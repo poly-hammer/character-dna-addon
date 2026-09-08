@@ -1,49 +1,30 @@
 # standard library imports
 import logging  # noqa: I001
-import math
 import threading
 
 from collections.abc import Callable
 from pathlib import Path
-from pprint import pformat
 
 # third party imports
 import bpy
 import numpy as np
 
-from mathutils import Euler, Matrix, Quaternion, Vector
+from mathutils import Euler, Matrix, Vector
 
 # local imports
 from . import utilities
-from .constants import FLOATING_POINT_PRECISION, IS_BLENDER_5, SCALE_FACTOR, SHAPE_KEY_NAME_MAX_LENGTH
+from .constants import SHAPE_KEY_NAME_MAX_LENGTH
 from .ui import callbacks
 from .typing import *  # noqa: F403
 
 
-MEMORY_RESOURCE_SIZE = 1024 * 1024 * 4  # 4MB
-MEMORY_RESOURCE_ALIGNMENT = 16
 ATTR_COUNT_PER_QUATERNION_JOINT = 10
 ATTR_COUNT_PER_EULER_JOINT = 9
 
 logger = logging.getLogger(__name__)
 
-# Blender runs an animation render as a job on its own thread and fires every app handler
-# (render_init, frame_change_post, render_write, render_complete) from that thread. Writing
-# pose bones, shape keys or materials from any thread but the main one races Blender's
-# notifier queue and crashes it, so off-thread evaluations are handed to the main thread and
-# waited on. Blocking is what keeps the rendered frame in step with the face board.
 _MAIN_THREAD_IDENT = threading.main_thread().ident
-MAIN_THREAD_TIMEOUT_SECONDS = 10.0
-# Short enough to be irrelevant next to a render frame, long enough that the main loop still sleeps.
-_RENDER_POLL_SECONDS = 0.001
-_IDLE_POLL_SECONDS = 0.25
-
-_main_thread_lock = threading.Lock()
-_main_thread_queue: list[tuple[str, "ComponentType", bpy.types.Depsgraph | None, threading.Event]] = []
 _rendering = False
-_post_render_pending = False
-_suppress_evaluation = False
-_logged_main_thread_timeout = False
 
 
 def is_main_thread() -> bool:
@@ -82,353 +63,12 @@ def begin_render() -> None:
 
 
 def end_render() -> None:
-    """Called from ``render_complete``/``render_cancel`` on the render job thread.
-
-    Only plain Python state is touched here; the Blender-side cleanup is queued for
-    :func:`run_main_thread_evaluations` to perform on the main thread.
-    """
-    global _post_render_pending, _suppress_evaluation
-    _suppress_evaluation = True
-    _post_render_pending = True
+    """Retire render graph sessions without writing Blender data from a job thread."""
+    global _rendering
+    _rendering = False
     from .runtime.engine import clear_contexts
 
     clear_contexts()
-
-
-def _apply_post_render_cleanup() -> None:
-    global _rendering, _post_render_pending, _suppress_evaluation
-
-    scene_properties = utilities.get_addon_scene_properties()
-    if scene_properties:
-        for instance in scene_properties.rig_instance_list:
-            try:
-                instance.clear_evaluated_references()
-            except ReferenceError:
-                continue
-
-    window_manager_properties = utilities.get_addon_window_manager_properties()
-    if window_manager_properties:
-        window_manager_properties.is_rendering = False
-        window_manager_properties.evaluate_dependency_graph = True
-
-    _rendering = False
-    _post_render_pending = False
-    _suppress_evaluation = False
-
-
-def run_main_thread_evaluations() -> float:
-    """Timer that performs queued rig evaluations on the main thread.
-
-    Registered by :func:`ensure_main_thread_timer` so nothing ever has to call into
-    ``bpy.app.timers`` from the render job thread.
-    """
-    try:
-        while True:
-            with _main_thread_lock:
-                if not _main_thread_queue:
-                    break
-                name, component, dependency_graph, done = _main_thread_queue.pop(0)
-
-            try:
-                scene_properties = utilities.get_addon_scene_properties()
-                # Re-resolve by name: the queued instance could have been freed by an undo.
-                instance = scene_properties.rig_instance_list.get(name) if scene_properties else None
-                if instance:
-                    instance.evaluate(component=component, dependency_graph=dependency_graph)
-            except ReferenceError:
-                pass
-            except Exception as error:
-                if is_id_write_locked(error):
-                    # The next evaluation retries once Blender accepts writes again.
-                    logger.debug(f"Deferred evaluation of rig instance '{name}': {error}")
-                else:
-                    logger.exception(f"Error evaluating rig instance '{name}': {error}")
-            finally:
-                done.set()
-
-        if _post_render_pending:
-            _apply_post_render_cleanup()
-    except Exception as error:
-        # Blender drops a timer whose callback raises, and losing this one makes renders
-        # silently produce stale frames, so never let anything escape.
-        logger.exception(f"Error draining main thread evaluations: {error}")
-
-    # Poll hard while a render is waiting on us, otherwise stay out of the way.
-    return _RENDER_POLL_SECONDS if _rendering else _IDLE_POLL_SECONDS
-
-
-def ensure_main_thread_timer() -> None:
-    """Arm the drain timer if it is not already running.
-
-    Without it a render blocks on evaluations nothing ever performs, which renders the
-    character frozen at whatever the viewport last evaluated. Cheap enough to re-check
-    from the listener so the timer re-arms itself if it is ever lost.
-    """
-    if not bpy.app.timers.is_registered(run_main_thread_evaluations):
-        bpy.app.timers.register(run_main_thread_evaluations, first_interval=0.0, persistent=True)
-
-
-def _compute_input_signature(
-    instance: "RigInstance", component: str, dependency_graph: bpy.types.Depsgraph | None
-) -> tuple | None:
-    """Build a comparable signature of a component's driver (input) bone rotations.
-
-    A rig's driver bones are the only inputs to RigLogic's evaluation of that component. The
-    bones it writes back are a disjoint set (``head_bone_transform_plan`` skips driver bones
-    outright, and the body's driven/twist/swing bones are likewise separate), so when
-    ``evaluate`` writes those outputs Blender re-tags the armature's transform and the listener
-    fires again for an update it caused itself. Comparing this input signature lets the listener
-    tell a genuine user change from that self-induced echo and break the feedback loop.
-
-    Returns ``None`` when the signature can't be determined yet (e.g. the instance has never
-    been evaluated, so the driver bone names aren't cached), in which case the caller should
-    evaluate rather than risk skipping a real update.
-    """
-    driver_bone_names = instance.data.get(instance.cache_key(component, "driver_bone_names"))
-    rig = instance.head_rig if component == "head" else instance.body_rig
-    if not driver_bone_names or not rig:
-        return None
-
-    evaluated = rig.evaluated_get(dependency_graph) if dependency_graph else rig
-    if not evaluated or not evaluated.pose:
-        return None
-
-    signature = []
-    for name in driver_bone_names:
-        pose_bone = evaluated.pose.bones.get(name)
-        if not pose_bone:
-            continue
-        quaternion = utilities.get_pose_bone_local_quaternion(pose_bone)
-        signature.append(
-            (name, round(quaternion.w, 6), round(quaternion.x, 6), round(quaternion.y, 6), round(quaternion.z, 6))
-        )
-    return tuple(signature)
-
-
-def _uses_action(animated_object: bpy.types.Object | None, action_name: str) -> bool:
-    """Whether the object is driven by the named action, directly or through an NLA strip."""
-    animation_data = animated_object.animation_data if animated_object else None
-    if not animation_data:
-        return False
-    if animation_data.action and animation_data.action.name == action_name:
-        return True
-    return any(
-        strip.action and strip.action.name == action_name
-        for track in animation_data.nla_tracks
-        for strip in track.strips
-    )
-
-
-def _is_self_induced_echo(
-    instance: "RigInstance", component: str, dependency_graph: bpy.types.Depsgraph | None
-) -> bool:
-    """Whether an armature update is the echo of RigLogic's own write rather than a user change.
-
-    ``evaluate`` writes the driven bones, which re-tags the armature's transform and fires the
-    listener again. Driver bones are a disjoint set, so an unchanged input signature means
-    nothing the rig actually reads has moved. Records the signature when it does change, so the
-    next echo has something to compare against.
-    """
-    input_signature = _compute_input_signature(instance, component, dependency_graph)
-    # A None signature means we can't tell yet (never evaluated), so evaluate rather than risk
-    # skipping a real update.
-    if input_signature is None:
-        return False
-    if input_signature == instance.data.get(instance.cache_key(component, "input_signature")):
-        return True
-    instance.data[instance.cache_key(component, "input_signature")] = input_signature
-    return False
-
-
-def _get_action_update_component(instance: "RigInstance", action_name: str) -> "ComponentType | None":
-    """Which component of this instance the named action drives, if any."""
-    from .runtime.engine import active as native_active
-
-    if native_active(instance) or not instance.auto_evaluate:
-        return None
-
-    if instance.auto_evaluate_head and _uses_action(instance.face_board, action_name):
-        return "head"
-
-    if instance.auto_evaluate_body and (
-        _uses_action(instance.body_rig, action_name) or _uses_action(instance.control_rig, action_name)
-    ):
-        # heads have rbf driven bones that move based on neck quaternions, so if head rig is present,
-        # evaluate all
-        if instance.head_rig and instance.auto_evaluate_head and instance.evaluate_rbfs:
-            return "all"
-        return "body"
-
-    # A head imported without a body is animated on the head rig itself; with a body it follows
-    # the body rig's action instead.
-    if instance.auto_evaluate_head and _uses_action(instance.head_rig, action_name):
-        return "head"
-
-    return None
-
-
-def _get_armature_update_component(
-    instance: "RigInstance", armature_name: str, dependency_graph: bpy.types.Depsgraph | None
-) -> "ComponentType | None":
-    """Which component of this instance the named armature datablock drives, if any."""
-    from .runtime.engine import active as native_active
-
-    if native_active(instance) or not instance.auto_evaluate:
-        return None
-
-    if (
-        instance.auto_evaluate_head
-        and instance.face_board
-        and instance.face_board.data
-        and instance.face_board.data.name == armature_name
-    ):
-        return "head"
-
-    if instance.auto_evaluate_body and (
-        (instance.body_rig and instance.body_rig.data and instance.body_rig.data.name == armature_name)
-        or (instance.control_rig and instance.control_rig.data and instance.control_rig.data.name == armature_name)
-    ):
-        # The body armature is both driven and written by RigLogic, so filter out its own echo.
-        if _is_self_induced_echo(instance, "body", dependency_graph):
-            return None
-        # heads have rbf driven bones that move based on neck quaternions, so if head rig is present,
-        # evaluate all
-        if instance.head_rig and instance.auto_evaluate_head and instance.evaluate_rbfs:
-            return "all"
-        return "body"
-
-    # With a full character the head rig's neck bones are copy-transform driven by the body, so the
-    # body branch above already covers them. Imported on its own the head rig has no body to follow
-    # and is posed directly, and it is the only thing that feeds the neck quaternions to the head
-    # RBFs and re-solves the eye aim against the new head orientation.
-    if (
-        instance.auto_evaluate_head
-        and instance.head_rig
-        and instance.head_rig.data
-        and instance.head_rig.data.name == armature_name
-    ):
-        if _is_self_induced_echo(instance, "head", dependency_graph):
-            return None
-        return "head"
-
-    return None
-
-
-def rig_instance_listener(_: "Scene", dependency_graph: bpy.types.Depsgraph, is_frame_change: bool = False):  # noqa: PLR0912
-    addon_window_manager = utilities.get_addon_window_manager_properties()
-    if not addon_window_manager:
-        return
-
-    # Safety net for a post-render cleanup that the drain timer never got to run, which would
-    # otherwise leave evaluation suppressed for the rest of the session.
-    if is_main_thread():
-        ensure_main_thread_timer()
-        if _post_render_pending:
-            _apply_post_render_cleanup()
-
-    # this condition prevents constant evaluation
-    if not addon_window_manager.evaluate_dependency_graph or _suppress_evaluation:
-        return
-
-    # this condition prevents 2 evaluations per frame change, causes issues with
-    # render threads accessing data while it's being updated, and causing a crash.
-    if is_rendering() and not is_frame_change:
-        return
-
-    # this condition prevents evaluation after an undo operation
-    if addon_window_manager.is_undoing:
-        addon_window_manager.is_undoing = False
-        return
-
-    scene_properties = utilities.get_addon_scene_properties()
-    if not scene_properties:
-        return
-
-    from .runtime.engine import active as native_active
-
-    legacy_instances = [instance for instance in scene_properties.rig_instance_list if not native_active(instance)]
-    if not legacy_instances:
-        return
-
-    # track the minimal set of instances that need to be updated and their components
-    instance_updates = set()
-
-    # only evaluate if in pose mode or if animation is
-    if is_frame_change or bpy.context.mode == "POSE":
-        for update in dependency_graph.updates:
-            if not update.id:
-                continue
-
-            data_type = update.id.bl_rna.name  # type: ignore[attr-defined]
-            if data_type == "Action":
-                for instance in legacy_instances:
-                    component = _get_action_update_component(instance, update.id.name)
-                    if component:
-                        instance_updates.add((instance, component))
-
-            elif data_type == "Armature" and update.is_updated_transform:
-                for instance in legacy_instances:
-                    component = _get_armature_update_component(instance, update.id.name, dependency_graph)
-                    if component:
-                        instance_updates.add((instance, component))
-
-    # reduce redundant updates if 'all' components are being updated anyway, no need to
-    # update head/body again separately
-    final_instance_updates = set()
-    for instance, component in instance_updates:
-        if (instance, "all") in instance_updates:
-            final_instance_updates.add((instance, "all"))
-        else:
-            final_instance_updates.add((instance, component))
-
-    if not final_instance_updates:
-        return
-
-    for instance, component in final_instance_updates:
-        try:
-            instance.evaluate(component=component, dependency_graph=dependency_graph)
-        except ReferenceError:
-            # The underlying data was freed out from under us; skip it.
-            continue
-        except Exception as error:
-            if is_id_write_locked(error):
-                # The next evaluation retries once Blender accepts writes again.
-                logger.debug(f"Deferred evaluation of rig instance '{instance.name}': {error}")
-                continue
-            logger.exception(f"Error evaluating rig instance '{instance.name}': {error}")
-
-
-def frame_change_handler(scene: "Scene", dependency_graph: bpy.types.Depsgraph):
-    rig_instance_listener(scene, dependency_graph, is_frame_change=True)
-
-
-def stop_listening():
-    if bpy.app.timers.is_registered(run_main_thread_evaluations):
-        bpy.app.timers.unregister(run_main_thread_evaluations)
-
-    for handler in bpy.app.handlers.depsgraph_update_post:
-        if handler.__name__ == rig_instance_listener.__name__:
-            bpy.app.handlers.depsgraph_update_post.remove(handler)
-
-    for handler in bpy.app.handlers.frame_change_post:
-        if handler.__name__ == frame_change_handler.__name__:
-            bpy.app.handlers.frame_change_post.remove(handler)  # pyright: ignore[reportArgumentType]
-
-
-def start_listening():
-    stop_listening()
-    logger.info("Listening for Rig Logic...")
-    # Register before anything that can fail, so a bad scene cannot leave the session deaf.
-    bpy.app.handlers.depsgraph_update_post.append(rig_instance_listener)  # type: ignore[call-arg]
-    bpy.app.handlers.frame_change_post.append(frame_change_handler)  # type: ignore[call-arg]
-    ensure_main_thread_timer()
-
-    context: "Context" = bpy.context  # pyright: ignore[reportAssignmentType]  # noqa: UP037
-    try:
-        callbacks.update_head_output_items(None, context)
-        callbacks.update_body_output_items(None, context)
-    except Exception as error:
-        logger.exception(f"Failed to refresh the output items: {error}")
 
 
 class RigInstance(bpy.types.PropertyGroup):
@@ -712,11 +352,6 @@ class RigInstance(bpy.types.PropertyGroup):
                 )
                 self.data[self.cache_key("head", "logged_validation_warning")] = True
             return False
-        if not self.face_board:
-            if not logged_warning:
-                logger.warning(f"The Face board is not set. The Rig Instance {self.name} will not be initialized.")
-                self.data[self.cache_key("head", "logged_validation_warning")] = True
-            return False
         return True
 
     @property
@@ -838,9 +473,9 @@ class RigInstance(bpy.types.PropertyGroup):
 
     @property
     def head_instance(self) -> "riglogic.RigInstance":
-        from .runtime.engine import synchronize_legacy
+        from .runtime.engine import synchronize_authoring
 
-        return synchronize_legacy(self, "head", self.data.get(self.cache_key("head", "instance")))
+        return synchronize_authoring(self, "head", self.data.get(self.cache_key("head", "instance")))
 
     @property
     def head_dna_reader(self) -> "dna.BinaryStreamReader":
@@ -852,9 +487,9 @@ class RigInstance(bpy.types.PropertyGroup):
 
     @property
     def body_instance(self) -> "riglogic.RigInstance":
-        from .runtime.engine import synchronize_legacy
+        from .runtime.engine import synchronize_authoring
 
-        return synchronize_legacy(self, "body", self.data.get(self.cache_key("body", "instance")))
+        return synchronize_authoring(self, "body", self.data.get(self.cache_key("body", "instance")))
 
     @property
     def body_dna_reader(self) -> "dna.BinaryStreamReader":
@@ -1540,6 +1175,8 @@ class RigInstance(bpy.types.PropertyGroup):
         # The RigLogic C++ instances and the plain value-copy caches (rest pose, bone-name
         # lists, channel lookups) are undo-safe, so the component stays initialized.
         reference_descriptors = (
+            ("head", "runtime_plan"),
+            ("body", "runtime_plan"),
             ("head", "mesh_index_lookup"),
             ("head", "shape_key"),
             ("head", "shape_key_blocks"),
@@ -1569,303 +1206,6 @@ class RigInstance(bpy.types.PropertyGroup):
     def destroy(self):
         self.destroy_head()
         self.destroy_body()
-
-    def update_head_switch_values(self):
-        if not self.face_board:
-            return
-
-        # Switch values are read from the evaluated face board (see `face_board_evaluated`),
-        # but the constraints and visibility they drive are written to the original datablock.
-        evaluated_face_board = self.face_board_evaluated
-        evaluated_pose_bones = (
-            evaluated_face_board.pose.bones if evaluated_face_board and evaluated_face_board.pose else None
-        )
-        if evaluated_pose_bones is None:
-            return
-
-        # update the head follow body switch constraint influence
-        face_gui_control = self.face_board.pose.bones.get("CTRL_faceGUI")
-        face_follow_head_switch = evaluated_pose_bones.get("CTRL_faceGUIfollowHead")
-        if face_follow_head_switch and face_gui_control:
-            constraint = None
-            for existing_constraint in face_gui_control.constraints:
-                if existing_constraint.type == "CHILD_OF":
-                    constraint = existing_constraint
-                    break
-            if constraint and round(constraint.influence, 3) != round(face_follow_head_switch.location.y, 3):
-                constraint.influence = face_follow_head_switch.location.y
-
-        # update the eye aim follow head switch constraint influence
-        eye_aim_control = self.face_board.pose.bones.get("CTRL_C_eyesAim")
-        eye_aim_follow_head_switch = evaluated_pose_bones.get("CTRL_eyesAimFollowHead")
-        if eye_aim_follow_head_switch and eye_aim_control:
-            constraint = None
-            for existing_constraint in eye_aim_control.constraints:
-                if existing_constraint.type == "CHILD_OF":
-                    constraint = existing_constraint
-                    break
-            if constraint and round(constraint.influence, 3) != round(eye_aim_follow_head_switch.location.y, 3):
-                constraint.influence = eye_aim_follow_head_switch.location.y
-
-        # update the eye aim control visibility, but only when the eye-aim mode actually changes.
-        # The visibility sweep walks children_recursive, so running it on every evaluation is pure
-        # overhead once the hide states already match the current mode.
-        # Note: In Blender 5.0+, the hide property moved from Bone to PoseBone
-        if eye_aim_control:
-            use_eye_aim = self.head_use_eye_aim
-            if self.data.get(self.cache_key("head", "eye_aim_visibility")) != use_eye_aim:
-                hidden = not use_eye_aim
-
-                def apply_eye_aim_visibility():
-                    for pose_bone in [eye_aim_control, *eye_aim_control.children_recursive]:
-                        if pose_bone != eye_aim_control and pose_bone.name.startswith(("GRP_", "LOC_")):
-                            continue
-                        target = pose_bone if IS_BLENDER_5 else pose_bone.bone
-                        if target.hide != hidden:
-                            target.hide = hidden
-
-                # Only cache once the writes land, otherwise a locked context is never retried.
-                if apply_id_writes(f"eye aim visibility for '{self.name}'", apply_eye_aim_visibility):
-                    self.data[self.cache_key("head", "eye_aim_visibility")] = use_eye_aim
-
-    def get_head_gui_control_values_from_eye_aim(
-        self, dependency_graph: bpy.types.Depsgraph | None = None
-    ) -> dict[str, dict[str, float]]:
-        values = {}
-        if not self.face_board or not self.head_rig:
-            return values
-
-        # Read the *evaluated* objects so the posed bone matrices reflect the current head-bone
-        # rotation and the eye aim follow-head constraint. The caller's graph is used when given
-        # (during a render that is the only graph holding this frame's pose); otherwise this is
-        # taken fresh from the current dependency graph so it is also correct per-frame during
-        # baking, where the scene frame is stepped just before this is called.
-        if dependency_graph is None:
-            dependency_graph = bpy.context.evaluated_depsgraph_get()
-        head_rig = self.head_rig.evaluated_get(dependency_graph)
-        face_board = self.face_board.evaluated_get(dependency_graph)
-        if not head_rig.pose or not face_board.pose:
-            return values
-
-        for target_name, eye_bone_name, control_name in [
-            ("CTRL_L_eyeAim", "FACIAL_L_Eye", "CTRL_L_eye"),
-            ("CTRL_R_eyeAim", "FACIAL_R_Eye", "CTRL_R_eye"),
-        ]:
-            target = face_board.pose.bones.get(target_name)
-            eye = head_rig.pose.bones.get(eye_bone_name)
-            if not (target and eye):
-                continue
-
-            # The eye control values are expressed relative to the eye's neutral (control = 0)
-            # orientation. That neutral orientation is posed by the eye's parent chain, so it
-            # rotates with the head. Building the reference frame from the parent's *current* pose
-            # matrix (instead of the static rest matrix) is what lets the eyes keep aiming at a
-            # world-fixed target when the head bone is turned (the eyes-follow-head-off case).
-            eye_parent = eye.parent
-            if eye_parent:
-                rest_relative_to_parent = eye_parent.bone.matrix_local.inverted_safe() @ eye.bone.matrix_local
-                eye_reference_matrix = head_rig.matrix_world @ eye_parent.matrix @ rest_relative_to_parent
-            else:
-                eye_reference_matrix = head_rig.matrix_world @ eye.bone.matrix_local
-
-            # The eye and the aim target live on different objects, so map each into true world
-            # space with its own object matrix (head rig for the eye, face board for the target).
-            eye_pos = head_rig.matrix_world @ eye.head
-            target_pos = face_board.matrix_world @ target.head
-            look_direction = target_pos - eye_pos
-
-            if look_direction.length < FLOATING_POINT_PRECISION:
-                continue
-
-            look_direction.normalize()
-
-            # Convert the world look direction into the eye's reference (local) space.
-            local_look_direction = (eye_reference_matrix.to_3x3().inverted_safe() @ look_direction).normalized()
-
-            # Calculate horizontal distance (projection onto XZ plane, forward is local -Z)
-            horizontal_dist = math.sqrt(local_look_direction.x**2 + local_look_direction.z**2)
-
-            if horizontal_dist > FLOATING_POINT_PRECISION:
-                # Remap yaw to continuous range centered on forward direction (-Z)
-                # Instead of atan2(x, -z), we use the normalized x component directly
-                # This gives us a smooth -1 to 1 range for horizontal movement
-                x_normalized = local_look_direction.x / horizontal_dist
-
-                # For better control, we can use asin which gives -90° to 90° range
-                yaw = math.asin(max(-1.0, min(1.0, x_normalized)))
-            else:
-                # Looking straight up/down, yaw is undefined
-                yaw = 0.0
-
-            # Pitch is the angle from the horizontal plane
-            pitch = math.atan2(local_look_direction.y, horizontal_dist)
-
-            # Map angles to -1..1 range based on max rotation
-            x_max_rad = math.radians(60.0)
-            y_max_rad = math.radians(30.0)
-
-            x_control = max(-1.0, min(1.0, yaw / x_max_rad))
-            y_control = max(-1.0, min(1.0, pitch / y_max_rad))
-
-            values[control_name] = {"x": x_control, "y": y_control}
-
-        return values
-
-    def update_head_raw_control_values(self, override_values: dict[str, dict[str, float]] | None = None):
-        # skip if the body rig is not set
-        if not self.head_rig or not self.head_rig_evaluated or not self.head_dna_reader:
-            return
-
-        # skip if the rest pose is not initialized
-        if not self.head_rest_pose:
-            return
-
-        if not self.head_rig_evaluated.pose:
-            return
-
-        missing_raw_controls = []
-        converted_quaternions = {}
-
-        # convert the quaternion values to the correct coordinate system
-        driver_bone_names = frozenset(self.head_driver_bone_names)
-        for pose_bone in self.head_rig_evaluated.pose.bones:
-            if pose_bone.name in driver_bone_names:
-                # get the local quaternion, but from the world matrix to account for constraints, since we
-                # can't always assume the local quaternion value is what is driving the bone rotation. For
-                # example, if the body is driving the head bone transforms via constraints.
-                # TODO: This math might have performance implications, so we might want review this later.
-                quaternion = utilities.get_pose_bone_local_quaternion(pose_bone)
-                converted_quaternions[pose_bone.name] = quaternion
-
-        head_instance = self.head_instance
-        for index, control_name, axis in self.head_raw_quat_plan:
-            # override the values can be provided to update values based on them vs current head rig bone locations
-            # This can be used for baking the values to an action
-            if override_values:
-                value = override_values.get(control_name, {}).get(axis)
-                if value is not None:
-                    head_instance.setRawControl(index, value)
-            else:
-                quaternion = converted_quaternions.get(control_name)
-                if quaternion:
-                    value = getattr(quaternion, axis)
-                    head_instance.setRawControl(index, value)
-                else:
-                    missing_raw_controls.append(control_name)
-
-        if missing_raw_controls and not self.data.get(self.cache_key("head", "logged_missing_raw_controls")):
-            logger.warning(
-                f'The following raw controls are missing on "{self.head_rig.name}":\n{pformat(missing_raw_controls)}.'
-            )
-            logger.warning(f"You are not listening to {len(missing_raw_controls)} raw controls")
-            logger.warning(
-                f"This is most likely due to the these bones being missing from the rig {self.head_rig.name}."
-            )
-            self.data[self.cache_key("head", "logged_missing_raw_controls")] = True
-
-    def _resolve_eye_control_value(
-        self,
-        value: float | None,
-        control_name: str,
-        axis: str,
-        eye_aim_override_values: dict[str, dict[str, float]],
-        center_value: float | None,
-    ) -> float | None:
-        """Apply the eye aim / master center eye override to an individual L/R eye control value.
-
-        The eye aim (when active) takes priority; otherwise the master ``CTRL_C_eye`` value
-        (``center_value``, read from either the live face board bone or the baked override
-        values) overrides the individual ``CTRL_L_eye`` / ``CTRL_R_eye`` value. Any control that
-        is not an eye control is returned unchanged. This is shared by the live and bake paths.
-        """
-        if control_name not in ("CTRL_L_eye", "CTRL_R_eye"):
-            return value
-
-        eye_aim_value = eye_aim_override_values.get(control_name, {}).get(axis)
-        if eye_aim_value is not None:
-            if abs(eye_aim_value) > FLOATING_POINT_PRECISION:
-                return eye_aim_value
-        elif center_value is not None and abs(center_value) > FLOATING_POINT_PRECISION:
-            return center_value
-
-        return value
-
-    def update_head_gui_control_values(
-        self,
-        override_values: dict[str, dict[str, float]] | None = None,
-        dependency_graph: bpy.types.Depsgraph | None = None,
-    ):
-        # The face board only supplies the GUI control positions. Without one the head still has
-        # to solve its raw controls below, so a missing face board skips the loop, not the whole
-        # evaluation.
-        if not self.head_dna_reader:
-            return
-
-        missing_gui_controls = []
-
-        # Control positions are inputs, so they come from the evaluated face board rather than
-        # the original datablock, which is stale while rendering (see `face_board_evaluated`).
-        evaluated_face_board = self.face_board_evaluated
-        face_pose_bones = (
-            evaluated_face_board.pose.bones if evaluated_face_board and evaluated_face_board.pose else None
-        )
-        center_eye_control = face_pose_bones.get("CTRL_C_eye") if face_pose_bones else None
-
-        eye_aim_override_values = {}
-        if self.head_use_eye_aim:
-            eye_aim_override_values = self.get_head_gui_control_values_from_eye_aim(dependency_graph)
-
-        head_instance = self.head_instance
-        for index, control_name, axis in self.head_gui_control_plan:
-            # Override values can be provided to update values based on them vs current face board
-            # bone locations. This can be used for baking the values to an action.
-            if override_values:
-                value = override_values.get(control_name, {}).get(axis)
-                # Mirror the live path's eye handling so baking respects the eye aim and the
-                # master center eye control (read from the baked CTRL_C_eye override values).
-                value = self._resolve_eye_control_value(
-                    value, control_name, axis, eye_aim_override_values, override_values.get("CTRL_C_eye", {}).get(axis)
-                )
-                if value is not None:
-                    head_instance.setGUIControl(index, value)
-            elif face_pose_bones is not None:
-                pose_bone = face_pose_bones.get(control_name)
-                if pose_bone:
-                    value = getattr(pose_bone.location, axis)
-                    # special case for the eye controls: the eye aim and the master center eye
-                    # control override the individual L/R eye controls.
-                    center_value = getattr(center_eye_control.location, axis) if center_eye_control else None
-                    value = self._resolve_eye_control_value(
-                        value, control_name, axis, eye_aim_override_values, center_value
-                    )
-                    head_instance.setGUIControl(index, value)
-                else:
-                    missing_gui_controls.append(control_name)
-
-        if missing_gui_controls and not self.data.get(self.cache_key("head", "logged_missing_gui_controls")):
-            logger.warning(
-                f'The following GUI controls are missing on "{self.face_board.name}":\n{pformat(missing_gui_controls)}.'
-            )
-            logger.warning(f"You are not listening to {len(missing_gui_controls)} GUI controls")
-            logger.warning(
-                "This is most likely due to the DNA file being an older version then what "
-                "the face board currently supports."
-            )
-            logger.warning(
-                "Using a new .dna file created from the latest version of MetaHuman Creator will probably resolve this."
-            )
-            self.data[self.cache_key("head", "logged_missing_gui_controls")] = True
-
-        # set the active LOD level for the head instance to optimize performance
-        self.head_instance.setLOD(level=int(self.view_options.active_lod[-1]))  # pyright: ignore[reportAttributeAccessIssue]
-        # map the GUI changes to the raw controls
-        self.head_manager.mapGUIToRawControls(self.head_instance)
-
-        if self.evaluate_rbfs:
-            self.update_head_raw_control_values()
-
-        # calculate the controls
-        self.head_manager.calculate(self.head_instance)
 
     def apply_gui_controls_to_face_board(self):
         if not self.face_board or not self.head_dna_reader or not self.head_instance:
@@ -2020,301 +1360,6 @@ class RigInstance(bpy.types.PropertyGroup):
 
         return texture_mask_values
 
-    def update_head_bone_transforms(self, collect_transforms: bool = False) -> list[tuple[str, Vector, Euler, Vector]]:
-        """Update head bone transforms from RigLogic joint outputs.
-
-        Args:
-            collect_transforms: When True, build and return the decomposed
-                (bone_name, location, rotation_euler, scale) tuples used by action baking. The
-                interactive evaluation path leaves this False to skip the per-bone matrix
-                decomposition, which is otherwise pure overhead.
-
-        Returns:
-            A list of (bone_name, location, rotation_euler, scale) tuples for each updated bone,
-            or an empty list when ``collect_transforms`` is False.
-        """
-        # skip if the head rig is not set
-        if not self.head_rig or not self.head_dna_reader:
-            return []
-
-        # skip if the rest pose is not initialized
-        # https://github.com/poly-hammer/character-dna-addon/issues/58
-        if not self.head_rest_pose:
-            return []
-
-        bone_transforms: list[tuple[str, Vector, Euler, Vector]] = []
-
-        raw_joint_output = self.head_instance.getJointOutputs()
-        pose_bones = self.head_rig.pose.bones
-        # update joint transforms using the precomputed plan (index/name/rest/inverse parsed once)
-        for (
-            index,
-            name,
-            rest_location,
-            rest_rotation,
-            rest_scale,
-            rest_to_parent_inverse,
-            has_children,
-        ) in self.head_bone_transform_plan:
-            pose_bone = pose_bones.get(name)
-            if not pose_bone:
-                continue
-
-            # get the values
-            matrix_index = (index + 1) * 9
-            values = raw_joint_output[(index * 9) : matrix_index]
-
-            # extract the delta values
-            location_delta = Vector([values[0] / SCALE_FACTOR, values[1] / SCALE_FACTOR, values[2] / SCALE_FACTOR])
-            rotation_delta = Euler([math.radians(values[3]), math.radians(values[4]), math.radians(values[5])])
-            scale_delta = Vector(values[6:9])
-
-            # update the transformations using the rest pose and the delta values
-            # we need to copy the vectors so we don't modify the original rest pose
-            location = Vector(
-                [
-                    rest_location.x + location_delta.x,
-                    rest_location.y + location_delta.y,
-                    rest_location.z + location_delta.z,
-                ]
-            )
-            rotation = Euler(
-                [
-                    rest_rotation.x + rotation_delta.x,
-                    rest_rotation.y + rotation_delta.y,
-                    rest_rotation.z + rotation_delta.z,
-                ],
-                "XYZ",
-            )
-            scale = Vector([rest_scale.x + scale_delta.x, rest_scale.y + scale_delta.y, rest_scale.z + scale_delta.z])
-
-            # update the bone matrix (rest-to-parent inverse is precomputed in the plan)
-            modified_matrix = Matrix.LocRotScale(location[:], rotation, scale[:])
-            try:
-                pose_bone.matrix_basis = rest_to_parent_inverse @ modified_matrix
-            except AttributeError as error:
-                logger.error(f'Failed to update the bone "{name}" on "{self.head_rig.name}": {error}')
-                continue
-
-            # if the bone is not a leaf bone, we need to update the rotation again
-            if has_children:
-                pose_bone.rotation_euler = rotation_delta
-
-            if collect_transforms:
-                # for non-leaf bones use the rotation_delta as the final euler, for leaf bones decompose
-                # from the matrix_basis
-                final_rotation = rotation_delta if has_children else pose_bone.matrix_basis.to_euler("XYZ")
-                final_location = pose_bone.matrix_basis.to_translation()
-                final_scale = pose_bone.matrix_basis.to_scale()
-                bone_transforms.append((name, final_location, final_rotation, final_scale))
-
-        return bone_transforms
-
-    def reset_body_raw_control_values(self):
-        from .runtime.engine import active as native_active
-
-        if native_active(self):
-            self.evaluate()
-            return
-        # skip if the body rig is not set
-        if not self.body_initialized:
-            self.body_initialize()
-
-        if not self.body_dna_reader:
-            logger.warning("The body DNA reader is not set. The body raw control values will not be reset.")
-            return
-
-        if not self.evaluate_rbfs:
-            # reset all raw controls to 0.0
-            for index in range(self.body_dna_reader.getRawControlCount()):
-                full_name = self.body_dna_reader.getRawControlName(index)
-                _, axis = full_name.split(".")
-                axis = axis.rsplit("q", -1)[-1].lower()
-                if axis == "w":
-                    self.body_instance.setRawControl(index, 1.0)
-                else:
-                    self.body_instance.setRawControl(index, 0.0)
-
-            self.body_instance.setLOD(level=int(self.view_options.active_lod[-1]))  # pyright: ignore[reportAttributeAccessIssue]
-            self.body_manager.calculate(self.body_instance)
-        else:
-            self.update_body_raw_control_values()
-
-        self.update_body_bone_transforms()
-
-    def reset_head_raw_control_values(self):
-        from .runtime.engine import active as native_active
-
-        if native_active(self):
-            self.evaluate()
-            return
-        # skip if the head rig is not set
-        if not self.head_initialized:
-            self.head_initialize()
-
-        if not self.head_dna_reader:
-            logger.warning("The head DNA reader is not set. The head raw control values will not be reset.")
-            return
-
-        if not self.evaluate_rbfs:
-            # reset all raw controls to 0.0
-            for index in range(self.head_dna_reader.getRawControlCount()):
-                full_name = self.head_dna_reader.getRawControlName(index)
-                control_name, axis = full_name.split(".")
-                if control_name in self.head_driver_bone_names:
-                    axis = axis.rsplit("q", -1)[-1].lower()
-                    if axis == "w":
-                        self.head_instance.setRawControl(index, 1.0)
-                    else:
-                        self.head_instance.setRawControl(index, 0.0)
-
-            self.head_instance.setLOD(level=int(self.view_options.active_lod[-1]))  # pyright: ignore[reportAttributeAccessIssue]
-            self.head_manager.calculate(self.head_instance)
-        else:
-            self.update_head_raw_control_values()
-            self.head_instance.setLOD(level=int(self.view_options.active_lod[-1]))  # pyright: ignore[reportAttributeAccessIssue]
-            self.head_manager.calculate(self.head_instance)
-
-        self.update_head_bone_transforms()
-
-    def update_body_raw_control_values(self, override_values: dict[str, dict[str, float]] | None = None):
-        # skip if the body rig is not set
-        if not self.body_rig or not self.body_rig_evaluated or not self.body_dna_reader:
-            return
-
-        # skip if the rest pose is not initialized
-        if not self.body_rest_pose:
-            return
-
-        if not self.body_rig_evaluated.pose:
-            return
-
-        missing_raw_controls = []
-        converted_quaternions = {}
-
-        # convert the quaternion values to the correct coordinate system
-        driver_bone_names = frozenset(self.body_driver_bone_names)
-        for pose_bone in self.body_rig_evaluated.pose.bones:
-            if pose_bone.name in driver_bone_names:
-                # get the local quaternion, but from the world matrix to account for constraints, since we
-                # can't always assume the local quaternion value is what is driving the bone rotation. For
-                # example, a control rig might be driving the body bone rotation via constraints.
-                # TODO: This math might have performance implications, so we might want review this later.
-                quaternion = utilities.get_pose_bone_local_quaternion(pose_bone)
-                converted_quaternions[pose_bone.name] = quaternion
-
-        body_instance = self.body_instance
-        for index, control_name, axis in self.body_raw_plan:
-            # override the values can be provided to update values based on them vs current body rig bone locations
-            # This can be used for baking the values to an action
-            if override_values:
-                value = override_values.get(control_name, {}).get(axis)
-                if value is not None:
-                    body_instance.setRawControl(index, value)
-            else:
-                quaternion = converted_quaternions.get(control_name)
-                if quaternion:
-                    value = getattr(quaternion, axis)
-                    body_instance.setRawControl(index, value)
-                else:
-                    missing_raw_controls.append(control_name)
-
-        if missing_raw_controls and not self.data.get(self.cache_key("body", "logged_missing_raw_controls")):
-            logger.warning(
-                f'The following raw controls are missing on "{self.body_rig.name}":\n{pformat(missing_raw_controls)}.'
-            )
-            logger.warning(f"You are not listening to {len(missing_raw_controls)} raw controls")
-            logger.warning(
-                f"This is most likely due to the these bones being missing from the rig {self.body_rig.name}."
-            )
-            self.data[self.cache_key("body", "logged_missing_raw_controls")] = True
-
-        # set the active LOD level for the body instance to optimize performance
-        self.body_instance.setLOD(level=int(self.view_options.active_lod[-1]))  # pyright: ignore[reportAttributeAccessIssue]
-
-        # calculate the changes
-        self.body_manager.calculate(self.body_instance)
-
-    def update_body_bone_transforms(self, collect_transforms: bool = False) -> list[tuple[str, Vector, Euler, Vector]]:
-        """Update body bone transforms from RigLogic joint outputs.
-
-        Args:
-            collect_transforms: When True, build and return the decomposed
-                (bone_name, location, rotation_euler, scale) tuples used by action baking. The
-                interactive evaluation path leaves this False to skip the per-bone matrix
-                decomposition, which is otherwise pure overhead.
-
-        Returns:
-            A list of (bone_name, location, rotation_euler, scale) tuples for each updated bone,
-            or an empty list when ``collect_transforms`` is False.
-        """
-        # skip if the body rig is not set
-        if not self.body_rig or not self.body_dna_reader:
-            return []
-
-        # skip if the rest pose is not initialized
-        if not self.body_rest_pose:
-            return []
-
-        bone_transforms: list[tuple[str, Vector, Euler, Vector]] = []
-
-        # get the delta values
-        D = self.body_instance.getJointOutputs()
-        pose_bones = self.body_rig.pose.bones
-
-        # update joint transforms using the precomputed plan (only RBF/twist/swing-updated bones)
-        for (
-            joint_index,
-            name,
-            rest_location,
-            rest_rotation,
-            rest_scale,
-            rest_to_parent_inverse,
-        ) in self.body_bone_transform_plan:
-            pose_bone = pose_bones.get(name)
-            if not pose_bone:
-                continue
-
-            # get the values
-            attr_index = joint_index * ATTR_COUNT_PER_QUATERNION_JOINT
-            # extract the delta values
-            location_delta = Vector(
-                [D[attr_index] / SCALE_FACTOR, D[attr_index + 1] / SCALE_FACTOR, D[attr_index + 2] / SCALE_FACTOR]
-            )
-            rotation_delta = Quaternion([D[attr_index + 6], D[attr_index + 3], D[attr_index + 4], D[attr_index + 5]])
-            scale_delta = Vector([D[attr_index + 7], D[attr_index + 8], D[attr_index + 9]])
-
-            # update the transformations using the rest pose and the delta values
-            # we need to copy the vectors so we don't modify the original rest pose
-            location = Vector(
-                [
-                    rest_location.x + location_delta.x,
-                    rest_location.y + location_delta.y,
-                    rest_location.z + location_delta.z,
-                ]
-            )
-
-            rotation = rest_rotation.to_quaternion() @ rotation_delta
-
-            scale = Vector([rest_scale.x + scale_delta.x, rest_scale.y + scale_delta.y, rest_scale.z + scale_delta.z])
-
-            # update the bone matrix (rest-to-parent inverse is precomputed in the plan)
-            modified_matrix = Matrix.LocRotScale(location[:], rotation, scale[:])
-            try:
-                pose_bone.matrix_basis = rest_to_parent_inverse @ modified_matrix
-            except AttributeError as error:
-                logger.error(f'Failed to update the bone "{name}" on "{self.body_rig.name}": {error}')
-                continue
-
-            if collect_transforms:
-                # decompose the final matrix_basis for baking output
-                final_location = pose_bone.matrix_basis.to_translation()
-                final_rotation = pose_bone.matrix_basis.to_euler("XYZ")
-                final_scale = pose_bone.matrix_basis.to_scale()
-                bone_transforms.append((name, final_location, final_rotation, final_scale))
-
-        return bone_transforms
-
     def update_body_rbf_solver_list(self):
         try:
             from .editors.rbf_editor.callbacks import update_body_rbf_solver_list as _update
@@ -2331,80 +1376,78 @@ class RigInstance(bpy.types.PropertyGroup):
         except ImportError:
             logger.debug("Could not import the raw control editor module to update the head raw control list.")
 
-    def _evaluate_on_main_thread(
-        self, component: "ComponentType", dependency_graph: bpy.types.Depsgraph | None
-    ) -> None:
-        """Queue an evaluation for the main thread and block until it has run.
-
-        Waiting is deliberate: the render job thread must not produce the frame until the pose
-        bones and shape keys for it have been written.
-        """
-        global _logged_main_thread_timeout
-
-        done = threading.Event()
-        with _main_thread_lock:
-            _main_thread_queue.append((self.name, component, dependency_graph, done))
-
-        if not done.wait(MAIN_THREAD_TIMEOUT_SECONDS) and not _logged_main_thread_timeout:
-            _logged_main_thread_timeout = True
-            logger.error(
-                f"Timed out waiting for the main thread to evaluate rig instance '{self.name}'. "
-                "Bake the animation before rendering to avoid relying on live evaluation."
-            )
-
     def evaluate(self, component: "ComponentType" = "all", dependency_graph: bpy.types.Depsgraph | None = None):
-        from .runtime.engine import active as native_active
+        """Ensure the character is bound; Blender's graph owns all live evaluation."""
+        from .runtime import controller, engine
 
-        if native_active(self):
-            if dependency_graph is None and is_main_thread():
-                bpy.context.view_layer.update()
+        if dependency_graph is not None or not is_main_thread() or controller.is_suspended(self):
             return
+        if not self.head_initialized and self.head_rig:
+            self.head_initialize()
+        if not self.body_initialized and self.body_rig:
+            self.body_initialize()
+        if not engine.active(self) and self.auto_evaluate:
+            engine.install(self)
+        bpy.context.view_layer.update()
 
-        # Only a real render (F12 / Render Animation) hands its handlers to a job thread that the
-        # main thread is not servicing, so that is the only case worth blocking for. An OpenGL
-        # playblast also runs off the main thread but drives the viewport from it, so waiting
-        # there starves both threads; it never fires render_init, which is what is_rendering()
-        # keys off. Viewport and timeline evaluation stay on the main thread and go straight through.
-        if is_rendering() and not is_main_thread():
-            self._evaluate_on_main_thread(component, dependency_graph)
-            return
+    def update_head_switch_values(self):
+        """Switches are outputs of the dependency-ordered runtime carrier."""
+        self.evaluate(component="head")
 
-        window_manager_properties = utilities.get_addon_window_manager_properties()
-        # this condition prevents constant evaluation
-        if window_manager_properties.evaluate_dependency_graph:
-            # turn off the dependency graph evaluation so we can update the controls without triggering an update
-            window_manager_properties.evaluate_dependency_graph = False
+    def get_head_gui_control_values_from_eye_aim(
+        self, dependency_graph: bpy.types.Depsgraph | None = None
+    ) -> dict[str, dict[str, float]]:
+        """Read eye controls solved by the native frame evaluator."""
+        from .runtime.authoring import sample
 
-            try:
-                if not self.head_initialized:
-                    self.head_initialize()
+        state = sample(self, "head", graph=dependency_graph)
+        values = {}
+        for index, name, axis in self.head_gui_control_plan:
+            if name in ("CTRL_L_eye", "CTRL_R_eye"):
+                values.setdefault(name, {})[axis] = state.getGUIControl(index)
+        return values
 
-                if not self.body_initialized:
-                    self.body_initialize()
+    def update_head_gui_control_values(
+        self,
+        override_values: dict[str, dict[str, float]] | None = None,
+        dependency_graph: bpy.types.Depsgraph | None = None,
+    ) -> None:
+        """Sample face-board controls using the runtime's C++ input and eye solve."""
+        from .runtime.authoring import sample
 
-                # apply the dependency graph update so we have the latest evaluated bone transforms
-                self.apply_dependency_graph_update(dependency_graph)
+        if self.head_dna_reader and self.head_rig:
+            sample(self, "head", override_values, dependency_graph)
 
-                if component in ("body", "all") and self.body_initialized:
-                    if self.evaluate_rbfs:
-                        self.update_body_raw_control_values()
+    def update_head_raw_control_values(self, override_values: dict[str, dict[str, float]] | None = None) -> None:
+        """Sample joint-driving raw controls through the runtime."""
+        from .runtime.authoring import raw_inputs
 
-                    # apply the changes
-                    if self.evaluate_bones:
-                        self.update_body_bone_transforms()
+        if self.head_dna_reader and self.head_rig:
+            raw_inputs(self, "head", override_values)
 
-                if component in ("head", "all") and self.head_initialized:
-                    # update the gui controls
-                    self.update_head_switch_values()
-                    self.update_head_gui_control_values(dependency_graph=dependency_graph)
+    def update_body_raw_control_values(self, override_values: dict[str, dict[str, float]] | None = None) -> None:
+        """Sample body quaternion inputs through the runtime."""
+        from .runtime.authoring import raw_inputs
 
-                    # apply the changes
-                    if self.evaluate_bones:
-                        self.update_head_bone_transforms()
-                    if self.evaluate_shape_keys:
-                        self.update_head_shape_keys()
-                    if self.evaluate_texture_masks:
-                        self.update_head_texture_masks()
-            finally:
-                # always restore the flag so evaluation isn't permanently disabled by an exception
-                window_manager_properties.evaluate_dependency_graph = True
+        if self.body_dna_reader and self.body_rig:
+            raw_inputs(self, "body", override_values)
+
+    def update_head_bone_transforms(self, collect_transforms: bool = False) -> list[tuple[str, Vector, Euler, Vector]]:
+        """Apply or collect the native-converted head authoring pose."""
+        from .runtime.authoring import bone_transforms
+
+        return bone_transforms(self, "head", collect_transforms)
+
+    def update_body_bone_transforms(self, collect_transforms: bool = False) -> list[tuple[str, Vector, Euler, Vector]]:
+        """Apply or collect the native-converted body authoring pose."""
+        from .runtime.authoring import bone_transforms
+
+        return bone_transforms(self, "body", collect_transforms)
+
+    def reset_head_raw_control_values(self):
+        """Re-evaluate the native head inputs after changing evaluation options."""
+        self.evaluate(component="head")
+
+    def reset_body_raw_control_values(self):
+        """Re-evaluate the native body inputs after changing evaluation options."""
+        self.evaluate(component="body")

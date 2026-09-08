@@ -106,9 +106,8 @@ def _evaluated_vertices(mesh_object) -> np.ndarray:
 
 @pytest.fixture(scope="module")
 def head_shape_key_rig(addon):
-    """Load Ada's head (LOD0) with every shape-key block created, listening stopped
-    so manual control driving stays deterministic, and yield the rig instance."""
-    from character_dna import rig_instance as rig_instance_module
+    """Load Ada's head with output drivers released for explicit authoring checks."""
+    from character_dna.runtime.controller import authoring_operation
     from character_dna.utilities import get_active_rig_instance
 
     load_dna(
@@ -120,15 +119,13 @@ def head_shape_key_rig(addon):
     )
     _create_head_shape_keys()
 
-    rig_instance_module.stop_listening()
     instance = get_active_rig_instance()
     assert instance is not None
     if not instance.head_initialized:
         instance.head_initialize()
 
-    yield instance
-
-    rig_instance_module.start_listening()
+    with authoring_operation(instance):
+        yield instance
 
 
 def test_update_head_shape_keys_writes_blend_shape_outputs(head_shape_key_rig):

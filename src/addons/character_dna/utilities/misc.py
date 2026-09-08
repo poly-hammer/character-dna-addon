@@ -43,7 +43,7 @@ from ..constants import (
     TEMP_FOLDER,
     ToolInfo,
 )
-from ..rig_instance import begin_render, end_render, ensure_main_thread_timer, start_listening
+from ..rig_instance import begin_render, end_render
 from ..typing import *  # noqa: F403
 from . import get_active_rig_instance
 
@@ -346,10 +346,9 @@ def notify_rig_instances_changed(instance: "RigInstance | None" = None) -> None:
     removals (where the callback should simply re-derive its state from the current list).
     """
     from .. import post_setup_scene_callbacks
-    from ..runtime.controller import enabled, request_sync
+    from ..runtime.controller import request_sync
 
-    if enabled():
-        request_sync()
+    request_sync()
 
     for callback in post_setup_scene_callbacks:
         try:
@@ -363,10 +362,6 @@ def setup_scene(*_: Any) -> None:
 
     engine.discard()
     engine.invalidate()
-    # Arm the main thread evaluation drain before anything that can fail: without it a render
-    # blocks on evaluations nothing performs and every frame comes out frozen.
-    ensure_main_thread_timer()
-
     # Auto-migrate rig-instance data saved by a different addon edition (Free vs
     # Pro) or an older version before initializing, so reopening a .blend always
     # yields a correctly populated rig-instance list. Guard against failures so a
@@ -381,8 +376,6 @@ def setup_scene(*_: Any) -> None:
 
     # initialize the rig instances
     for instance in getattr(scene_properties, "rig_instance_list", []):
-        # One instance failing must not stop the others, and must never skip start_listening()
-        # below -- that would leave the whole session without rig logic evaluation.
         try:
             instance.initialize()
 
@@ -392,7 +385,6 @@ def setup_scene(*_: Any) -> None:
         except Exception as error:
             logger.exception(f"Failed to set up rig instance '{instance.name}': {error}")
 
-    start_listening()
     controller.after_load()
 
 
@@ -460,15 +452,10 @@ def post_redo(*args: Any) -> None:
 
 
 def pre_render(*_: Any) -> None:
-    # render_init fires on Blender's render job thread, so only plain Python state is touched
-    # here; anything Blender-side is done by the main thread timer in rig_instance.
     begin_render()
 
 
 def post_render(*_: Any) -> None:
-    # render_complete/render_cancel also fire on the render job thread. This suppresses further
-    # evaluation immediately and queues the Blender-side cleanup for the main thread, which
-    # clears the cached evaluated objects belonging to the now-freed render dependency graph.
     end_render()
 
 
@@ -812,9 +799,11 @@ def import_head_texture_logic_node() -> bpy.types.NodeTree | None:
 
 
 def dependencies_are_valid() -> bool:
-    """Return True when the compiled RigLogic/DNA bindings are loaded."""
+    """Require both the DNA authoring bindings and the native evaluator."""
     try:
-        from ..bindings import dna, riglogic
+        from ..bindings import dna, load_native_runtime, riglogic
+
+        load_native_runtime()
     except Exception:
         return False
     return not (getattr(dna, "__is_fake__", False) or getattr(riglogic, "__is_fake__", False))

@@ -14,7 +14,7 @@ import pytest
 
 from mathutils import Quaternion
 
-from character_dna import rig_instance
+from character_dna.runtime import engine
 
 
 # 45 degrees about the head's local z, which is a neck-driver rotation the head RBFs read.
@@ -99,31 +99,29 @@ def test_head_rig_rotation_updates_the_eye_aim_solve(load_head_only_dna):
 
 
 def test_head_rig_updates_are_not_repeated_for_rig_logic_own_writes(load_head_only_dna):
-    """Rig logic writes head bones, which re-tags the armature. That echo must not re-evaluate."""
+    """Unchanged graph updates do not cause another native solve."""
     instance = get_instance()
     enter_pose_mode(instance.head_rig)
 
     instance.head_rig.pose.bones["head"].rotation_quaternion = TURNED_HEAD
     bpy.context.view_layer.update()
 
-    armature_name = instance.head_rig.data.name
-    dependency_graph = bpy.context.evaluated_depsgraph_get()
+    record = next(record for record in engine._records.values() if record["component"] == "head")
+    session = record["last_context"]["session"]
+    before = engine.native_module().session_statistics(session)["solves"]
+    bpy.context.view_layer.update()
+    assert engine.native_module().session_statistics(session)["solves"] == before
 
-    assert rig_instance._get_armature_update_component(instance, armature_name, dependency_graph) is None
-
-    # a genuine change to a driver bone is still picked up
     instance.head_rig.pose.bones["neck_01"].rotation_quaternion = TURNED_HEAD
     bpy.context.view_layer.update()
-    dependency_graph = bpy.context.evaluated_depsgraph_get()
-    instance.data.pop(instance.cache_key("head", "input_signature"), None)
-
-    assert rig_instance._get_armature_update_component(instance, armature_name, dependency_graph) == "head"
+    assert engine.native_module().session_statistics(session)["solves"] > before
 
 
 def test_head_evaluates_without_a_face_board(load_head_only_dna):
     """The face board only supplies GUI control positions; the neck solve must not depend on it."""
     instance = get_instance()
     instance.face_board = None
+    bpy.ops.character_dna.sync_native_runtime()
     enter_pose_mode(instance.head_rig)
 
     before = get_neck_raw_controls(instance)

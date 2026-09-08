@@ -1,8 +1,6 @@
 # standard library imports
 import logging
 
-from typing import Any
-
 # third party imports
 import bpy
 
@@ -18,13 +16,6 @@ from .ui import callbacks
 logger = logging.getLogger(__name__)
 
 face_pose_preview_collections = {}
-
-
-def update_native_runtime(_owner: Any, _context: bpy.types.Context) -> None:
-    """Apply preference changes through the runtime's undoable transition operator."""
-    from .runtime.controller import request_sync
-
-    request_sync()
 
 
 def get_dna_import_property_group_base_class() -> type:
@@ -341,13 +332,6 @@ class CharacterAddonProperties:
         name="Collect Metrics",
         default=False,
         description="This will send anonymous usage data to Poly Hammer to help improve the addon and help catch bugs",
-    )  # pyright: ignore[reportInvalidTypeForm]
-
-    experimental_native_riglogic: bpy.props.BoolProperty(
-        name="Native RigLogic (Experimental)",
-        default=False,
-        description="Use the optional native runtime on compatible Blender 5.2 installations",
-        update=update_native_runtime,
     )  # pyright: ignore[reportInvalidTypeForm]
 
     next_metrics_consent_timestamp: bpy.props.FloatProperty(default=0.0)  # pyright: ignore[reportInvalidTypeForm]

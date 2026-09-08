@@ -29,8 +29,8 @@ _errors: dict[str, str] = {}
 def capability() -> tuple[bool, str]:
     """Check availability without importing private Blender APIs or development paths."""
     global _module
-    if bpy.app.version[:2] != (5, 2) or sys.version_info[:2] != (3, 13):
-        return False, "Native evaluation requires Blender 5.2 / Python 3.13"
+    if bpy.app.version < (4, 5, 0) or sys.version_info[:2] not in {(3, 11), (3, 13)}:
+        return False, "RigLogic requires Blender 4.5 or newer with supported Python bindings"
     if not bpy.context.preferences.filepaths.use_scripts_auto_execute and bpy.app.autoexec_fail:
         return False, "This file has Python driver execution disabled"
     try:
@@ -46,7 +46,7 @@ def capability() -> tuple[bool, str]:
                 return False, f"Native runtime is missing {name}"
     except (ImportError, OSError, RuntimeError) as error:
         return False, f"Native runtime unavailable: {error}"
-    return True, "Native runtime available (experimental)"
+    return True, "Native runtime available"
 
 
 def _model(path: str, body: bool) -> Any:
@@ -118,8 +118,33 @@ def _resolve_instance(carrier: Any) -> Any:
     raise RuntimeError("Native carrier has no owning rig instance")
 
 
-def _record(carrier: Any) -> dict[str, Any]:
-    instance = _resolve_instance(carrier)
+def native_module() -> Any:
+    """Return the required, already validated native module."""
+    return _module
+
+
+def transform_plan(plans: list, component: str) -> array:
+    """Pack the common C++ transform plan for live evaluation and authoring."""
+    return array(
+        "f",
+        [
+            value
+            for item in plans
+            for value in (
+                item[0],
+                int(item[6]) if component == "head" else 0,
+                *item[2],
+                *item[3],
+                *item[4],
+                *(value for row in item[5] for value in row),
+            )
+        ],
+    )
+
+
+def make_record(carrier: Any, instance: Any = None) -> dict[str, Any]:
+    """Build a native frame plan from persisted bindings or an authoring descriptor."""
+    instance = instance if instance is not None else _resolve_instance(carrier)
     component = carrier["component"]
     if component == "switches":
         return {
@@ -167,7 +192,7 @@ def restore() -> None:
     bpy.app.driver_namespace[NAMESPACE] = solve
     for carrier in carriers():
         try:
-            record = _record(carrier)
+            record = make_record(carrier)
             _records[carrier["token"]] = record
         except Exception as error:
             _errors[carrier.get("instance_id", "")] = str(error)
@@ -175,7 +200,7 @@ def restore() -> None:
 
 
 def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
-    """Bind native outputs after a legacy evaluation; roll back the whole instance on failure."""
+    """Bind initialized rig data; roll back the whole instance on failure."""
     available, reason = capability()
     if not available:
         raise RuntimeError(reason)
@@ -249,21 +274,7 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
             carrier["outputs"] = initial
             carrier["epoch"] = 0.0
             carrier["preview_revision"] = 0
-            carrier["plan"] = array(
-                "f",
-                [
-                    value
-                    for item in plans
-                    for value in (
-                        item[0],
-                        int(item[6]) if component == "head" else 0,
-                        *item[2],
-                        *item[3],
-                        *item[4],
-                        *(value for row in item[5] for value in row),
-                    )
-                ],
-            )
+            carrier["plan"] = transform_plan(plans, component)
             raw_plan = instance.body_raw_plan if component == "body" else instance.head_raw_quat_plan
             carrier["raw"] = [{"index": index, "name": name, "axis": axis} for index, name, axis in raw_plan]
             if component == "head" and instance.face_board:
@@ -281,8 +292,7 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
                 curve.modifiers.remove(modifier)
             driver = curve.driver
             driver.use_self = True
-            if component == "head":
-                add_variable(driver, "preview_revision", carrier, '["preview_revision"]')
+            add_variable(driver, "preview_revision", carrier, '["preview_revision"]')
             for index, name in enumerate(sorted({name for _index, name, _axis in raw_plan})):
                 bone = rig.pose.bones.get(name)
                 if not bone:
@@ -332,7 +342,7 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
                 add_variable(driver, flag, scene, instance.path_from_id(flag))
             add_variable(driver, "lod", scene, instance.view_options.path_from_id("active_lod"))
             driver.expression = f"{NAMESPACE}(self, depsgraph)"
-            _records[carrier["token"]] = _record(carrier)
+            _records[carrier["token"]] = make_record(carrier)
         if instance.head_rig and instance.face_board and instance.auto_evaluate_head:
             _install_switches(instance, scene, identity)
         bpy.app.driver_namespace[NAMESPACE] = solve
@@ -428,7 +438,7 @@ def solve(owner: Any, graph: Any) -> float:
 
 def status(instance: Any) -> str:
     """Expose binding failures instead of silently reporting stale output as success."""
-    return _errors.get(instance_id(instance), "Native" if active(instance) else "Python")
+    return _errors.get(instance_id(instance), "Native" if active(instance) else "Inactive")
 
 
 def errors() -> list[str]:
@@ -473,20 +483,27 @@ def _store_preview(record: dict[str, Any], outputs: array, controls: dict[str, A
     carrier.update_tag()
 
 
-def preview_controls(instance: Any, legacy: Any) -> bool:
+def preview_controls(instance: Any, state: Any, component: str = "head") -> bool:
     """Publish a calculated manual head pose through the existing native drivers."""
-    record = _head_record(instance)
+    record = next(
+        (
+            item
+            for item in _records.values()
+            if item["identity"] == instance_id(instance) and item["component"] == component
+        ),
+        None,
+    )
     if record is None:
         return False
-    reader = instance.head_dna_reader
+    reader = getattr(instance, f"{component}_dna_reader")
     controls = {
-        "raw": array("f", (legacy.getRawControl(index) for index in range(reader.getRawControlCount()))),
-        "gui": array("f", (legacy.getGUIControl(index) for index in range(reader.getGUIControlCount()))),
+        "raw": array("f", (state.getRawControl(index) for index in range(reader.getRawControlCount()))),
+        "gui": array("f", (state.getGUIControl(index) for index in range(reader.getGUIControlCount()))),
     }
     outputs = array("d", [0.0]) * (record["joint_count"] * 9)
-    _module.transform_into(record["plan"], array("d", legacy.getJointOutputs()), outputs)
-    outputs.extend(legacy.getBlendShapeOutputs())
-    outputs.extend(legacy.getAnimatedMapOutputs())
+    _module.transform_into(record["plan"], array("d", state.getJointOutputs()), outputs, component == "body")
+    outputs.extend(state.getBlendShapeOutputs())
+    outputs.extend(state.getAnimatedMapOutputs())
     _store_preview(record, outputs, controls)
     return True
 
@@ -576,28 +593,35 @@ def ui_raw_control_value(instance: Any, index: int, graph: Any) -> float | None:
     return None
 
 
-def synchronize_legacy(instance: Any, component: str, legacy: Any) -> Any:
-    """Keep explicit legacy SDK readers current without a second per-frame solve."""
+def mark_authoring_current(instance: Any, component: str) -> None:
+    """Keep an explicit tool calculation from being overwritten by a repeated getter."""
+    for record in _records.values():
+        if record["identity"] == instance_id(instance) and record["component"] == component:
+            record["authoring_revision"] = record["calls"]
+
+
+def synchronize_authoring(instance: Any, component: str, state: Any) -> Any:
+    """Populate SDK editing handles on demand, never as a live evaluation backend."""
     identity = instance_id(instance)
-    if legacy is None or not identity:
-        return legacy
+    if state is None or not identity:
+        return state
     for record in _records.values():
         if record["identity"] != identity or record["component"] != component:
             continue
         context = record.get("last_context")
-        if context is None or record.get("legacy_revision") == record["calls"]:
-            return legacy
+        if context is None or record.get("authoring_revision") == record["calls"]:
+            return state
         controls = context.get("preview_controls") or _module.control_snapshot(context["session"])
         for index, value in enumerate(controls["gui"]):
-            legacy.setGUIControl(index, value)
+            state.setGUIControl(index, value)
         for index, value in enumerate(controls["raw"]):
-            legacy.setRawControl(index, value)
-        legacy.setLOD(context["lod"])
+            state.setRawControl(index, value)
+        state.setLOD(context["lod"])
         manager = instance.data.get(instance.cache_key(component, "manager"))
-        manager.calculate(legacy)
-        record["legacy_revision"] = record["calls"]
-        return legacy
-    return legacy
+        manager.calculate(state)
+        record["authoring_revision"] = record["calls"]
+        return state
+    return state
 
 
 def _install_switches(instance: Any, scene: Any, identity: str) -> None:
@@ -622,9 +646,10 @@ def _install_switches(instance: Any, scene: Any, identity: str) -> None:
         for bone in [aim, *aim.children_recursive]:
             if bone != aim and bone.name.startswith(("GRP_", "LOC_")):
                 continue
-            targets.append(Target(face, bone.path_from_id("hide"), -1, len(switches)))
+            visibility = bone if hasattr(bone, "hide") else bone.bone
+            targets.append(Target(visibility.id_data, visibility.path_from_id("hide"), -1, len(switches)))
             switches.append("CTRL_lookAtSwitch")
-            values.append(float(bone.hide))
+            values.append(float(visibility.hide))
     if not targets:
         return
     validate_targets(targets)
@@ -651,4 +676,4 @@ def _install_switches(instance: Any, scene: Any, identity: str) -> None:
     for index, name in enumerate(switches):
         add_variable(curve.driver, f"switch_{index}", face, face.pose.bones[name].path_from_id("location") + "[1]")
     curve.driver.expression = f"{NAMESPACE}(self, depsgraph)"
-    _records[carrier["token"]] = _record(carrier)
+    _records[carrier["token"]] = make_record(carrier)

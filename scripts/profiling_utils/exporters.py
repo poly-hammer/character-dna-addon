@@ -257,20 +257,13 @@ def results_to_dict(
     )
 
     return {
-        "metadata": asdict(metadata),
+        "metadata": {**asdict(metadata), "benchmark_schema": 2},
         "timings": {
             "head": {
-                "gui_control_update": timing_result_to_dict(results.head_gui_control_update),
-                "raw_control_update": timing_result_to_dict(results.head_raw_control_update),
-                "bone_transforms": timing_result_to_dict(results.head_bone_transforms),
-                "shape_keys": timing_result_to_dict(results.head_shape_keys),
-                "texture_masks": timing_result_to_dict(results.head_texture_masks),
-                "manager_calculate": timing_result_to_dict(results.head_manager_calculate),
+                "native_evaluation": timing_result_to_dict(results.head_evaluation),
             },
             "body": {
-                "raw_control_update": timing_result_to_dict(results.body_raw_control_update),
-                "bone_transforms": timing_result_to_dict(results.body_bone_transforms),
-                "manager_calculate": timing_result_to_dict(results.body_manager_calculate),
+                "native_evaluation": timing_result_to_dict(results.body_evaluation),
             },
             "full_evaluation": timing_result_to_dict(results.full_evaluation),
         },
@@ -279,22 +272,8 @@ def results_to_dict(
             "body": riglogic_stats_to_dict(results.body_stats),
         },
         "summary": {
-            "python_head_ms": round(
-                results.head_gui_control_update.mean_ms
-                + results.head_raw_control_update.mean_ms
-                + results.head_bone_transforms.mean_ms
-                + results.head_shape_keys.mean_ms
-                + results.head_texture_masks.mean_ms,
-                4,
-            ),
-            "python_body_ms": round(
-                results.body_raw_control_update.mean_ms + results.body_bone_transforms.mean_ms,
-                4,
-            ),
-            "cpp_total_ms": round(
-                results.head_manager_calculate.mean_ms + results.body_manager_calculate.mean_ms,
-                4,
-            ),
+            "native_head_ms": round(results.head_evaluation.mean_ms, 4),
+            "native_body_ms": round(results.body_evaluation.mean_ms, 4),
             "full_evaluation_ms": round(results.full_evaluation.mean_ms, 4),
             "theoretical_fps": round(1000 / results.full_evaluation.mean_ms, 1)
             if results.full_evaluation.mean_ms > 0
@@ -427,8 +406,8 @@ def export_markdown(results: ProfileResults, output_path: Path, iterations: int 
         "",
         "## Summary",
         "",
-        f"- **Python (Head + Body)**: {data['summary']['python_head_ms'] + data['summary']['python_body_ms']:.3f} ms",
-        f"- **C++ RigLogic**: {data['summary']['cpp_total_ms']:.3f} ms",
+        f"- **Native Head Callback**: {data['summary']['native_head_ms']:.3f} ms",
+        f"- **Native Body Callback**: {data['summary']['native_body_ms']:.3f} ms",
         f"- **Full Evaluation**: {data['summary']['full_evaluation_ms']:.3f} ms",
         f"- **Theoretical FPS**: {data['summary']['theoretical_fps']:.1f}",
         "",
@@ -539,6 +518,9 @@ def compare_snapshots(
     with open(current_path, encoding="utf-8") as f:
         current = json.load(f)
 
+    if baseline.get("metadata", {}).get("benchmark_schema") != current.get("metadata", {}).get("benchmark_schema"):
+        raise ValueError("Benchmark workloads differ; capture a new baseline for the native runtime")
+
     # Check hardware compatibility
     baseline_hw = baseline.get("metadata", {}).get("hardware", {})
     current_hw = current.get("metadata", {}).get("hardware", {})
@@ -582,7 +564,7 @@ def compare_snapshots(
             improvements.append({"name": name, "diff_pct": round(diff_pct, 2)})
 
     # Compare summary metrics
-    for key in ["python_head_ms", "python_body_ms", "cpp_total_ms", "full_evaluation_ms"]:
+    for key in ["native_head_ms", "native_body_ms", "full_evaluation_ms"]:
         compare_timing(key, baseline["summary"].get(key, 0), current["summary"].get(key, 0))
 
     return {

@@ -40,16 +40,6 @@ class CharacterDnaPreferences(CharacterAddonProperties, bpy.types.AddonPreferenc
         row = layout.row()
         row.prop(self, "metrics_collection", text="Allow Metrics Collection")
 
-        from ..runtime import controller, engine
-
-        available, reason = engine.capability()
-        row = layout.row()
-        row.enabled = available or self.experimental_native_riglogic
-        row.prop(self, "experimental_native_riglogic")
-        layout.label(text=controller.status() if self.experimental_native_riglogic else reason)
-        if self.experimental_native_riglogic:
-            layout.operator(f"{ToolInfo.NAME}.sync_native_runtime", icon="FILE_REFRESH")
-
         # Editor Settings (Pro only). The ``show_pro_features`` toggle lets Pro
         # users preview what the free edition's UI looks like. When the editors
         # submodule is absent (free edition), show a note advertising Pro instead.

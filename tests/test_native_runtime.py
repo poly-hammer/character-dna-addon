@@ -12,29 +12,29 @@ from character_dna.runtime import controller, engine
 from character_dna.utilities import get_active_rig_instance, get_addon_preferences
 
 
+def test_import_uses_runtime_without_opt_in(load_head_only_dna):
+    """An ordinary import installs the only evaluator without a preferences toggle."""
+    instance = get_active_rig_instance()
+    assert engine.active(instance), controller.status()
+    assert "experimental_native_riglogic" not in get_addon_preferences().bl_rna.properties
+    instance.face_board.pose.bones["CTRL_C_jaw"].location.y = 0.8
+    instance.face_board.update_tag()
+    bpy.context.view_layer.update()
+    reader = instance.head_dna_reader
+    index = next(
+        index
+        for index in range(reader.getRawControlCount())
+        if reader.getRawControlName(index) == "CTRL_expressions.jawOpen"
+    )
+    assert engine.ui_raw_control_value(instance, index, bpy.context.view_layer.depsgraph) == pytest.approx(0.8)
+
+
 @pytest.fixture
 def native_head(load_head_only_dna):
-    """Opt in through the same operator used by the preferences UI."""
-    from character_dna.bindings import load_native_runtime
-
-    try:
-        load_native_runtime()
-    except ModuleNotFoundError:
-        pytest.skip("Native platform binding is not installed")
-    if bpy.app.version[:2] != (5, 2):
-        pytest.skip("Native backend is gated to Blender 5.2")
+    """Use the runtime installed by ordinary DNA import."""
     instance = get_active_rig_instance()
-    preferences = get_addon_preferences()
-    old_value = preferences.experimental_native_riglogic
-    preferences.experimental_native_riglogic = True
-    assert bpy.ops.character_dna.sync_native_runtime() == {"FINISHED"}
     assert engine.active(instance), controller.status()
-    try:
-        yield instance
-    finally:
-        preferences.experimental_native_riglogic = False
-        bpy.ops.character_dna.sync_native_runtime()
-        preferences.experimental_native_riglogic = old_value
+    return instance
 
 
 def test_native_head_only(native_head):
@@ -65,7 +65,6 @@ def test_native_without_face_board(native_head):
     engine.discard(native_head)
     native_head.face_board = None
     native_head.evaluate()
-    engine.install(native_head)
     native_head.head_rig.pose.bones["head"].rotation_quaternion = (0.9238795, 0, 0, 0.3826834)
     native_head.head_rig.update_tag()
     bpy.context.view_layer.update()
@@ -140,8 +139,8 @@ def _head_matrices(instance):
 
 @pytest.mark.usefixtures("pro_editors")
 @pytest.mark.parametrize("control", ["jawOpen", "jawOpenExtreme"])
-def test_native_raw_activate_on_click_matches_legacy(native_head, control):
-    """Selection, prerequisite chains and the neutral row retain their legacy poses."""
+def test_native_raw_activate_on_click_matches_authoring(native_head, control):
+    """Selection, prerequisite chains and the neutral row match the authoring pose."""
     from character_dna.editors.raw_control_editor.callbacks import update_head_raw_control_list
 
     update_head_raw_control_list(native_head)
@@ -160,11 +159,10 @@ def test_native_raw_activate_on_click_matches_legacy(native_head, control):
     editor.raw_controls_active_index = 0
     bpy.context.view_layer.update()
     assert editor.raw_controls[index].value == pytest.approx(0.0)
-    get_addon_preferences().experimental_native_riglogic = False
-    bpy.ops.character_dna.sync_native_runtime()
-    editor.raw_controls_active_index = index
-    bpy.context.view_layer.update()
-    assert native_pose == pytest.approx(_head_matrices(native_head), abs=1e-5)
+    with controller.authoring_operation(native_head):
+        editor.raw_controls_active_index = index
+        bpy.context.view_layer.update()
+        assert native_pose == pytest.approx(_head_matrices(native_head), abs=1e-5)
 
 
 @pytest.fixture
@@ -190,7 +188,7 @@ def native_shape(native_head, request):
 
 
 @pytest.mark.parametrize("evaluate_shapes", [True, False])
-def test_native_shape_slider_matches_legacy(native_shape, evaluate_shapes):
+def test_native_shape_slider_matches_authoring(native_shape, evaluate_shapes):
     """Shape sliders deform the evaluated mesh and do not change the raw-control pose."""
     instance, name = native_shape
     instance.evaluate_shape_keys = evaluate_shapes
@@ -207,21 +205,20 @@ def test_native_shape_slider_matches_legacy(native_shape, evaluate_shapes):
         for vertex in instance.head_mesh.evaluated_get(bpy.context.view_layer.depsgraph).data.vertices
         for value in vertex.co
     ]
-    get_addon_preferences().experimental_native_riglogic = False
-    bpy.ops.character_dna.sync_native_runtime()
-    item.value = 0.25
-    bpy.context.view_layer.update()
-    legacy_vertices = [
-        value
-        for vertex in instance.head_mesh.evaluated_get(bpy.context.view_layer.depsgraph).data.vertices
-        for value in vertex.co
-    ]
-    assert native_vertices == pytest.approx(legacy_vertices, abs=1e-5)
+    with controller.authoring_operation(instance):
+        item.value = 0.25
+        bpy.context.view_layer.update()
+        authored_vertices = [
+            value
+            for vertex in instance.head_mesh.evaluated_get(bpy.context.view_layer.depsgraph).data.vertices
+            for value in vertex.co
+        ]
+        assert native_vertices == pytest.approx(authored_vertices, abs=1e-5)
 
 
 @pytest.mark.parametrize("native_shape", ["brow_down_L", "head_turnUp_U"], indirect=True)
-def test_native_shape_activate_on_click_matches_legacy(native_shape):
-    """Selecting a shape activates its DNA-derived raw pose in either backend."""
+def test_native_shape_activate_on_click_matches_authoring(native_shape):
+    """Selecting a shape matches the pose used during explicit authoring."""
     instance, name = native_shape
     editor = instance.shape_key_editor
     index = editor.shape_key_list.find(name)
@@ -231,12 +228,11 @@ def test_native_shape_activate_on_click_matches_legacy(native_shape):
     native_value = editor.shape_key_list[index].value
     assert native_value > 0.5
     native_pose = _head_matrices(instance)
-    get_addon_preferences().experimental_native_riglogic = False
-    bpy.ops.character_dna.sync_native_runtime()
-    editor.shape_key_list_active_index = index
-    bpy.context.view_layer.update()
-    assert editor.shape_key_list[index].value == pytest.approx(native_value, abs=1e-5)
-    assert native_pose == pytest.approx(_head_matrices(instance), abs=1e-5)
+    with controller.authoring_operation(instance):
+        editor.shape_key_list_active_index = index
+        bpy.context.view_layer.update()
+        assert editor.shape_key_list[index].value == pytest.approx(native_value, abs=1e-5)
+        assert native_pose == pytest.approx(_head_matrices(instance), abs=1e-5)
 
 
 @pytest.mark.usefixtures("pro_editors")
@@ -277,6 +273,28 @@ def test_native_previews_are_instance_local(native_head):
 def test_native_operator_has_undo():
     """Native scene mutations participate in Blender's operator undo stack."""
     assert "UNDO" in controller.CHARACTER_DNA_OT_sync_native_runtime.bl_options
+
+
+def test_native_raw_input_sampling_preserves_authored_expressions(native_head):
+    """Sampling neck quaternions must not erase a tool's manually set expression."""
+    from character_dna.runtime.authoring import raw_inputs
+
+    with controller.authoring_operation(native_head):
+        reader = native_head.head_dna_reader
+        index = next(
+            index
+            for index in range(reader.getRawControlCount())
+            if reader.getRawControlName(index) == "CTRL_expressions.jawOpen"
+        )
+        native_head.head_instance.setRawControl(index, 0.65)
+        raw_inputs(native_head, "head", {"head": {"z": 0.2, "w": 0.98}})
+        assert native_head.head_instance.getRawControl(index) == pytest.approx(0.65)
+        raw_index = next(
+            index for index, name, axis in native_head.head_raw_quat_plan if name == "head" and axis == "z"
+        )
+        assert native_head.head_instance.getRawControl(raw_index) == pytest.approx(0.2)
+        native_head.destroy_references()
+        assert native_head.cache_key("head", "runtime_plan") not in native_head.data
 
 
 def test_native_auto_evaluate_off_releases_channels(native_head):

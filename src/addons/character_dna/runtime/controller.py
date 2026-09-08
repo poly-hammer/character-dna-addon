@@ -1,4 +1,4 @@
-"""Opt-in native backend transitions and Blender lifecycle coordination."""
+"""Rig runtime ownership and Blender lifecycle coordination."""
 
 from __future__ import annotations
 
@@ -20,19 +20,16 @@ logger = logging.getLogger(__name__)
 _transitioning = False
 _undoing = False
 _suspended: set[str] = set()
-_status = "Python backend"
+_status = "Runtime ready"
 
 
-def enabled() -> bool:
-    """Read the opt-in preference without requiring native dependencies."""
-    from ..utilities import get_addon_preferences
-
-    preferences = get_addon_preferences()
-    return bool(preferences and getattr(preferences, "experimental_native_riglogic", False))
+def is_suspended(instance: Any) -> bool:
+    """Whether an editor currently owns the character's output channels."""
+    return engine.instance_id(instance) in _suspended or bool(instance.get("native_editor_resume", False))
 
 
 def status() -> str:
-    """Return the last requested backend transition result."""
+    """Return current runtime setup or evaluation failures."""
     failures = engine.errors()
     return "Native evaluation error: " + "; ".join(failures) if failures else _status
 
@@ -41,26 +38,28 @@ def release(instance: Any) -> None:
     """Release native ownership before DNA replacement or component reinitialization."""
     if not _undoing and not _transitioning and engine.carriers(instance):
         engine.discard(instance)
-        if enabled() and engine.instance_id(instance) not in _suspended:
+        if not is_suspended(instance):
             request_sync()
 
 
 def reconcile() -> None:
-    """Rebuild opted-in rigs in a write-safe operator context, one backend at a time."""
+    """Rebuild rig bindings in a write-safe operator context."""
     global _transitioning, _status
     from .. import rig_instance
 
     if _transitioning:
         return
     if rig_instance.is_rendering() or bpy.app.is_job_running("RENDER"):
-        raise RuntimeError("Change the native backend after rendering finishes")
+        raise RuntimeError("Rebuild the runtime after rendering finishes")
     _transitioning = True
     failures = []
     bound = 0
     identities = set()
     try:
         engine.discard()
-        available, reason = engine.capability() if enabled() else (False, "Python backend")
+        available, reason = engine.capability()
+        if not available:
+            raise RuntimeError(reason)
         for scene in bpy.data.scenes:
             properties = getattr(scene, ToolInfo.NAME, None)
             for instance in getattr(properties, "rig_instance_list", []):
@@ -68,29 +67,27 @@ def reconcile() -> None:
                 if identity and identity in identities:
                     instance["native_runtime_id"] = uuid.uuid4().hex
                 identities.add(engine.instance_id(instance))
-                if engine.instance_id(instance) in _suspended or instance.get("native_editor_resume", False):
+                if is_suspended(instance):
                     continue
                 try:
                     instance.initialize()
                     with bpy.context.temp_override(scene=scene, view_layer=scene.view_layers[0]):
-                        if instance.auto_evaluate:
-                            for component in ("body", "head"):
-                                if getattr(instance, f"auto_evaluate_{component}"):
-                                    instance.evaluate(component=component)
-                    if available:
                         engine.install(instance)
+                        bpy.context.view_layer.update()
                         bound += int(engine.active(instance))
                 except Exception as error:
                     engine.discard(instance)
                     failures.append(f"{instance.name}: {error}")
                     logger.exception("Native runtime transition failed for %s", instance.name)
-        _status = "; ".join(failures) if failures else (f"Native: {bound} rig(s)" if available else reason)
+        _status = "; ".join(failures) if failures else f"Native: {bound} rig(s)"
+        if failures:
+            raise RuntimeError(_status)
     finally:
         _transitioning = False
 
 
 class CHARACTER_DNA_OT_sync_native_runtime(bpy.types.Operator):
-    """Rebuild or remove the experimental native bindings."""
+    """Rebuild the runtime bindings after structural changes."""
 
     bl_idname = f"{ToolInfo.NAME}.sync_native_runtime"
     bl_label = "Rebuild Native Evaluation"
@@ -113,26 +110,21 @@ def _apply_requested() -> None:
 
 
 def request_sync(_owner: Any = None, _context: Any = None) -> None:
-    """Queue a single undoable transition outside preference/property draw callbacks."""
+    """Queue a single undoable rebuild outside property callbacks."""
     if not _transitioning and not bpy.app.timers.is_registered(_apply_requested):
         bpy.app.timers.register(_apply_requested, first_interval=0.0)
 
 
 def auto_evaluation_changed(instance: Any, _context: Any) -> None:
     """Release or reacquire output ownership when the user changes auto evaluation."""
-    if enabled() and engine.instance_id(instance) not in _suspended:
+    if not is_suspended(instance):
         request_sync()
 
 
 def after_load() -> None:
-    """Recover saved carrier ownership or remove it when this install is unsupported."""
+    """Rebuild saved bindings once after the scene's data has been loaded."""
     ui_refresh.clear()
-    if enabled() and engine.capability()[0]:
-        engine.restore()
-        bpy.ops.character_dna.sync_native_runtime()
-    else:
-        engine.discard()
-        engine.invalidate()
+    bpy.ops.character_dna.sync_native_runtime()
 
 
 def before_undo() -> None:
@@ -147,20 +139,20 @@ def after_undo() -> None:
     """Rehydrate the bindings restored by Blender's undo, without rewriting its stack."""
     global _undoing
     _undoing = False
-    if enabled():
-        engine.restore()
-    elif engine.carriers():
-        request_sync()
+    engine.restore()
 
 
 def suspend(instance: Any) -> bool:
-    """Give an editor or animation baker exclusive access to the legacy SDK state."""
+    """Give an editor or animation baker exclusive access to output channels."""
     was_active = engine.active(instance)
     identity = engine.instance_id(instance)
     if was_active:
+        for component in ("head", "body"):
+            engine.synchronize_authoring(
+                instance, component, instance.data.get(instance.cache_key(component, "instance"))
+            )
         _suspended.add(identity)
         engine.discard(instance)
-        instance.evaluate()
     return was_active
 
 
@@ -168,17 +160,12 @@ def resume(instance: Any, was_active: bool) -> None:
     """Rebind only after the owning operation has released its mutable SDK state."""
     if was_active:
         _suspended.discard(engine.instance_id(instance))
-        if enabled():
-            instance.evaluate()
-            try:
-                engine.install(instance)
-            except ValueError as error:
-                logger.warning("Native runtime remains suspended after operation: %s", error)
+        instance.evaluate()
 
 
 @contextmanager
-def legacy_operation(instance: Any):
-    """Scope regular animation baking/export, not simulation pre-baking."""
+def authoring_operation(instance: Any):
+    """Temporarily release output drivers for editing or animation baking."""
     was_active = suspend(instance)
     try:
         yield
@@ -186,13 +173,13 @@ def legacy_operation(instance: Any):
         resume(instance, was_active)
 
 
-def with_legacy_runtime(function: Callable[..., Any]) -> Callable[..., Any]:
-    """Run an existing SDK-based operation with native output ownership suspended."""
+def with_authoring_output(function: Callable[..., Any]) -> Callable[..., Any]:
+    """Run a tool with exclusive output ownership and native sampling."""
 
     @functools.wraps(function)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         instance = kwargs.get("instance", args[0] if args else None)
-        with legacy_operation(instance):
+        with authoring_operation(instance):
             return function(*args, **kwargs)
 
     return wrapped
@@ -210,22 +197,21 @@ def native_scene_operation(function: Callable[..., Any]) -> Callable[..., Any]:
         try:
             return function(operator, context)
         finally:
-            if had_bindings and enabled():
+            if had_bindings:
                 reconcile()
 
     return wrapped
 
 
 def register() -> None:
-    """Register the operator and native driver namespace independently of opt-in."""
+    """Register the runtime's rebuild operator, driver callback and deferred startup."""
     bpy.utils.register_class(CHARACTER_DNA_OT_sync_native_runtime)
     bpy.app.driver_namespace[engine.NAMESPACE] = engine.solve
     bpy.app.timers.register(_startup, first_interval=0.0)
 
 
 def _startup() -> None:
-    if enabled() or engine.carriers():
-        _apply_requested()
+    _apply_requested()
 
 
 def unregister() -> None:

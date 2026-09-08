@@ -39,7 +39,7 @@ else:
 combo_folder = BINDINGS_FOLDER / os_name / arch / python_version
 
 def load_native_runtime() -> types.ModuleType:
-    """Load the optional native runtime beside the SDK without a top-level module."""
+    """Load the required native runtime beside the SDK without a top-level module."""
     import importlib.machinery
     import importlib.util
 

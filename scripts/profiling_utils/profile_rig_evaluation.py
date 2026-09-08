@@ -1,50 +1,20 @@
-"""
-Profiling module for MetaHuman DNA Addon rig evaluation.
-
-This script profiles both the Python code in rig_instance.py and the C++ RigLogic
-evaluation using the collectCalculationStats method from the RigLogic bindings.
-
-Usage:
-    Run from Blender with a MetaHuman DNA file loaded::
-
-        from profiling_utils import run_profiler
-
-        results = run_profiler(iterations=100, warmup=10)
-
-    Export results for CI::
-
-        from profiling_utils.exporters import export_snapshot
-
-        export_snapshot(results, "reports/profiling", format="all")
-
-    Enable realtime HUD::
-
-        from profiling_utils.viewport_hud import enable_hud
-
-        enable_hud()
-"""
+"""Measure native rig callbacks and full dependency-graph evaluation for CI."""
 
 from __future__ import annotations
 
-import logging
 import statistics
 import time
-from collections.abc import Callable
+
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import bpy
-
-if TYPE_CHECKING:
-    from character_dna.rig_logic import RigLogicInstance as RigInstance
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
 class TimingResult:
-    """Stores timing results for a single operation."""
+    """Nanosecond samples exported in milliseconds."""
 
     name: str
     times_ns: list[int] = field(default_factory=list)
@@ -71,11 +41,8 @@ class TimingResult:
 
     @property
     def p95_ms(self) -> float:
-        if not self.times_ns:
-            return 0.0
-        sorted_times = sorted(self.times_ns)
-        idx = int(len(sorted_times) * 0.95)
-        return sorted_times[min(idx, len(sorted_times) - 1)] / 1e6
+        ordered = sorted(self.times_ns)
+        return ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)] / 1e6 if ordered else 0.0
 
     def add(self, time_ns: int) -> None:
         self.times_ns.append(time_ns)
@@ -83,10 +50,10 @@ class TimingResult:
 
 @dataclass
 class RigLogicStats:
-    """Stats from RigLogic collectCalculationStats method."""
+    """DNA workload dimensions recorded with each benchmark."""
 
-    calculation_type: str = ""
-    floating_point_type: str = ""
+    calculation_type: str = "native_frame"
+    floating_point_type: str = "float32"
     rbf_solver_count: int = 0
     neural_network_count: int = 0
     psd_count: int = 0
@@ -98,330 +65,130 @@ class RigLogicStats:
 
 @dataclass
 class ProfileResults:
-    """Container for all profiling results."""
+    """Native callback times are subsets of the full graph evaluation time."""
 
-    # Head Python timing
-    head_gui_control_update: TimingResult = field(
-        default_factory=lambda: TimingResult("head_gui_control_update")
-    )
-    head_raw_control_update: TimingResult = field(
-        default_factory=lambda: TimingResult("head_raw_control_update")
-    )
-    head_bone_transforms: TimingResult = field(
-        default_factory=lambda: TimingResult("head_bone_transforms")
-    )
-    head_shape_keys: TimingResult = field(
-        default_factory=lambda: TimingResult("head_shape_keys")
-    )
-    head_texture_masks: TimingResult = field(
-        default_factory=lambda: TimingResult("head_texture_masks")
-    )
-
-    # Head C++ timing
-    head_manager_calculate: TimingResult = field(
-        default_factory=lambda: TimingResult("head_manager_calculate")
-    )
-
-    # Body Python timing
-    body_raw_control_update: TimingResult = field(
-        default_factory=lambda: TimingResult("body_raw_control_update")
-    )
-    body_bone_transforms: TimingResult = field(
-        default_factory=lambda: TimingResult("body_bone_transforms")
-    )
-
-    # Body C++ timing
-    body_manager_calculate: TimingResult = field(
-        default_factory=lambda: TimingResult("body_manager_calculate")
-    )
-
-    # Full evaluation
-    full_evaluation: TimingResult = field(
-        default_factory=lambda: TimingResult("full_evaluation")
-    )
-
-    # C++ stats
+    head_evaluation: TimingResult = field(default_factory=lambda: TimingResult("head_evaluation"))
+    body_evaluation: TimingResult = field(default_factory=lambda: TimingResult("body_evaluation"))
+    full_evaluation: TimingResult = field(default_factory=lambda: TimingResult("full_evaluation"))
     head_stats: RigLogicStats = field(default_factory=RigLogicStats)
     body_stats: RigLogicStats = field(default_factory=RigLogicStats)
 
 
-class RigEvaluationProfiler:
-    """Profiler for MetaHuman DNA rig evaluation."""
+def get_active_rig_instance() -> Any:
+    """Resolve the benchmark character through the add-on's current selection API."""
+    from character_dna.utilities import get_active_rig_instance as get_instance
 
-    def __init__(self, rig_instance: RigInstance):
+    return get_instance()
+
+
+def _stats(reader: Any) -> RigLogicStats:
+    if reader is None:
+        return RigLogicStats()
+    return RigLogicStats(
+        joint_count=reader.getJointCount(),
+        blend_shape_channel_count=reader.getBlendShapeChannelCount(),
+        animated_map_count=reader.getAnimatedMapCount(),
+        rbf_solver_count=reader.getRBFSolverCount(),
+        neural_network_count=reader.getNeuralNetworkCount(),
+        psd_count=reader.getPSDCount(),
+    )
+
+
+class RigEvaluationProfiler:
+    """Benchmark changed inputs, including Blender output drivers and deformation."""
+
+    def __init__(self, rig_instance: Any):
         self.rig_instance = rig_instance
         self.results = ProfileResults()
 
-    def _time_function(
-        self, func: Callable[..., Any], *args: Any, **kwargs: Any
-    ) -> tuple[Any, int]:
-        """Time a function call and return (result, time_ns)."""
-        start = time.perf_counter_ns()
-        result = func(*args, **kwargs)
-        return result, time.perf_counter_ns() - start
+    def run_benchmark(self, iterations: int = 100, warmup: int = 10) -> ProfileResults:  # noqa: PLR0912
+        """Time the actual live path and restore all input poses and instrumentation."""
+        from character_dna.runtime import engine
 
-    def _collect_riglogic_stats(self, dna_reader: Any) -> RigLogicStats:
-        """Collect stats from DNA reader."""
-        # TODO: Use collectCalculationStats if available in bindings
+        if iterations < 1 or warmup < 0:
+            raise ValueError("Use at least one iteration and nonnegative warmup")
+        instance = self.rig_instance
+        instance.evaluate()
+        if not engine.active(instance):
+            raise RuntimeError("The benchmark requires an active native runtime")
+        controls = []
+        if instance.face_board:
+            for name in ("CTRL_C_jaw", "CTRL_L_brow_down", "CTRL_C_eye"):
+                bone = instance.face_board.pose.bones.get(name)
+                if bone:
+                    controls.append((instance.face_board, bone, "location", bone.location.copy()))
+        if instance.body_rig:
+            for name in ("upperarm_l", "neck_01"):
+                bone = instance.body_rig.pose.bones.get(name)
+                if bone:
+                    controls.append((instance.body_rig, bone, "rotation_quaternion", bone.rotation_quaternion.copy()))
+        if not controls:
+            raise RuntimeError("The benchmark fixture has no controllable rig inputs")
+        self.results = ProfileResults(
+            head_stats=_stats(instance.head_dna_reader), body_stats=_stats(instance.body_dna_reader)
+        )
+        original = bpy.app.driver_namespace[engine.NAMESPACE]
+        identity = engine.instance_id(instance)
+        collecting = False
+
+        def measured_solve(owner: Any, graph: Any) -> float:
+            start = time.perf_counter_ns()
+            result = original(owner, graph)
+            elapsed = time.perf_counter_ns() - start
+            if collecting and owner.get("instance_id") == identity:
+                metric = getattr(self.results, f"{owner['component']}_evaluation", None)
+                if metric is not None:
+                    metric.add(elapsed)
+            return result
+
+        bpy.app.driver_namespace[engine.NAMESPACE] = measured_solve
         try:
-            return RigLogicStats(
-                calculation_type="",  # Not available from reader
-                floating_point_type="",  # Not available from reader
-                rbf_solver_count=dna_reader.getRBFSolverCount()
-                if hasattr(dna_reader, "getRBFSolverCount")
-                else 0,
-                neural_network_count=dna_reader.getNeuralNetworkCount()
-                if hasattr(dna_reader, "getNeuralNetworkCount")
-                else 0,
-                psd_count=0,  # Not directly available
-                blend_shape_channel_count=dna_reader.getBlendShapeChannelCount()
-                if hasattr(dna_reader, "getBlendShapeChannelCount")
-                else 0,
-                animated_map_count=dna_reader.getAnimatedMapCount()
-                if hasattr(dna_reader, "getAnimatedMapCount")
-                else 0,
-                joint_count=dna_reader.getJointCount()
-                if hasattr(dna_reader, "getJointCount")
-                else 0,
-                joint_delta_value_count=0,  # Not directly available
-            )
-        except Exception:
-            return RigLogicStats()
-
-    def profile_head_evaluation(self) -> None:
-        """Profile the head rig evaluation components."""
-        ri = self.rig_instance
-        if not ri.head_initialized:
-            ri.head_initialize()
-        if not ri.head_manager or not ri.head_instance:
-            return
-
-        _, t = self._time_function(ri.update_head_gui_control_values)
-        self.results.head_gui_control_update.add(t)
-
-        _, t = self._time_function(ri.update_head_raw_control_values)
-        self.results.head_raw_control_update.add(t)
-
-        _, t = self._time_function(ri.head_manager.calculate, ri.head_instance)
-        self.results.head_manager_calculate.add(t)
-
-        _, t = self._time_function(ri.update_head_bone_transforms)
-        self.results.head_bone_transforms.add(t)
-
-        _, t = self._time_function(ri.update_head_shape_keys)
-        self.results.head_shape_keys.add(t)
-
-        _, t = self._time_function(ri.update_head_texture_masks)
-        self.results.head_texture_masks.add(t)
-
-        # Collect stats only once (on first iteration)
-        if self.results.head_stats.joint_count == 0 and ri.head_dna_reader:
-            self.results.head_stats = self._collect_riglogic_stats(ri.head_dna_reader)
-
-    def profile_body_evaluation(self) -> None:
-        """Profile the body rig evaluation components."""
-        ri = self.rig_instance
-        if not ri.body_initialized:
-            ri.body_initialize()
-        if not ri.body_manager or not ri.body_instance:
-            return
-
-        _, t = self._time_function(ri.update_body_raw_control_values)
-        self.results.body_raw_control_update.add(t)
-
-        _, t = self._time_function(ri.body_manager.calculate, ri.body_instance)
-        self.results.body_manager_calculate.add(t)
-
-        _, t = self._time_function(ri.update_body_bone_transforms)
-        self.results.body_bone_transforms.add(t)
-
-        # Collect stats only once (on first iteration)
-        if self.results.body_stats.joint_count == 0 and ri.body_dna_reader:
-            self.results.body_stats = self._collect_riglogic_stats(ri.body_dna_reader)
-
-    def profile_full_evaluation(self) -> None:
-        """Profile a full rig evaluation."""
-        start = time.perf_counter_ns()
-        self.rig_instance.evaluate(component="all")
-        self.results.full_evaluation.add(time.perf_counter_ns() - start)
-
-    def run_benchmark(self, iterations: int = 100, warmup: int = 10) -> ProfileResults:
-        """Run benchmark with warmup iterations."""
-        print(f"Starting benchmark: {warmup} warmup + {iterations} iterations")
-
-        for _ in range(warmup):
-            self.profile_head_evaluation()
-            self.profile_body_evaluation()
-
-        self.results = ProfileResults()
-
-        for i in range(iterations):
-            self.profile_head_evaluation()
-            self.profile_body_evaluation()
-            self.profile_full_evaluation()
-            if (i + 1) % 25 == 0:
-                print(f"  Completed {i + 1}/{iterations}")
-
+            for iteration in range(warmup + iterations):
+                value = (iteration % 19 + 1) / 20.0
+                for owner, bone, attribute, _saved in controls:
+                    if attribute == "location":
+                        bone.location.y = value
+                    else:
+                        bone.rotation_quaternion = (1.0, value * 0.2, 0.0, 0.0)
+                    owner.update_tag()
+                collecting = iteration >= warmup
+                start = time.perf_counter_ns()
+                bpy.context.view_layer.update()
+                elapsed = time.perf_counter_ns() - start
+                if collecting:
+                    self.results.full_evaluation.add(elapsed)
+            for component in ("head", "body"):
+                if (
+                    getattr(instance, f"{component}_rig")
+                    and getattr(self.results, f"{component}_evaluation").count < iterations
+                ):
+                    raise RuntimeError(f"The {component} callback was not evaluated for every timed sample")
+        finally:
+            bpy.app.driver_namespace[engine.NAMESPACE] = original
+            for owner, bone, attribute, saved in controls:
+                setattr(bone, attribute, saved)
+                owner.update_tag()
+            bpy.context.view_layer.update()
         return self.results
 
     def print_report(self) -> None:
-        """Print profiling report."""
-        r = self.results
-
-        def row(name: str, t: TimingResult) -> None:
-            print(
-                f"  {name:25s} | mean: {t.mean_ms:7.3f}ms | p95: {t.p95_ms:7.3f}ms | max: {t.max_ms:7.3f}ms"
-            )
-
-        print("\n" + "=" * 80)
-        print("RIG EVALUATION PROFILING REPORT")
-        print("=" * 80)
-
-        print("\n--- HEAD (Python) ---")
-        row("GUI Control Update", r.head_gui_control_update)
-        row("Raw Control Update", r.head_raw_control_update)
-        row("Bone Transforms", r.head_bone_transforms)
-        row("Shape Keys", r.head_shape_keys)
-        row("Texture Masks", r.head_texture_masks)
-
-        print("\n--- HEAD (C++ RigLogic) ---")
-        row("manager.calculate()", r.head_manager_calculate)
-
-        print("\n--- BODY (Python) ---")
-        row("Raw Control Update", r.body_raw_control_update)
-        row("Bone Transforms", r.body_bone_transforms)
-
-        print("\n--- BODY (C++ RigLogic) ---")
-        row("manager.calculate()", r.body_manager_calculate)
-
-        print("\n--- FULL EVALUATION ---")
-        row("Full Evaluate", r.full_evaluation)
-
-        print("\n--- C++ STATS (HEAD) via collectCalculationStats ---")
-        print(
-            f"  Joints: {r.head_stats.joint_count} | "
-            f"BlendShapes: {r.head_stats.blend_shape_channel_count} | "
-            f"RBFs: {r.head_stats.rbf_solver_count} | "
-            f"NNs: {r.head_stats.neural_network_count}"
-        )
-
-        print("\n--- C++ STATS (BODY) via collectCalculationStats ---")
-        print(
-            f"  Joints: {r.body_stats.joint_count} | "
-            f"BlendShapes: {r.body_stats.blend_shape_channel_count} | "
-            f"RBFs: {r.body_stats.rbf_solver_count} | "
-            f"NNs: {r.body_stats.neural_network_count}"
-        )
-
-        print("\n--- SUMMARY ---")
-        py_head = (
-            r.head_gui_control_update.mean_ms
-            + r.head_raw_control_update.mean_ms
-            + r.head_bone_transforms.mean_ms
-            + r.head_shape_keys.mean_ms
-            + r.head_texture_masks.mean_ms
-        )
-        py_body = r.body_raw_control_update.mean_ms + r.body_bone_transforms.mean_ms
-        cpp = r.head_manager_calculate.mean_ms + r.body_manager_calculate.mean_ms
-
-        print(f"  Python (Head + Body):  {py_head + py_body:.3f} ms")
-        print(f"  C++ (Head + Body):     {cpp:.3f} ms")
-        print(f"  Full Evaluation:       {r.full_evaluation.mean_ms:.3f} ms")
-        if r.full_evaluation.mean_ms > 0:
-            print(f"  Theoretical FPS:       {1000 / r.full_evaluation.mean_ms:.1f}")
-        print("=" * 80)
-
-    def export_results(
-        self,
-        output_path: str | Path = "reports/profiling",
-        output_format: str = "all",
-        iterations: int = 0,
-        warmup: int = 0,
-    ) -> list[Path]:
-        """
-        Export profiling results to files.
-
-        Args:
-            output_path: Directory to write output files.
-            output_format: Export format - "json", "csv", "markdown", or "all".
-            iterations: Number of iterations run (for metadata).
-            warmup: Number of warmup iterations (for metadata).
-
-        Returns:
-            List of paths to created files.
-        """
-        from .exporters import export_snapshot
-
-        return export_snapshot(
-            self.results, output_path, output_format, iterations, warmup
-        )
-
-
-def get_active_rig_instance() -> RigInstance | None:
-    """Get the active RigInstance from the scene."""
-    try:
-        # Try the current property name first
-        props = bpy.context.scene.character_dna  # type: ignore[attr-defined]
-        if hasattr(props, "rig_instance_list"):
-            instance_list = props.rig_instance_list
-            active_index = props.rig_instance_list_active_index
-        elif hasattr(props, "rig_logic_instance_list"):
-            instance_list = props.rig_logic_instance_list
-            active_index = props.rig_logic_instance_list_active_index
-        else:
-            return None
-
-        if not instance_list or len(instance_list) == 0:
-            return None
-
-        return instance_list[active_index]
-    except AttributeError:
-        return None
+        """Print only measured runtime stages; callback times are not standalone C++ timings."""
+        for metric in (self.results.head_evaluation, self.results.body_evaluation, self.results.full_evaluation):
+            print(f"{metric.name}: mean={metric.mean_ms:.3f}ms p95={metric.p95_ms:.3f}ms samples={metric.count}")
 
 
 def run_profiler(
-    iterations: int = 100,
-    warmup: int = 10,
-    export_path: str | Path | None = None,
-    export_format: str = "all",
-    enable_hud: bool = False,
-) -> ProfileResults | None:
-    """
-    Run the profiler on the active rig instance.
-
-    Args:
-        iterations: Number of benchmark iterations.
-        warmup: Number of warmup iterations.
-        export_path: Optional path to export results. If provided, exports after profiling.
-        export_format: Export format - "json", "csv", "markdown", or "all".
-        enable_hud: If True, enables the realtime performance HUD.
-
-    Returns:
-        ProfileResults or None if no active rig instance.
-    """
-    ri = get_active_rig_instance()
-    if not ri:
-        print("ERROR: No active rig instance. Load a MetaHuman DNA file first.")
-        return None
-
-    if enable_hud:
-        try:
-            from .viewport_hud import enable_hud as _enable_hud
-
-            _enable_hud()
-        except ImportError:
-            print("WARNING: Could not enable HUD - viewport_hud module not available")
-
-    profiler = RigEvaluationProfiler(ri)
-    profiler.run_benchmark(iterations=iterations, warmup=warmup)
+    iterations: int = 100, warmup: int = 10, export_path: str | Path | None = None, export_format: str = "all"
+) -> ProfileResults:
+    """Run the CI workload on the active character and optionally export its snapshot."""
+    instance = get_active_rig_instance()
+    if instance is None:
+        raise RuntimeError("Load a character before benchmarking")
+    profiler = RigEvaluationProfiler(instance)
+    results = profiler.run_benchmark(iterations, warmup)
     profiler.print_report()
-
     if export_path:
-        files = profiler.export_results(export_path, export_format, iterations, warmup)
-        print(f"\nExported results to: {[str(f) for f in files]}")
+        from .exporters import export_snapshot
 
-    return profiler.results
-
-
-if __name__ == "__main__":
-    run_profiler()
+        export_snapshot(results, export_path, export_format, iterations, warmup)
+    return results
