@@ -90,6 +90,9 @@ def end_render() -> None:
     global _post_render_pending, _suppress_evaluation
     _suppress_evaluation = True
     _post_render_pending = True
+    from .runtime.engine import clear_contexts
+
+    clear_contexts()
 
 
 def _apply_post_render_cleanup() -> None:
@@ -239,7 +242,9 @@ def _is_self_induced_echo(
 
 def _get_action_update_component(instance: "RigInstance", action_name: str) -> "ComponentType | None":
     """Which component of this instance the named action drives, if any."""
-    if not instance.auto_evaluate:
+    from .runtime.engine import active as native_active
+
+    if native_active(instance) or not instance.auto_evaluate:
         return None
 
     if instance.auto_evaluate_head and _uses_action(instance.face_board, action_name):
@@ -266,7 +271,9 @@ def _get_armature_update_component(
     instance: "RigInstance", armature_name: str, dependency_graph: bpy.types.Depsgraph | None
 ) -> "ComponentType | None":
     """Which component of this instance the named armature datablock drives, if any."""
-    if not instance.auto_evaluate:
+    from .runtime.engine import active as native_active
+
+    if native_active(instance) or not instance.auto_evaluate:
         return None
 
     if (
@@ -337,6 +344,12 @@ def rig_instance_listener(_: "Scene", dependency_graph: bpy.types.Depsgraph, is_
     if not scene_properties:
         return
 
+    from .runtime.engine import active as native_active
+
+    legacy_instances = [instance for instance in scene_properties.rig_instance_list if not native_active(instance)]
+    if not legacy_instances:
+        return
+
     # track the minimal set of instances that need to be updated and their components
     instance_updates = set()
 
@@ -348,13 +361,13 @@ def rig_instance_listener(_: "Scene", dependency_graph: bpy.types.Depsgraph, is_
 
             data_type = update.id.bl_rna.name  # type: ignore[attr-defined]
             if data_type == "Action":
-                for instance in scene_properties.rig_instance_list:
+                for instance in legacy_instances:
                     component = _get_action_update_component(instance, update.id.name)
                     if component:
                         instance_updates.add((instance, component))
 
             elif data_type == "Armature" and update.is_updated_transform:
-                for instance in scene_properties.rig_instance_list:
+                for instance in legacy_instances:
                     component = _get_armature_update_component(instance, update.id.name, dependency_graph)
                     if component:
                         instance_updates.add((instance, component))
@@ -419,6 +432,8 @@ def start_listening():
 
 
 class RigInstance(bpy.types.PropertyGroup):
+    from .runtime.controller import auto_evaluation_changed
+
     name: bpy.props.StringProperty(
         default="my_metahuman",
         description=(
@@ -431,8 +446,10 @@ class RigInstance(bpy.types.PropertyGroup):
         default=True,
         name="Auto Evaluate",
         description="Whether to automatically evaluate this rig instance when the scene is updated",
+        update=auto_evaluation_changed,
     )  # pyright: ignore[reportInvalidTypeForm]
     auto_evaluate_head: bpy.props.BoolProperty(
+        update=auto_evaluation_changed,
         default=True,
         name="Auto Evaluate Head",
         description=(
@@ -440,6 +457,7 @@ class RigInstance(bpy.types.PropertyGroup):
         ),
     )  # pyright: ignore[reportInvalidTypeForm]
     auto_evaluate_body: bpy.props.BoolProperty(
+        update=auto_evaluation_changed,
         default=True,
         name="Auto Evaluate Body",
         description=(
@@ -820,7 +838,9 @@ class RigInstance(bpy.types.PropertyGroup):
 
     @property
     def head_instance(self) -> "riglogic.RigInstance":
-        return self.data.get(self.cache_key("head", "instance"))  # pyright: ignore[reportReturnType]
+        from .runtime.engine import synchronize_legacy
+
+        return synchronize_legacy(self, "head", self.data.get(self.cache_key("head", "instance")))
 
     @property
     def head_dna_reader(self) -> "dna.BinaryStreamReader":
@@ -832,7 +852,9 @@ class RigInstance(bpy.types.PropertyGroup):
 
     @property
     def body_instance(self) -> "riglogic.RigInstance":
-        return self.data.get(self.cache_key("body", "instance"))  # pyright: ignore[reportReturnType]
+        from .runtime.engine import synchronize_legacy
+
+        return synchronize_legacy(self, "body", self.data.get(self.cache_key("body", "instance")))
 
     @property
     def body_dna_reader(self) -> "dna.BinaryStreamReader":
@@ -1486,6 +1508,9 @@ class RigInstance(bpy.types.PropertyGroup):
         garbage collection here would leave the destruction order undefined.
         """
         from .dna_io import release_dna_handle
+        from .runtime.controller import release
+
+        release(self)
 
         for descriptor in ("instance", "manager", "dna_reader"):
             release_dna_handle(self.data.get(self.cache_key(component, descriptor)))
@@ -2086,6 +2111,11 @@ class RigInstance(bpy.types.PropertyGroup):
         return bone_transforms
 
     def reset_body_raw_control_values(self):
+        from .runtime.engine import active as native_active
+
+        if native_active(self):
+            self.evaluate()
+            return
         # skip if the body rig is not set
         if not self.body_initialized:
             self.body_initialize()
@@ -2113,6 +2143,11 @@ class RigInstance(bpy.types.PropertyGroup):
         self.update_body_bone_transforms()
 
     def reset_head_raw_control_values(self):
+        from .runtime.engine import active as native_active
+
+        if native_active(self):
+            self.evaluate()
+            return
         # skip if the head rig is not set
         if not self.head_initialized:
             self.head_initialize()
@@ -2318,6 +2353,13 @@ class RigInstance(bpy.types.PropertyGroup):
             )
 
     def evaluate(self, component: "ComponentType" = "all", dependency_graph: bpy.types.Depsgraph | None = None):
+        from .runtime.engine import active as native_active
+
+        if native_active(self):
+            if dependency_graph is None and is_main_thread():
+                bpy.context.view_layer.update()
+            return
+
         # Only a real render (F12 / Render Animation) hands its handlers to a job thread that the
         # main thread is not servicing, so that is the only case worth blocking for. An OpenGL
         # playblast also runs off the main thread but drives the viewport from it, so waiting

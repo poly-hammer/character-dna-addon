@@ -56,6 +56,11 @@ FACE_BOARD_CONTROL_RATIO = 0.5
 MAX_REPORTED_NAMES = 10
 
 
+def is_face_board_animation_control(name: str, exclude_controls: frozenset[str] = frozenset()) -> bool:
+    """Return whether a node is an importable face-board control rather than a helper."""
+    return name.startswith(FACE_BOARD_CONTROL_PREFIX) and not name.endswith("_grp") and name not in exclude_controls
+
+
 def _format_names(names: Iterable[str]) -> str:
     """Return a short, sorted, comma separated preview of ``names``."""
     ordered = sorted(names)
@@ -229,8 +234,32 @@ class FaceBoardAnimationValidator(AnimationValidator):
 
     expected_kind = "face board animation"
 
+    def __init__(
+        self,
+        source_names: Iterable[str],
+        target_names: Iterable[str],
+        subject: str,
+        minimum_coverage: float = MINIMUM_BONE_COVERAGE,
+        exclude_controls: frozenset[str] = frozenset(),
+    ) -> None:
+        """Limit matching to importable controls while retaining original clip-type evidence."""
+        self._all_source_names = frozenset(source_names)
+        super().__init__(
+            (name for name in self._all_source_names if is_face_board_animation_control(name, exclude_controls)),
+            (name for name in target_names if is_face_board_animation_control(name, exclude_controls)),
+            subject,
+            minimum_coverage,
+        )
+
+    def validate(self) -> ValidationReport:
+        """Report a wrong-kind clip even when filtering leaves no importable controls."""
+        report = super().validate()
+        if not self._source_names or not self._target_names:
+            self._check_animation_type(report)
+        return report
+
     def _check_animation_type(self, report: ValidationReport) -> None:
-        if not looks_like_skeleton(self._source_names):
+        if not looks_like_skeleton(self._all_source_names):
             return
         report.add(
             code="wrong_animation_type",
@@ -268,6 +297,7 @@ def validate_face_board_animation(
     source_names: Iterable[str],
     target_names: Iterable[str],
     minimum_coverage: float = MINIMUM_BONE_COVERAGE,
+    exclude_controls: frozenset[str] = frozenset(),
 ) -> ValidationReport:
     """Validate an FBX clip against the face board.
 
@@ -275,8 +305,11 @@ def validate_face_board_animation(
         source_names: Node names found in the FBX file.
         target_names: Control bone names on the face board.
         minimum_coverage: Fraction of the smaller name set that must match.
+        exclude_controls: Control names intentionally ignored by the importer.
 
     Returns:
         The validation report.
     """
-    return FaceBoardAnimationValidator(source_names, target_names, "face board", minimum_coverage).validate()
+    return FaceBoardAnimationValidator(
+        source_names, target_names, "face board", minimum_coverage, exclude_controls
+    ).validate()

@@ -30,6 +30,7 @@ from ..fbx.writer import (
     write_face_board_animation,
     write_skeleton_animation,
 )
+from ..runtime.controller import with_legacy_runtime
 from ..typing import *  # noqa: F403
 from ..validators import ValidationReport, validate_face_board_animation, validate_skeleton_animation
 from .armature import get_pose_bone_local_transform
@@ -139,8 +140,7 @@ def validate_animation_clip(
     """
     bone_names = [bone.name for bone in armature.pose.bones] if armature.pose else []
     if is_face_board:
-        controls = [name for name in bone_names if name not in FACE_BOARD_EXCLUDED_CONTROLS]
-        return validate_face_board_animation(clip.node_names, controls)
+        return validate_face_board_animation(clip.node_names, bone_names, exclude_controls=FACE_BOARD_EXCLUDED_CONTROLS)
     return validate_skeleton_animation(clip.node_names, bone_names, component=component)
 
 
@@ -651,6 +651,7 @@ def flush_texture_mask_keyframes_to_action(
     return action
 
 
+@with_legacy_runtime
 def bake_face_board_to_action(
     instance: "RigInstance",
     armature_object: bpy.types.Object,
@@ -798,6 +799,7 @@ def _snapshot_source_fcurves(
     return snapshot
 
 
+@with_legacy_runtime
 def bake_body_to_action(  # noqa: PLR0912, PLR0915
     instance: "RigInstance",
     armature_object: bpy.types.Object,

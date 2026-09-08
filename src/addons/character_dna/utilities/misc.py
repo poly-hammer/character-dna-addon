@@ -346,6 +346,10 @@ def notify_rig_instances_changed(instance: "RigInstance | None" = None) -> None:
     removals (where the callback should simply re-derive its state from the current list).
     """
     from .. import post_setup_scene_callbacks
+    from ..runtime.controller import enabled, request_sync
+
+    if enabled():
+        request_sync()
 
     for callback in post_setup_scene_callbacks:
         try:
@@ -355,6 +359,10 @@ def notify_rig_instances_changed(instance: "RigInstance | None" = None) -> None:
 
 
 def setup_scene(*_: Any) -> None:
+    from ..runtime import controller, engine
+
+    engine.discard()
+    engine.invalidate()
     # Arm the main thread evaluation drain before anything that can fail: without it a render
     # blocks on evaluations nothing performs and every frame comes out frozen.
     ensure_main_thread_timer()
@@ -385,9 +393,13 @@ def setup_scene(*_: Any) -> None:
             logger.exception(f"Failed to set up rig instance '{instance.name}': {error}")
 
     start_listening()
+    controller.after_load()
 
 
 def teardown_scene(*_: Any) -> None:
+    from ..runtime import engine
+
+    engine.invalidate()
     scene_properties = getattr(bpy.context.scene, ToolInfo.NAME, object)
 
     for instance in getattr(scene_properties, "rig_instance_list", []):
@@ -396,6 +408,9 @@ def teardown_scene(*_: Any) -> None:
 
 
 def pre_undo(*_: Any) -> None:
+    from ..runtime.controller import before_undo
+
+    before_undo()
     context: "Context" = bpy.context  # type: ignore[attr-defined]  # noqa: UP037
     addon_window_manager_properties = get_addon_window_manager_properties(context)
     addon_scene_properties = get_addon_scene_properties(context)
@@ -425,6 +440,9 @@ def pre_undo(*_: Any) -> None:
 
 
 def post_undo(*_: Any) -> None:
+    from ..runtime.controller import after_undo
+
+    after_undo()
     context: "Context" = bpy.context  # type: ignore[attr-defined]  # noqa: UP037
     addon_window_manager_properties = get_addon_window_manager_properties(context)
 

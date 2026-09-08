@@ -1,10 +1,12 @@
+from typing import Any, cast
+
 import bpy
 import pytest
 
-from constants import TEST_ANIMATION_FOLDER
 from character_dna.constants import IS_BLENDER_5
 from character_dna.ui.callbacks import get_active_rig_instance
-from character_dna.utilities.action import get_channel_bag
+from character_dna.utilities.action import FACE_BOARD_EXCLUDED_CONTROLS, get_channel_bag
+from constants import TEST_ANIMATION_FOLDER
 
 
 @pytest.mark.parametrize(
@@ -32,13 +34,23 @@ def test_import_component_animation(load_full_dna_for_animation, component: str,
         ("MHC_FaceBoardROM.fbx"),
     ],
 )
-def test_import_face_board_animation(load_full_dna_for_animation, file_name: str):
+def test_import_face_board_animation(load_full_dna_for_animation, file_name: str, caplog):
     instance = get_active_rig_instance()
+    assert instance is not None
     file_path = TEST_ANIMATION_FOLDER / "head" / file_name
 
     bpy.ops.character_dna.import_face_board_animation(filepath=str(file_path))
 
     assert instance.face_board.animation_data.action.name == f"{instance.name}_face_board_{file_path.stem}"
+    assert not any("no matching face board bone" in record.getMessage() for record in caplog.records)
+    action = instance.face_board.animation_data.action
+    curves = cast("Any", get_channel_bag(action, instance.face_board.name)).fcurves
+    assert len(curves) > 0
+    for curve in curves:
+        name = curve.data_path.split('"', 2)[1]
+        assert name.startswith("CTRL_")
+        assert not name.endswith("_grp")
+        assert name not in FACE_BOARD_EXCLUDED_CONTROLS
 
 
 def test_body_animation_onto_face_board_is_rejected(load_full_dna_for_animation):

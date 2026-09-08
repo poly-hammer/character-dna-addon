@@ -1445,6 +1445,7 @@ class DuplicateRigInstance(bpy.types.Operator):
 
     bl_idname = f"{ToolInfo.NAME}.duplicate_rig_instance"
     bl_label = "Duplicate Rig Instance"
+    bl_options = {"REGISTER", "UNDO"}
 
     new_name: bpy.props.StringProperty(
         name="New Name",
@@ -1464,6 +1465,9 @@ class DuplicateRigInstance(bpy.types.Operator):
         default=True,
     )  # pyright: ignore[reportInvalidTypeForm]
 
+    from .runtime.controller import native_scene_operation
+
+    @native_scene_operation
     def execute(self, context: "Context") -> set[str]:  # noqa: PLR0912, PLR0915
         new_folder = Path(bpy.path.abspath(self.new_folder))
         if not bpy.path.abspath(self.new_folder) and not bpy.data.filepath:

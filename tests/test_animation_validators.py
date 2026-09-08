@@ -1,5 +1,6 @@
 import pytest
 
+from character_dna.constants import EXCLUDED_FACE_BOARD_CONTROLS, EYE_AIM_BONES, FACE_BOARD_SWITCHES
 from character_dna.validators import (
     Severity,
     validate_face_board_animation,
@@ -40,6 +41,8 @@ FACE_BOARD_CONTROLS = [
     "CTRL_R_brow_down",
 ]
 
+EXCLUDED_CONTROLS = frozenset(EXCLUDED_FACE_BOARD_CONTROLS) | frozenset(EYE_AIM_BONES) | frozenset(FACE_BOARD_SWITCHES)
+
 
 def codes(report) -> set[str]:
     return {issue.code for issue in report.issues}
@@ -56,6 +59,45 @@ def test_matching_face_board_animation_is_valid():
     report = validate_face_board_animation(FACE_BOARD_CONTROLS, FACE_BOARD_CONTROLS)
 
     assert report.is_valid
+
+
+@pytest.mark.parametrize(
+    "name",
+    sorted(
+        set(EXCLUDED_FACE_BOARD_CONTROLS)
+        | set(EYE_AIM_BONES)
+        | set(FACE_BOARD_SWITCHES)
+        | {"FRM_C_tongue_move", "GRP_faceGUI", "headGui_grp", "headRig_grp", "CTRL_helper_grp", "camera"}
+    ),
+)
+def test_face_board_helpers_are_not_validated(name: str):
+    report = validate_face_board_animation(
+        [*FACE_BOARD_CONTROLS, name], FACE_BOARD_CONTROLS, exclude_controls=EXCLUDED_CONTROLS
+    )
+
+    assert report.is_valid
+    assert not report.issues
+
+
+def test_face_board_unknown_control_still_warns():
+    report = validate_face_board_animation(
+        [*FACE_BOARD_CONTROLS, "CTRL_missing", "CTRL_faceGUI", "FRM_C_tongue_move"],
+        FACE_BOARD_CONTROLS,
+        exclude_controls=EXCLUDED_CONTROLS,
+    )
+
+    assert report.is_valid
+    assert codes(report) == {"node_unexpected"}
+    assert report.warnings[0].actual == 1
+    assert "CTRL_missing" in report.warnings[0].message
+
+
+def test_face_board_helpers_cannot_satisfy_coverage():
+    helpers = [*FACE_BOARD_SWITCHES, *EXCLUDED_FACE_BOARD_CONTROLS, *EYE_AIM_BONES]
+    report = validate_face_board_animation(helpers, helpers, exclude_controls=EXCLUDED_CONTROLS)
+
+    assert not report.is_valid
+    assert "node_unexpected" not in codes(report)
 
 
 def test_extra_fbx_nodes_only_warn():
