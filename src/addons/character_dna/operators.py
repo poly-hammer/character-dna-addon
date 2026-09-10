@@ -22,6 +22,7 @@ from .constants import (
 from .dna_io import DNACalibrator, DNAExporter
 from .fbx.reader import FbxAnimationClip
 from .properties import BlendFileCharacterCollection, CharacterImportProperties
+from .runtime import controller, engine
 from .typing import *  # noqa: F403
 from .ui import callbacks, importer
 from .validators import ValidationReport
@@ -148,6 +149,7 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
 
     bl_idname = f"{ToolInfo.NAME}.append_or_link_metahuman"
     bl_label = "Import"
+    bl_options = {"REGISTER", "UNDO"}
     filename_ext = ".blend"
 
     filter_glob: bpy.props.StringProperty(
@@ -168,7 +170,7 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
     meta_human_list: bpy.props.CollectionProperty(type=BlendFileCharacterCollection)  # pyright: ignore[reportInvalidTypeForm]
     meta_human_names: bpy.props.StringProperty(default="")  # pyright: ignore[reportInvalidTypeForm]
 
-    def execute(self, context: "Context") -> set[str]:  # noqa: PLR0912, PLR0915
+    def execute(self, context: "Context") -> set[str]:
         file_path = self.filepath  # type: ignore[attr-defined]
         if not file_path:
             self.report({"ERROR"}, "You must select a .blend file")
@@ -192,8 +194,6 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
                 f"running Blender {bpy.app.version_string}. This may cause import issues.",
             )
 
-        addon_scene_properties = utilities.get_addon_scene_properties(context)
-
         # this is for headless imports and automated tests
         if self.meta_human_names:
             self.meta_human_list.clear()
@@ -202,12 +202,36 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
                 item.name = name
                 item.include = True
 
+        data, error = utilities.extract_rig_instance_data_from_blend_file(abs_file_path)
+        if error:
+            logger.error(error)
+            self.report({"ERROR"}, f"Failed to extract rig instance data from blend file: {error}")
+            return {"CANCELLED"}
+        if not data:
+            self.report({"ERROR"}, "Failed to read rig instance data in blend file")
+            return {"CANCELLED"}
+
+        try:
+            engine.discard()
+            try:
+                self._import_collections(context, file_path, data)
+            finally:
+                controller.reconcile()
+        except Exception as error:
+            logger.exception("Failed to import character collections")
+            self.report({"ERROR"}, f"Failed to import character: {error}")
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+    def _import_collections(self, context: "Context", file_path: str, data: dict) -> None:  # noqa: PLR0912
+        addon_scene_properties = utilities.get_addon_scene_properties(context)
         # track the current control objects
         current_control_objects = []
         for instance in addon_scene_properties.rig_instance_list:
             if instance.face_board:
                 current_control_objects.extend(pose_bone.custom_shape for pose_bone in instance.face_board.pose.bones)
 
+        current_scenes = set(bpy.data.scenes)
         collection_names = []
         with bpy.data.libraries.load(
             filepath=file_path,
@@ -222,25 +246,28 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
                             data_to.collections.append(collection_name)
                             collection_names.append(collection_name)
 
-        # extract the rig instance data from the blend file
-        data, error = utilities.extract_rig_instance_data_from_blend_file(Path(bpy.path.abspath(file_path)))
-        if error:
-            logger.error(error)
-            self.report({"ERROR"}, f"Failed to extract rig instance data from blend file: {error}")
-            return {"CANCELLED"}
+        for scene in set(bpy.data.scenes) - current_scenes:
+            bpy.data.scenes.remove(scene)
 
-        if not data:
-            self.report({"ERROR"}, "Failed to read rig instance data in blend file")
-            return {"CANCELLED"}
+        engine.discard()
 
         # link the collections to the scene
-        for collection_name in collection_names:
-            collection = bpy.data.collections.get(collection_name)
+        for collection_name, imported_collection in zip(collection_names, data_to.collections, strict=True):
+            collection = imported_collection
             if collection and context.scene:
                 context.scene.collection.children.link(collection)
+                if self.operation_type == "LINK":
+                    collection = collection.override_hierarchy_create(
+                        context.scene, context.view_layer, do_fully_editable=True
+                    )
+                    collection.name = f"{collection_name}_linked"
+                    for container in collection.children_recursive:
+                        if container.name == f"{collection_name}_drivers":
+                            container.name = f"{collection_name}_linked_drivers"
+                    engine.discard()
 
             # delete the face board and its control object shapes if they exist
-            face_board = bpy.data.objects.get(f"{collection_name}_{FACE_BOARD_NAME}")
+            face_board = collection.all_objects.get(f"{collection_name}_{FACE_BOARD_NAME}")
             if face_board and face_board.pose:
                 for pose_bone in face_board.pose.bones:
                     if pose_bone.custom_shape and pose_bone.custom_shape not in current_control_objects:
@@ -253,11 +280,11 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
             # Extract the rig instance data from the .blend file and set them on the new rig instance
             instance = utilities.add_rig_instance(name=collection_name)
             instance.head_dna_file_path = data[collection_name]["head_dna_file_path"]
-            instance.head_mesh = bpy.data.objects.get(data[collection_name]["head_mesh"] or "")
-            instance.head_rig = bpy.data.objects.get(data[collection_name]["head_rig"] or "")
+            instance.head_mesh = collection.all_objects.get(data[collection_name]["head_mesh"] or "")
+            instance.head_rig = collection.all_objects.get(data[collection_name]["head_rig"] or "")
             instance.head_material = bpy.data.materials.get(data[collection_name]["head_material"] or "")
-            instance.body_mesh = bpy.data.objects.get(data[collection_name]["body_mesh"] or "")
-            instance.body_rig = bpy.data.objects.get(data[collection_name]["body_rig"] or "")
+            instance.body_mesh = collection.all_objects.get(data[collection_name]["body_mesh"] or "")
+            instance.body_rig = collection.all_objects.get(data[collection_name]["body_rig"] or "")
             instance.body_material = bpy.data.materials.get(data[collection_name]["body_material"] or "")
             instance.body_dna_file_path = data[collection_name]["body_dna_file_path"]
             instance.output.folder_path = data[collection_name]["output_folder_path"]
@@ -277,12 +304,11 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
                     face_board_object=instance.face_board,
                 )
                 if self.operation_type == "LINK":
-                    if collection:
-                        utilities.group_face_board_with_linked_collection(
-                            face_board=instance.face_board,
-                            linked_collection=collection,
-                            collection_name=collection_name,
-                        )
+                    utilities.group_face_board_with_linked_collection(
+                        face_board=instance.face_board,
+                        linked_collection=collection,
+                        collection_name=collection_name,
+                    )
                 else:
                     utilities.move_to_collection(
                         scene_objects=[instance.face_board], collection_name=collection_name, exclusively=True
@@ -300,8 +326,6 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
                     body_rig_object=instance.body_rig,
                     bone_name="CTRL_C_eyesAim",
                 )
-
-        return {"FINISHED"}
 
 
 class ImportAnimationBase(bpy.types.Operator):

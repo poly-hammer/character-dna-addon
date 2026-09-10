@@ -12,11 +12,23 @@ from character_dna.runtime import controller, engine
 from character_dna.utilities import get_active_rig_instance, get_addon_preferences
 
 
-def test_import_uses_runtime_without_opt_in(load_head_only_dna):
+@pytest.mark.parametrize("import_fixture", ["load_head_only_dna", "load_head_dna"])
+def test_import_uses_runtime_without_opt_in(request: pytest.FixtureRequest, import_fixture: str) -> None:
     """An ordinary import installs the only evaluator without a preferences toggle."""
+    request.getfixturevalue(import_fixture)
     instance = get_active_rig_instance()
     assert engine.active(instance), controller.status()
     assert "experimental_native_riglogic" not in get_addon_preferences().bl_rna.properties
+    drivers = bpy.data.collections.get(f"{instance.name}_drivers")
+    assert drivers is not None
+    assert drivers in bpy.data.collections[instance.name].children.values()
+    assert drivers not in bpy.context.scene.collection.children.values()
+    expected_components = {"head", "switches"}
+    if import_fixture == "load_head_dna":
+        expected_components.add("body")
+    assert {carrier["component"] for carrier in engine.carriers(instance)} == expected_components
+    for carrier in engine.carriers(instance):
+        assert tuple(carrier.users_collection) == (drivers,)
     instance.face_board.pose.bones["CTRL_C_jaw"].location.y = 0.8
     instance.face_board.update_tag()
     bpy.context.view_layer.update()

@@ -70,7 +70,7 @@ def carriers(instance: Any = None) -> list[Any]:
     return [
         obj
         for obj in bpy.data.objects
-        if obj.get(CARRIER_MARKER) == 1 and (identity is None or obj.get("instance_id") == identity)
+        if not obj.library and obj.get(CARRIER_MARKER) == 1 and (identity is None or obj.get("instance_id") == identity)
     ]
 
 
@@ -199,6 +199,24 @@ def restore() -> None:
             logger.exception("Unable to restore native rig runtime")
 
 
+def _link_carrier(instance: Any, carrier: bpy.types.Object) -> None:
+    scene = instance.id_data
+    parent = bpy.data.collections.get((instance.name, None))
+    if parent is None:
+        parent = bpy.data.collections.new(instance.name)
+    if parent not in scene.collection.children_recursive:
+        scene.collection.children.link(parent)
+    name = f"{instance.name}_drivers"
+    collection = bpy.data.collections.get((name, None))
+    if collection is None:
+        collection = bpy.data.collections.new(name)
+    if collection not in parent.children.values():
+        parent.children.link(collection)
+    if collection in scene.collection.children.values():
+        scene.collection.children.unlink(collection)
+    collection.objects.link(carrier)
+
+
 def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
     """Bind initialized rig data; roll back the whole instance on failure."""
     available, reason = capability()
@@ -282,7 +300,7 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
                 carrier["gui"] = [
                     {"index": index, "name": name, "axis": axis} for index, name, axis in instance.head_gui_control_plan
                 ]
-            scene.collection.objects.link(carrier)
+            _link_carrier(instance, carrier)
             carrier.hide_select = True
             carrier.empty_display_size = 0.001
             install_targets(carrier, targets)
@@ -664,7 +682,7 @@ def _install_switches(instance: Any, scene: Any, identity: str) -> None:
     carrier["visibility_start"] = visibility_start
     carrier["epoch"] = 0.0
     carrier["outputs"] = values
-    scene.collection.objects.link(carrier)
+    _link_carrier(instance, carrier)
     carrier.hide_select = True
     carrier.empty_display_size = 0.001
     install_targets(carrier, targets)

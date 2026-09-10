@@ -3,8 +3,9 @@ from pathlib import Path
 import bpy
 import pytest
 
-from constants import TEST_DNA_FOLDER
+from character_dna.runtime import engine
 from character_dna.ui.callbacks import get_active_rig_instance
+from constants import TEST_DNA_FOLDER
 
 
 @pytest.mark.parametrize(
@@ -12,6 +13,8 @@ from character_dna.ui.callbacks import get_active_rig_instance
     [
         ("APPEND", ["ada"], "ada2"),
         ("LINK", ["ada"], "ada2"),
+        ("APPEND", ["ada"], ""),
+        ("LINK", ["ada"], ""),
     ],
 )
 def test_reference_blend_file(
@@ -20,6 +23,7 @@ def test_reference_blend_file(
     operation: str,
     metahuman_names: list[str],
     current_metahuman_name: str,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     from fixtures.scene import load_dna
 
@@ -35,16 +39,24 @@ def test_reference_blend_file(
         pytest.fail("Rig instance should be created after loading DNA")
 
     # Rename the current instance to avoid name clashes
-    instance.name = current_metahuman_name
+    if current_metahuman_name:
+        instance.name = current_metahuman_name
+    else:
+        bpy.ops.wm.read_homefile(app_template="")
 
-    bpy.ops.character_dna.append_or_link_metahuman(  # type: ignore
+    monkeypatch.setattr(bpy.context.preferences.filepaths, "use_scripts_auto_execute", True)
+    scene_names = {scene.name for scene in bpy.data.scenes}
+
+    result = bpy.ops.character_dna.append_or_link_metahuman(  # type: ignore
         filepath=str(setup_reference_blend_file), operation_type=operation, meta_human_names=",".join(metahuman_names)
     )
+    assert result == {"FINISHED"}
 
     instances = list(bpy.context.scene.character_dna.rig_instance_list)  # type: ignore
     instance_names = [instance.name for instance in instances]
 
-    for name in [*metahuman_names, current_metahuman_name]:
+    assert {scene.name for scene in bpy.data.scenes} == scene_names
+    for name in [*metahuman_names, *([current_metahuman_name] if current_metahuman_name else [])]:
         assert name in instance_names, f"Rig instance {name} should be present in the scene"
 
     for instance in instances:
@@ -68,3 +80,38 @@ def test_reference_blend_file(
         assert instance.face_board.name not in root_objects, (
             f"Face board for {name} should not be loose in the scene root collection"
         )
+
+    for reload in (False, True):
+        if reload:
+            saved_path = temp_folder / f"{operation}_{current_metahuman_name}_evaluated.blend"
+            bpy.ops.wm.save_as_mainfile(filepath=str(saved_path))
+            bpy.ops.wm.open_mainfile(filepath=str(saved_path))
+        instances = list(bpy.context.scene.character_dna.rig_instance_list)  # type: ignore
+        assert {instance.name for instance in instances} == set(instance_names)
+        for instance in instances:
+            assert engine.active(instance)
+            if instance.name in metahuman_names and operation == "LINK":
+                assert instance.head_rig.override_library is not None
+                assert instance.body_rig.override_library is not None
+            face_board = instance.face_board
+            face_board.pose.bones["CTRL_C_jaw"].location.y = 0.0
+            face_board.update_tag()
+            bpy.context.view_layer.update()
+            before = {other.name: _jaw_matrix(other) for other in instances}
+            face_board.pose.bones["CTRL_C_jaw"].location.y = 0.8
+            face_board.update_tag()
+            bpy.context.view_layer.update()
+            assert before[instance.name] != _jaw_matrix(instance), (
+                f"Face board should drive head bones for {instance.name} after {operation} (reload={reload})"
+            )
+            for other in instances:
+                if other != instance:
+                    assert _jaw_matrix(other) == before[other.name], "Face boards must evaluate independently"
+            face_board.pose.bones["CTRL_C_jaw"].location.y = 0.0
+            face_board.update_tag()
+            bpy.context.view_layer.update()
+            assert _jaw_matrix(instance) == before[instance.name]
+
+
+def _jaw_matrix(instance):
+    return instance.head_rig.evaluated_get(bpy.context.view_layer.depsgraph).pose.bones["FACIAL_C_Jaw"].matrix.copy()
