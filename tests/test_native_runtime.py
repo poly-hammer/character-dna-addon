@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from array import array
 from types import SimpleNamespace
 
@@ -10,6 +12,98 @@ import pytest
 
 from character_dna.runtime import controller, engine
 from character_dna.utilities import get_active_rig_instance, get_addon_preferences
+
+
+@pytest.mark.parametrize("schema", [1, 2])
+def test_missing_runtime_warns_once_without_changing_outputs(monkeypatch, caplog, schema):
+    """Unmigrated or temporarily unbound drivers must not emit evaluation exceptions."""
+    data = {"schema_version": schema, "epoch": 7.0, "outputs": array("d", [0.2, 0.8])}
+    original = SimpleNamespace(
+        name="MissingRuntime",
+        as_pointer=lambda: 123,
+        get=data.get,
+        is_property_overridable_library=lambda _path: True,
+    )
+    owner = SimpleNamespace(original=original, get=data.get)
+    monkeypatch.setattr(engine, "_records", {})
+    monkeypatch.setattr(engine, "_warnings", {})
+    with caplog.at_level(logging.WARNING, logger=engine.__name__):
+        for _ in range(3):
+            assert engine.solve(owner, None) == 7.0
+    assert list(data["outputs"]) == [0.2, 0.8]
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.WARNING
+    assert caplog.records[0].exc_info is None
+    assert ("Migrate Legacy Data" if schema == 1 else "Rebuild Native Evaluation") in caplog.text
+
+
+def test_runtime_still_rejects_original_output_storage(monkeypatch):
+    """An actual unsafe write attempt remains an error, not an initialization warning."""
+    original = SimpleNamespace(as_pointer=lambda: 123)
+    owner = SimpleNamespace(original=original, is_evaluated=False)
+    monkeypatch.setattr(engine, "_records", {123: {"carrier": original, "identity": "unsafe"}})
+    monkeypatch.setattr(engine, "_errors", {})
+    with pytest.raises(RuntimeError, match="evaluated carrier storage"):
+        engine.solve(owner, None)
+    assert "unsafe" in engine._errors
+
+
+@pytest.mark.parametrize("problem", ["legacy", "missing_dna", "corrupt_bindings", "native_failure"])
+def test_runtime_hydration_classifies_expected_states(monkeypatch, caplog, problem):
+    """Migration and moved files warn; broken current bindings and native failures error."""
+    data = {"schema_version": 1 if problem == "legacy" else 2, "instance_id": "test-rig"}
+    carrier = SimpleNamespace(
+        name="HydrationTest",
+        get=data.get,
+        as_pointer=lambda: 123,
+        is_property_overridable_library=lambda _path: True,
+    )
+    monkeypatch.setattr(engine, "_records", {})
+    monkeypatch.setattr(engine, "_warnings", {})
+    monkeypatch.setattr(engine, "_errors", {})
+    monkeypatch.setattr(engine, "capability", lambda: (True, "Available"))
+    monkeypatch.setattr(engine, "carriers", lambda: [carrier])
+    monkeypatch.setattr(
+        engine,
+        "carrier_issues",
+        lambda _carrier: ["Conflicting output driver"] if problem == "corrupt_bindings" else [],
+    )
+
+    def make_record(_carrier):
+        if problem == "legacy":
+            pytest.fail("Legacy data must not attempt native initialization")
+        if problem == "missing_dna":
+            raise FileNotFoundError("head.dna")
+        raise RuntimeError("Native frame plan failed")
+
+    monkeypatch.setattr(engine, "make_record", make_record)
+    with caplog.at_level(logging.WARNING):
+        engine.hydrate()
+        if problem in {"legacy", "missing_dna"}:
+            engine.hydrate()
+            assert len(caplog.records) == 1
+            assert caplog.records[0].levelno == logging.WARNING
+            assert caplog.records[0].exc_info is None
+            assert engine._errors == {}
+        else:
+            assert len(caplog.records) == 1
+            assert caplog.records[0].levelno == logging.ERROR
+            assert caplog.records[0].exc_info is not None
+            assert "test-rig" in engine._errors
+
+
+def test_runtime_adoption_clears_initialization_warning(monkeypatch):
+    """Successful adoption removes the temporary warning rather than leaving stale status."""
+    carrier = SimpleNamespace(as_pointer=lambda: 123)
+    instance = SimpleNamespace(as_pointer=lambda: 456)
+    monkeypatch.setattr(engine, "_records", {})
+    monkeypatch.setattr(engine, "_warnings", {123: "Not initialized", 456: "Not initialized"})
+    monkeypatch.setattr(engine, "capability", lambda: (True, "Available"))
+    monkeypatch.setattr(engine, "carriers", lambda _instance: [carrier])
+    monkeypatch.setattr(engine, "binding_issues", lambda _instance: [])
+    monkeypatch.setattr(engine, "make_record", lambda _carrier, _instance: {"component": "head"})
+    assert engine.adopt(instance) == 1
+    assert engine._warnings == {}
 
 
 @pytest.mark.parametrize("import_fixture", ["load_head_only_dna", "load_head_dna"])
@@ -70,6 +164,33 @@ def test_native_head_only(native_head):
         if reader.getRawControlName(index) == "CTRL_expressions.jawOpen"
     )
     assert native_head.head_instance.getRawControl(channel) > 0.5
+
+
+@pytest.mark.parametrize("layout", ["legacy_carriers", "handler"])
+def test_reconcile_legacy_runtime_reports_warning(native_head, monkeypatch, caplog, layout):
+    """Opening older rigs must not escalate expected migration to an operator error."""
+    if layout == "legacy_carriers":
+        for carrier in engine.carriers(native_head):
+            carrier["schema_version"] = 1
+        engine.release_records(native_head)
+    else:
+        engine.discard(native_head)
+        native_head.data[native_head.cache_key("head", "initialized")] = False
+    monkeypatch.setattr(engine, "_warnings", {})
+    monkeypatch.setattr(controller, "_status", "Runtime ready")
+    monkeypatch.setattr(controller, "_warning", "")
+    monkeypatch.setattr(controller, "rebuild", lambda _instance: pytest.fail("Migration must remain explicit"))
+    reports = []
+    operator = SimpleNamespace(report=lambda level, message: reports.append((level, message)))
+    with caplog.at_level(logging.WARNING):
+        assert controller.CHARACTER_DNA_OT_sync_native_runtime.execute(operator, bpy.context) == {"FINISHED"}
+        initial_count = len(caplog.records)
+        assert controller.CHARACTER_DNA_OT_sync_native_runtime.execute(operator, bpy.context) == {"FINISHED"}
+    assert initial_count > 0
+    assert len(caplog.records) == initial_count
+    assert all(record.levelno == logging.WARNING and record.exc_info is None for record in caplog.records)
+    assert reports == [({"WARNING"}, engine.MIGRATION_WARNING)] * 2
+    assert engine.status(native_head) == engine.MIGRATION_WARNING
 
 
 def test_native_without_face_board(native_head):

@@ -9,21 +9,42 @@ import uuid
 
 from array import array
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import bpy
 
 from ..constants import ToolInfo
-from .bindings import CARRIER_MARKER, Target, add_variable, install_targets, remove_targets, validate_targets
+from .bindings import (
+    CARRIER_MARKER,
+    Target,
+    add_variable,
+    install_targets,
+    owned_curve,
+    remove_targets,
+    validate_targets,
+)
 
 
 logger = logging.getLogger(__name__)
 NAMESPACE = "character_dna_native_solve_v1"
-_records: dict[str, dict[str, Any]] = {}
+SCHEMA_VERSION = 2
+SETTINGS = (
+    "auto_evaluate",
+    "auto_evaluate_head",
+    "auto_evaluate_body",
+    "evaluate_bones",
+    "evaluate_rbfs",
+    "evaluate_shape_keys",
+    "evaluate_texture_masks",
+)
+_records: dict[int, dict[str, Any]] = {}
 _models: dict[tuple[str, bool], Any] = {}
 _module: Any = None
 _generation = 0
 _errors: dict[str, str] = {}
+_warnings: dict[int, str] = {}
+MIGRATION_WARNING = "Legacy data detected. Run Migrate Legacy Data, then save the file."
 
 
 def capability() -> tuple[bool, str]:
@@ -66,26 +87,44 @@ def instance_id(instance: Any) -> str:
 
 def carriers(instance: Any = None) -> list[Any]:
     """Resolve original carrier IDs afresh after undo, remapping or loading."""
-    identity = instance_id(instance) if instance is not None else None
     return [
         obj
         for obj in bpy.data.objects
-        if not obj.library and obj.get(CARRIER_MARKER) == 1 and (identity is None or obj.get("instance_id") == identity)
+        if obj.get(CARRIER_MARKER) == 1 and (instance is None or _belongs_to(obj, instance))
     ]
+
+
+def _belongs_to(carrier: Any, instance: Any) -> bool:
+    component = carrier.get("component")
+    if component not in {"head", "body", "switches"}:
+        return False
+    field = "face_board" if component == "switches" else f"{component}_rig"
+    owner = getattr(instance, field, None) if hasattr(instance, "bl_rna") else instance.get(field)
+    if isinstance(owner, str):
+        owner = bpy.data.objects.get(owner)
+    return owner is not None and carrier.get("face" if component == "switches" else "rig") == owner
 
 
 def active(instance: Any) -> bool:
     """Whether native drivers own any output channels for the instance."""
-    identity = instance_id(instance)
-    return bool(identity) and any(record["identity"] == identity for record in _records.values())
+    return any(_belongs_to(record["carrier"], instance) for record in _records.values())
+
+
+def bound_carriers(instance: Any) -> list[Any]:
+    """Read active carrier ownership without traversing scene objects from the UI."""
+    return [record["carrier"] for record in _records.values() if _belongs_to(record["carrier"], instance)]
 
 
 def invalidate() -> None:
     """Release borrowed wrappers and sessions before graph/ID storage can disappear."""
+    from .ui_refresh import invalidate_migration
+
+    invalidate_migration()
     global _generation
     _generation += 1
     _records.clear()
     _models.clear()
+    _warnings.clear()
 
 
 def clear_contexts() -> None:
@@ -99,23 +138,158 @@ def clear_contexts() -> None:
 
 def discard(instance: Any = None) -> None:
     """Remove only owned drivers and carriers in a write-safe operator/lifecycle context."""
+    from .ui_refresh import invalidate_migration
+
+    invalidate_migration()
     for carrier in carriers(instance):
+        if carrier.library or carrier.override_library:
+            continue
         remove_targets(carrier)
         _errors.pop(carrier.get("instance_id", ""), None)
-        _records.pop(carrier.get("token", ""), None)
+        _records.pop(carrier.as_pointer(), None)
+        _warnings.pop(carrier.as_pointer(), None)
         bpy.data.objects.remove(carrier, do_unlink=True)
     if not _records:
         _models.clear()
         _errors.clear()
 
 
-def _resolve_instance(carrier: Any) -> Any:
-    scene = carrier.get("scene")
-    properties = getattr(scene, ToolInfo.NAME, None) if scene else None
-    for instance in getattr(properties, "rig_instance_list", []):
-        if instance_id(instance) == carrier["instance_id"]:
-            return instance
-    raise RuntimeError("Native carrier has no owning rig instance")
+def release_records(instance: Any = None) -> None:
+    """Release sessions without removing or modifying persisted driver bindings."""
+    if instance is None:
+        invalidate()
+        return
+    for carrier in carriers(instance):
+        _records.pop(carrier.as_pointer(), None)
+        _warnings.pop(carrier.as_pointer(), None)
+    _warnings.pop(instance.as_pointer(), None)
+    _errors.pop(instance_id(instance), None)
+
+
+def _resolve_instance(carrier: Any, scene: Any = None) -> Any:
+    scenes = [scene] if scene is not None else bpy.data.scenes
+    if not carrier.library:
+        for candidate in scenes:
+            if candidate.library:
+                continue
+            properties = getattr(candidate, ToolInfo.NAME, None)
+            for instance in getattr(properties, "rig_instance_list", []):
+                if _belongs_to(carrier, instance):
+                    return instance
+    settings = dict(carrier.get("settings", {}))
+    values: dict[str, Any] = {flag: bool(settings.get(flag, True)) for flag in SETTINGS}
+    values["view_options"] = SimpleNamespace(active_lod=settings.get("active_lod", "lod0"))
+    for component in ("head", "body"):
+        path = carrier.get(f"{component}_dna_file_path", "")
+        values[f"{component}_dna_file_path"] = bpy.path.abspath(path, library=carrier.library) if path else ""
+    values["get"] = lambda key, default=None: carrier.get("instance_id" if key == "native_runtime_id" else key, default)
+    values["name"] = carrier.get("character_name", "")
+    return SimpleNamespace(**values)
+
+
+def sync_settings(instance: Any, _context: Any = None) -> None:
+    """Publish local evaluation settings without introducing a Scene dependency."""
+    for carrier in carriers(instance):
+        if carrier.library or carrier.override_library:
+            continue
+        settings = {flag: bool(getattr(instance, flag)) for flag in SETTINGS}
+        settings["active_lod"] = instance.view_options.active_lod
+        if dict(carrier.get("settings", {})) != settings:
+            carrier["settings"] = settings
+            carrier.update_tag()
+
+
+def _describe_carrier(carrier: Any, instance: Any) -> None:
+    carrier["schema_version"] = SCHEMA_VERSION
+    carrier["character_name"] = instance.name
+    for component in ("head", "body"):
+        path = getattr(instance, f"{component}_dna_file_path")
+        carrier[f"{component}_dna_file_path"] = bpy.path.abspath(path) if path else ""
+    carrier["settings"] = {flag: bool(getattr(instance, flag)) for flag in SETTINGS}
+    carrier["settings"]["active_lod"] = instance.view_options.active_lod
+
+
+def carrier_issues(carrier: Any) -> list[str]:
+    """Validate a saved graph without installing drivers or requiring live sessions."""
+    issues = []
+    if carrier.get("schema_version") != SCHEMA_VERSION:
+        return [f"{carrier.name}: incompatible native binding schema; run Migrate Legacy Data"]
+    if carrier.get("scene") is not None:
+        issues.append(f"{carrier.name}: obsolete source scene dependency")
+    if not carrier.is_property_overridable_library('["targets"]'):
+        issues.append(f"{carrier.name}: native targets require migration for editable linking")
+    animation = carrier.animation_data
+    epoch = animation.drivers.find('["epoch"]') if animation else None
+    if epoch is None or NAMESPACE not in epoch.driver.expression:
+        issues.append(f"{carrier.name}: missing native solve driver")
+    for target in carrier.get("targets", []):
+        owner = target.get("owner")
+        if owner and target.get("embedded"):
+            owner = owner.node_tree
+        curve = (
+            owner.animation_data.drivers.find(target["path"], index=max(0, target["index"]))
+            if (owner and owner.animation_data)
+            else None
+        )
+        if curve is None or not owned_curve(curve, carrier):
+            issues.append(f"{carrier.name}: missing or conflicting output driver {target['path']}")
+    return issues
+
+
+def requires_migration(carrier: Any) -> bool:
+    """Recognize older persisted layouts, not failed sessions or corrupt current bindings."""
+    version = carrier.get("schema_version", 1)
+    return isinstance(version, int) and (
+        version < SCHEMA_VERSION
+        or (
+            version == SCHEMA_VERSION
+            and (carrier.get("scene") is not None or not carrier.is_property_overridable_library('["targets"]'))
+        )
+    )
+
+
+def binding_issues(instance: Any) -> list[str]:
+    """Report persisted runtime compatibility, independent of current evaluation state."""
+    found = carriers(instance)
+    issues = [issue for carrier in found for issue in carrier_issues(carrier)]
+    issues.extend(
+        f"Missing persisted {component} native runtime"
+        for component in ("head", "body")
+        if getattr(instance, f"{component}_rig")
+        and instance.auto_evaluate
+        and getattr(instance, f"auto_evaluate_{component}")
+        and not any(carrier.get("component") == component for carrier in found)
+    )
+    return issues
+
+
+def adopt(instance: Any = None) -> int:
+    """Hydrate compatible saved bindings without writing their original datablocks."""
+    from .ui_refresh import invalidate_migration
+
+    invalidate_migration()
+    available, reason = capability()
+    if not available:
+        raise RuntimeError(reason)
+    found = carriers(instance)
+    issues = (
+        binding_issues(instance)
+        if instance is not None
+        else [issue for carrier in found for issue in carrier_issues(carrier)]
+    )
+    if issues:
+        raise ValueError("; ".join(issues))
+    bpy.app.driver_namespace[NAMESPACE] = solve
+    count = 0
+    for carrier in found:
+        key = carrier.as_pointer()
+        if key not in _records:
+            _records[key] = make_record(carrier, instance)
+        _warnings.pop(key, None)
+        count += 1
+    if instance is not None:
+        _warnings.pop(instance.as_pointer(), None)
+    return count
 
 
 def native_module() -> Any:
@@ -187,13 +361,30 @@ def make_record(carrier: Any, instance: Any = None) -> dict[str, Any]:
 def restore() -> None:
     """Reconstruct native sessions from saved carrier metadata without changing IDs."""
     invalidate()
+    hydrate()
+
+
+def hydrate() -> None:
+    """Adopt newly loaded compatible carriers without retiring existing sessions."""
     if not capability()[0]:
         return
     bpy.app.driver_namespace[NAMESPACE] = solve
     for carrier in carriers():
         try:
+            if carrier.as_pointer() in _records:
+                continue
+            if requires_migration(carrier):
+                warn_unavailable(carrier, MIGRATION_WARNING)
+                continue
+            issues = carrier_issues(carrier)
+            if issues:
+                raise ValueError("; ".join(issues))
             record = make_record(carrier)
-            _records[carrier["token"]] = record
+            _records[carrier.as_pointer()] = record
+            _warnings.pop(carrier.as_pointer(), None)
+            _errors.pop(carrier.get("instance_id", ""), None)
+        except FileNotFoundError:
+            warn_unavailable(carrier, "DNA file not found. Update the DNA file path, then rebuild evaluation.")
         except Exception as error:
             _errors[carrier.get("instance_id", "")] = str(error)
             logger.exception("Unable to restore native rig runtime")
@@ -201,7 +392,7 @@ def restore() -> None:
 
 def _link_carrier(instance: Any, carrier: bpy.types.Object) -> None:
     scene = instance.id_data
-    parent = bpy.data.collections.get((instance.name, None))
+    parent = instance.get("reference_root") or bpy.data.collections.get((instance.name, None))
     if parent is None:
         parent = bpy.data.collections.new(instance.name)
     if parent not in scene.collection.children_recursive:
@@ -219,6 +410,9 @@ def _link_carrier(instance: Any, carrier: bpy.types.Object) -> None:
 
 def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
     """Bind initialized rig data; roll back the whole instance on failure."""
+    from .ui_refresh import invalidate_migration
+
+    invalidate_migration()
     available, reason = capability()
     if not available:
         raise RuntimeError(reason)
@@ -228,7 +422,6 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
         return
     identity = instance_id(instance) or uuid.uuid4().hex
     instance["native_runtime_id"] = identity
-    scene = instance.id_data
     prepared = []
     all_targets = []
     for component in ("body", "head"):
@@ -284,7 +477,7 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
             carrier[CARRIER_MARKER] = 1
             carrier["token"] = uuid.uuid4().hex
             carrier["instance_id"] = identity
-            carrier["scene"] = scene
+            _describe_carrier(carrier, instance)
             carrier["rig"] = rig
             carrier["component"] = component
             carrier["joint_count"] = len(plans)
@@ -304,11 +497,14 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
             carrier.hide_select = True
             carrier.empty_display_size = 0.001
             install_targets(carrier, targets)
+            carrier.property_overridable_library_set('["targets"]', True)
             curve = carrier.driver_add('["epoch"]')
+            assert isinstance(curve, bpy.types.FCurve)
             curve.keyframe_points.clear()
             for modifier in tuple(curve.modifiers):
                 curve.modifiers.remove(modifier)
             driver = curve.driver
+            assert driver is not None
             driver.use_self = True
             add_variable(driver, "preview_revision", carrier, '["preview_revision"]')
             for index, name in enumerate(sorted({name for _index, name, _axis in raw_plan})):
@@ -349,22 +545,16 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
                         variable.targets[0].bone_target = name
                         variable.targets[0].transform_type = "LOC_X"
                         variable.targets[0].transform_space = "WORLD_SPACE"
-            for flag in (
-                "auto_evaluate",
-                f"auto_evaluate_{component}",
-                "evaluate_bones",
-                "evaluate_rbfs",
-                "evaluate_shape_keys",
-                "evaluate_texture_masks",
-            ):
-                add_variable(driver, flag, scene, instance.path_from_id(flag))
-            add_variable(driver, "lod", scene, instance.view_options.path_from_id("active_lod"))
+            for flag in SETTINGS:
+                add_variable(driver, flag, carrier, f'["settings"]["{flag}"]')
             driver.expression = f"{NAMESPACE}(self, depsgraph)"
-            _records[carrier["token"]] = make_record(carrier)
+            _records[carrier.as_pointer()] = make_record(carrier, instance)
+            _warnings.pop(carrier.as_pointer(), None)
         if instance.head_rig and instance.face_board and instance.auto_evaluate_head:
-            _install_switches(instance, scene, identity)
+            _install_switches(instance, identity)
         bpy.app.driver_namespace[NAMESPACE] = solve
         _errors.pop(identity, None)
+        _warnings.pop(instance.as_pointer(), None)
     except Exception:
         discard(instance)
         raise
@@ -374,14 +564,15 @@ def solve(owner: Any, graph: Any) -> float:
     """Publish only the current evaluated carrier buffer, never original scene IDs."""
     from .frame import buffers, capture
 
-    token = owner["token"]
-    record = _records.get(token)
+    original = owner.original
+    record = _records.get(original.as_pointer())
     if record is None:
-        raise RuntimeError("Native rig requires initialization after loading or undo")
+        warn_unavailable(original)
+        return float(owner.get("epoch", 0.0))
     try:
         if not owner.is_evaluated or owner == record["carrier"]:
             raise RuntimeError("Native output publication requires evaluated carrier storage")
-        instance = _resolve_instance(record["carrier"])
+        instance = _resolve_instance(record["carrier"], graph.scene)
         component = record["component"]
         if component == "switches":
             face = record["face"].evaluated_get(graph)
@@ -456,7 +647,27 @@ def solve(owner: Any, graph: Any) -> float:
 
 def status(instance: Any) -> str:
     """Expose binding failures instead of silently reporting stale output as success."""
-    return _errors.get(instance_id(instance), "Native" if active(instance) else "Inactive")
+    warning = next(
+        (_warnings[owner.as_pointer()] for owner in [instance, *carriers(instance)] if owner.as_pointer() in _warnings),
+        None,
+    )
+    return _errors.get(instance_id(instance), warning or ("Native" if active(instance) else "Inactive"))
+
+
+def warn_unavailable(carrier: Any, message: str | None = None) -> None:
+    """Warn once per carrier and reason while expected runtime setup is unavailable."""
+    key = carrier.as_pointer()
+    if message is None:
+        if key in _warnings:
+            return
+        message = (
+            MIGRATION_WARNING
+            if requires_migration(carrier)
+            else "Native evaluation is not initialized. Rebuild Native Evaluation."
+        )
+    if _warnings.get(key) != message:
+        _warnings[key] = message
+        logger.warning("%s: %s", carrier.name, message)
 
 
 def errors() -> list[str]:
@@ -465,9 +676,12 @@ def errors() -> list[str]:
 
 
 def _head_record(instance: Any) -> dict[str, Any] | None:
-    identity = instance_id(instance)
     return next(
-        (record for record in _records.values() if record["identity"] == identity and record["component"] == "head"),
+        (
+            record
+            for record in _records.values()
+            if _belongs_to(record["carrier"], instance) and record["component"] == "head"
+        ),
         None,
     )
 
@@ -507,7 +721,7 @@ def preview_controls(instance: Any, state: Any, component: str = "head") -> bool
         (
             item
             for item in _records.values()
-            if item["identity"] == instance_id(instance) and item["component"] == component
+            if _belongs_to(item["carrier"], instance) and item["component"] == component
         ),
         None,
     )
@@ -594,7 +808,7 @@ def ui_raw_control_value(instance: Any, index: int, graph: Any) -> float | None:
     if not identity:
         return None
     for record in _records.values():
-        if record["identity"] != identity or record["component"] != "head":
+        if not _belongs_to(record["carrier"], instance) or record["component"] != "head":
             continue
         carrier = record["carrier"].evaluated_get(graph)
         key = (_generation, graph.as_pointer(), carrier.as_pointer(), graph.mode)
@@ -614,7 +828,7 @@ def ui_raw_control_value(instance: Any, index: int, graph: Any) -> float | None:
 def mark_authoring_current(instance: Any, component: str) -> None:
     """Keep an explicit tool calculation from being overwritten by a repeated getter."""
     for record in _records.values():
-        if record["identity"] == instance_id(instance) and record["component"] == component:
+        if _belongs_to(record["carrier"], instance) and record["component"] == component:
             record["authoring_revision"] = record["calls"]
 
 
@@ -624,7 +838,7 @@ def synchronize_authoring(instance: Any, component: str, state: Any) -> Any:
     if state is None or not identity:
         return state
     for record in _records.values():
-        if record["identity"] != identity or record["component"] != component:
+        if not _belongs_to(record["carrier"], instance) or record["component"] != component:
             continue
         context = record.get("last_context")
         if context is None or record.get("authoring_revision") == record["calls"]:
@@ -642,7 +856,7 @@ def synchronize_authoring(instance: Any, component: str, state: Any) -> Any:
     return state
 
 
-def _install_switches(instance: Any, scene: Any, identity: str) -> None:
+def _install_switches(instance: Any, identity: str) -> None:
     face = instance.face_board
     targets = []
     switches = []
@@ -675,7 +889,7 @@ def _install_switches(instance: Any, scene: Any, identity: str) -> None:
     carrier[CARRIER_MARKER] = 1
     carrier["token"] = uuid.uuid4().hex
     carrier["instance_id"] = identity
-    carrier["scene"] = scene
+    _describe_carrier(carrier, instance)
     carrier["component"] = "switches"
     carrier["face"] = face
     carrier["switches"] = switches
@@ -686,12 +900,15 @@ def _install_switches(instance: Any, scene: Any, identity: str) -> None:
     carrier.hide_select = True
     carrier.empty_display_size = 0.001
     install_targets(carrier, targets)
+    carrier.property_overridable_library_set('["targets"]', True)
     curve = carrier.driver_add('["epoch"]')
+    assert isinstance(curve, bpy.types.FCurve)
     curve.keyframe_points.clear()
     for modifier in tuple(curve.modifiers):
         curve.modifiers.remove(modifier)
+    assert curve.driver is not None
     curve.driver.use_self = True
     for index, name in enumerate(switches):
         add_variable(curve.driver, f"switch_{index}", face, face.pose.bones[name].path_from_id("location") + "[1]")
     curve.driver.expression = f"{NAMESPACE}(self, depsgraph)"
-    _records[carrier["token"]] = make_record(carrier)
+    _records[carrier.as_pointer()] = make_record(carrier, instance)

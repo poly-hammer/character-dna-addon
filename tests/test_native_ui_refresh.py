@@ -80,14 +80,20 @@ def test_removed_window_and_lifecycle_cleanup(sidebar):
     assert ui_refresh._refresh() is None
     sidebar.timers.is_registered.return_value = True
     ui_refresh.clear()
-    sidebar.timers.unregister.assert_called_once_with(ui_refresh._refresh)
+    sidebar.timers.unregister.assert_any_call(ui_refresh._refresh)
+    sidebar.timers.unregister.assert_any_call(ui_refresh._refresh_migration)
+    assert sidebar.timers.unregister.call_count == 2
 
 
 def test_raw_ui_snapshot_is_lazy_and_graph_local(monkeypatch):
     """One snapshot per visible graph revision; no UI reads of another render graph."""
     graphs = [handle(20, mode="VIEWPORT"), handle(21, mode="RENDER")]
     sessions = [object(), object()]
-    carrier = SimpleNamespace(evaluated_get=lambda graph: handle(graph.as_pointer() + 100))
+    rig = object()
+    carrier = SimpleNamespace(
+        evaluated_get=lambda graph: handle(graph.as_pointer() + 100),
+        get={"component": "head", "rig": rig}.get,
+    )
     contexts = {
         (7, graph.as_pointer(), graph.as_pointer() + 100, graph.mode): {"session": session, "revision": 3}
         for graph, session in zip(graphs, sessions, strict=True)
@@ -99,7 +105,7 @@ def test_raw_ui_snapshot_is_lazy_and_graph_local(monkeypatch):
         control_snapshot=Mock(side_effect=lambda session: {"raw": [0.25 if session == sessions[0] else 0.75]})
     )
     monkeypatch.setattr(engine, "_module", native)
-    instance = {"native_runtime_id": "ada"}
+    instance = {"native_runtime_id": "ada", "head_rig": rig}
     assert engine.ui_raw_control_value(instance, 0, graphs[0]) == 0.25
     assert engine.ui_raw_control_value(instance, 0, graphs[0]) == 0.25
     assert native.control_snapshot.call_count == 1
@@ -113,14 +119,89 @@ def test_raw_ui_snapshot_is_lazy_and_graph_local(monkeypatch):
 
 
 def test_raw_ui_read_never_initializes_a_missing_graph(monkeypatch):
+    rig = object()
     record = {
         "identity": "ada",
         "component": "head",
         "contexts": {},
-        "carrier": SimpleNamespace(evaluated_get=lambda _graph: handle(30)),
+        "carrier": SimpleNamespace(evaluated_get=lambda _graph: handle(30), get={"component": "head", "rig": rig}.get),
     }
     monkeypatch.setattr(engine, "_records", {"head": record})
     native = Mock()
     monkeypatch.setattr(engine, "_module", native)
-    assert engine.ui_raw_control_value({"native_runtime_id": "ada"}, 0, handle(20, mode="VIEWPORT")) == 0.0
+    instance = {"native_runtime_id": "ada", "head_rig": rig}
+    assert engine.ui_raw_control_value(instance, 0, handle(20, mode="VIEWPORT")) == 0.0
     native.control_snapshot.assert_not_called()
+
+
+def test_raw_ui_uses_rig_ownership_when_identities_collide(monkeypatch):
+    """Copied persisted IDs must not alias another rig's UI snapshot."""
+    graph = handle(20, mode="VIEWPORT")
+    rigs = [object(), object()]
+    records = {}
+    for index, rig in enumerate(rigs):
+        pointer = 100 + index
+        carrier = SimpleNamespace(
+            get={"component": "head", "rig": rig}.get,
+            evaluated_get=lambda _graph, pointer=pointer: handle(pointer),
+        )
+        records[pointer] = {
+            "identity": "copied-id",
+            "component": "head",
+            "carrier": carrier,
+            "contexts": {(7, 20, pointer, "VIEWPORT"): {"session": index, "revision": 1}},
+        }
+    monkeypatch.setattr(engine, "_generation", 7)
+    monkeypatch.setattr(engine, "_records", records)
+    monkeypatch.setattr(
+        engine, "_module", SimpleNamespace(control_snapshot=lambda session: {"raw": [0.2 + session * 0.6]})
+    )
+    for rig, expected in zip(rigs, (0.2, 0.8), strict=True):
+        assert engine.ui_raw_control_value(
+            {"native_runtime_id": "copied-id", "head_rig": rig}, 0, graph
+        ) == pytest.approx(expected)
+
+
+def test_migration_panel_defers_validation_until_outside_draw(monkeypatch):
+    """Panel polling must never walk the saved output drivers, even on a cache miss."""
+    from character_dna import utilities
+    from character_dna.ui import view_3d
+
+    scene = handle(100)
+    context = SimpleNamespace(scene=scene)
+    validation = Mock(return_value=True)
+    timers = SimpleNamespace(is_registered=Mock(return_value=False), register=Mock(), unregister=Mock())
+    monkeypatch.setattr(
+        ui_refresh, "bpy", SimpleNamespace(app=SimpleNamespace(timers=timers), data=SimpleNamespace(scenes=[scene]))
+    )
+    monkeypatch.setattr(utilities, "detect_legacy_data", Mock(return_value=None))
+    monkeypatch.setattr(utilities, "detect_runtime_migration", validation)
+    ui_refresh.clear()
+    try:
+        assert not view_3d.CHARACTER_DNA_PT_migrate_legacy_data.poll(context)
+        validation.assert_not_called()
+        callback = timers.register.call_args.args[0]
+        callback()
+        validation.assert_called_once_with(scene)
+        for _ in range(10):
+            assert view_3d.CHARACTER_DNA_PT_migrate_legacy_data.poll(context)
+        validation.assert_called_once()
+        ui_refresh.clear()
+        assert not view_3d.CHARACTER_DNA_PT_migrate_legacy_data.poll(context)
+        validation.assert_called_once()
+    finally:
+        ui_refresh.clear()
+
+
+def test_ui_ownership_does_not_scan_scene_objects(monkeypatch):
+    """Repeated activity and protection reads scale with bindings, not scene object count."""
+    from character_dna.ui.callbacks import is_reference_readonly
+
+    rig = SimpleNamespace(library=None, override_library=None)
+    instance = SimpleNamespace(bl_rna=True, head_rig=rig, body_rig=None, get=lambda _key, default=None: default)
+    carrier = SimpleNamespace(get={"component": "head", "rig": rig}.get, library=None, override_library=None)
+    monkeypatch.setattr(engine, "_records", {123: {"carrier": carrier}})
+    monkeypatch.setattr(engine, "carriers", lambda *_args: pytest.fail("UI reads must not scan scene objects"))
+    for _ in range(10):
+        assert engine.active(instance)
+        assert not is_reference_readonly(instance)

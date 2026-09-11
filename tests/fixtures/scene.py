@@ -1,6 +1,7 @@
 import shutil
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import bmesh
 import bpy
@@ -9,6 +10,10 @@ import pytest
 from mathutils import Euler, Vector
 
 from constants import TEST_DNA_FOLDER, TEST_FBX_FOLDER
+
+
+if TYPE_CHECKING:
+    from character_dna.rig_instance import RigInstance
 
 
 def load_dna(
@@ -200,11 +205,82 @@ def setup_reference_blend_file(addon, temp_folder) -> Path:
         import_face_board=True,
         include_body=True,
     )
+    instance = bpy.context.scene.character_dna.rig_instance_list[0]
+    face = instance.face_board
+    face["authored_reference_control"] = True
+    jaw = face.pose.bones["CTRL_C_jaw"]
+    for frame, value in ((1, 0.0), (10, 0.8), (25, 0.2), (50, 1.0), (100, 0.4), (200, 0.0)):
+        jaw.location.y = value
+        jaw.keyframe_insert(data_path="location", index=1, frame=frame)
+    root = bpy.data.collections.get((instance.name, None))
+    nested = bpy.data.collections.new("reference_nested")
+    root.children.link(nested)
+    helper = bpy.data.objects.new("reference_shared_helper", None)
+    root.objects.link(helper)
+    nested.objects.link(helper)
+    _add_reference_control_rig(instance, root)
+    bpy.context.scene.frame_set(1)
     file_path = temp_folder / "reference_blend_file.blend"
     # Save the blend file
     bpy.ops.wm.save_as_mainfile(filepath=str(file_path))
 
     return file_path
+
+
+def _add_reference_control_rig(instance: "RigInstance", root: bpy.types.Collection) -> None:
+    """Author a one-bone control rig with rest-offset intermediary binding and saved body samples."""
+    body = instance.body_rig
+    assert body is not None and body.pose is not None
+    assert "upperarm_l" in body.pose.bones and "hand_l" in body.pose.bones
+    armature = bpy.data.armatures.new(f"{instance.name}_control_rig")
+    control = bpy.data.objects.new(armature.name, armature)
+    root.objects.link(control)
+    if bpy.context.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.ops.object.select_all(action="DESELECT")
+    control.select_set(True)
+    bpy.context.view_layer.objects.active = control
+    bpy.ops.object.mode_set(mode="EDIT")
+    bone = armature.edit_bones.new("DEF-upper_arm.L")
+    bone.head = (0.3, 0.2, 1.4)
+    bone.tail = (0.3, 0.4, 1.4)
+    bone.roll = 0.3
+    bpy.ops.object.mode_set(mode="OBJECT")
+    instance.control_rig = control
+    constraints = bpy.data.collections.new("reference_control_constraints")
+    root.children.link(constraints)
+    constraints.hide_viewport = True
+    parent = bpy.data.objects.new("reference_control_parent", None)
+    child = bpy.data.objects.new("reference_control_child", None)
+    constraints.objects.link(parent)
+    constraints.objects.link(child)
+    parent.matrix_world = control.matrix_world @ armature.bones["DEF-upper_arm.L"].matrix_local
+    child.matrix_world = body.matrix_world @ body.data.bones["upperarm_l"].matrix_local
+    child.parent = parent
+    child.matrix_parent_inverse = parent.matrix_world.inverted()
+    binding = body.pose.bones["upperarm_l"].constraints.new("COPY_TRANSFORMS")
+    binding.name = "Reference Control Rig"
+    binding.target = child
+    following = parent.constraints.new("COPY_TRANSFORMS")
+    following.target = control
+    following.subtarget = "DEF-upper_arm.L"
+    pose = control.pose.bones["DEF-upper_arm.L"]
+    pose.rotation_mode = "XYZ"
+    for frame, angle in ((1, 0.0), (10, 0.65), (25, -0.35), (200, 0.0)):
+        pose.rotation_euler.z = angle
+        pose.keyframe_insert(data_path="rotation_euler", index=2, frame=frame)
+    samples = {}
+    for frame in (1, 10, 25, 200):
+        bpy.context.scene.frame_set(frame)
+        evaluated = body.evaluated_get(bpy.context.view_layer.depsgraph)
+        samples[str(frame)] = {
+            name: [value for row in evaluated.matrix_world @ evaluated.pose.bones[name].matrix for value in row]
+            for name in ("upperarm_l", "hand_l")
+        }
+    assert samples["1"]["hand_l"] != samples["10"]["hand_l"]
+    assert samples["10"]["hand_l"] != samples["25"]["hand_l"]
+    assert samples["1"]["hand_l"] == pytest.approx(samples["200"]["hand_l"], abs=1e-5)
+    control["reference_body_samples"] = samples
 
 
 @pytest.fixture(scope="session")

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import functools
 import logging
-import uuid
 
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -21,6 +20,7 @@ _transitioning = False
 _undoing = False
 _suspended: set[str] = set()
 _status = "Runtime ready"
+_warning = ""
 
 
 def is_suspended(instance: Any) -> bool:
@@ -42,9 +42,37 @@ def release(instance: Any) -> None:
             request_sync()
 
 
-def reconcile() -> None:
+def rebuild(instance: Any) -> None:
+    """Explicitly rebuild one writable character without affecting other instances."""
+    global _transitioning
+    if any(carrier.library or carrier.override_library for carrier in engine.carriers(instance)):
+        raise ValueError("Linked character bindings must be migrated in their source file")
+    previous = _transitioning
+    _transitioning = True
+    try:
+        engine.discard(instance)
+        instance.initialize()
+        engine.install(instance)
+        bpy.context.view_layer.update()
+    finally:
+        _transitioning = previous
+
+
+@contextmanager
+def preserve_bindings():
+    """Keep portable drivers while display-name changes release authoring caches."""
+    global _transitioning
+    previous = _transitioning
+    _transitioning = True
+    try:
+        yield
+    finally:
+        _transitioning = previous
+
+
+def reconcile() -> None:  # noqa: PLR0912
     """Rebuild rig bindings in a write-safe operator context."""
-    global _transitioning, _status
+    global _transitioning, _status, _warning
     from .. import rig_instance
 
     if _transitioning:
@@ -52,34 +80,65 @@ def reconcile() -> None:
     if rig_instance.is_rendering() or bpy.app.is_job_running("RENDER"):
         raise RuntimeError("Rebuild the runtime after rendering finishes")
     _transitioning = True
+    _warning = ""
     failures = []
     bound = 0
-    identities = set()
     try:
-        engine.discard()
         available, reason = engine.capability()
         if not available:
             raise RuntimeError(reason)
         for scene in bpy.data.scenes:
+            if scene.library:
+                continue
             properties = getattr(scene, ToolInfo.NAME, None)
             for instance in getattr(properties, "rig_instance_list", []):
-                identity = engine.instance_id(instance)
-                if identity and identity in identities:
-                    instance["native_runtime_id"] = uuid.uuid4().hex
-                identities.add(engine.instance_id(instance))
                 if is_suspended(instance):
                     continue
                 try:
-                    instance.initialize()
                     with bpy.context.temp_override(scene=scene, view_layer=scene.view_layers[0]):
-                        engine.install(instance)
+                        if not instance.auto_evaluate and not any(
+                            carrier.library or carrier.override_library for carrier in engine.carriers(instance)
+                        ):
+                            engine.discard(instance)
+                            continue
+                        if engine.carriers(instance):
+                            outdated = [
+                                carrier for carrier in engine.carriers(instance) if engine.requires_migration(carrier)
+                            ]
+                            if outdated:
+                                _warning = engine.MIGRATION_WARNING
+                                for carrier in outdated:
+                                    engine.warn_unavailable(carrier, _warning)
+                                continue
+                            engine.adopt(instance)
+                            if not any(
+                                carrier.library or carrier.override_library for carrier in engine.carriers(instance)
+                            ) and (
+                                (instance.head_rig and not instance.head_initialized)
+                                or (instance.body_rig and not instance.body_initialized)
+                            ):
+                                instance.initialize()
+                            engine.sync_settings(instance)
+                        elif instance.get("reference_mode") in {"LINK", "EDITABLE_LINK"}:
+                            _warning = "Legacy data detected. Open the source file, run Migrate Legacy Data, then save."
+                            engine.warn_unavailable(instance, _warning)
+                            continue
+                        elif not instance.head_initialized and not instance.body_initialized:
+                            if instance.head_rig or instance.body_rig:
+                                _warning = engine.MIGRATION_WARNING
+                                engine.warn_unavailable(instance, _warning)
+                            continue
+                        else:
+                            rebuild(instance)
                         bpy.context.view_layer.update()
                         bound += int(engine.active(instance))
+                except FileNotFoundError:
+                    _warning = "DNA file not found. Update the DNA file path, then rebuild evaluation."
+                    engine.warn_unavailable(instance, _warning)
                 except Exception as error:
-                    engine.discard(instance)
                     failures.append(f"{instance.name}: {error}")
                     logger.exception("Native runtime transition failed for %s", instance.name)
-        _status = "; ".join(failures) if failures else f"Native: {bound} rig(s)"
+        _status = "; ".join(failures) if failures else (_warning or f"Native: {bound} rig(s)")
         if failures:
             raise RuntimeError(_status)
     finally:
@@ -99,6 +158,8 @@ class CHARACTER_DNA_OT_sync_native_runtime(bpy.types.Operator):
         except Exception as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
+        if _warning:
+            self.report({"WARNING"}, _warning)
         return {"FINISHED"}
 
 
@@ -111,6 +172,7 @@ def _apply_requested() -> None:
 
 def request_sync(_owner: Any = None, _context: Any = None) -> None:
     """Queue a single undoable rebuild outside property callbacks."""
+    ui_refresh.invalidate_migration()
     if not _transitioning and not bpy.app.timers.is_registered(_apply_requested):
         bpy.app.timers.register(_apply_requested, first_interval=0.0)
 
@@ -118,13 +180,14 @@ def request_sync(_owner: Any = None, _context: Any = None) -> None:
 def auto_evaluation_changed(instance: Any, _context: Any) -> None:
     """Release or reacquire output ownership when the user changes auto evaluation."""
     if not is_suspended(instance):
+        engine.sync_settings(instance)
         request_sync()
 
 
 def after_load() -> None:
     """Rebuild saved bindings once after the scene's data has been loaded."""
     ui_refresh.clear()
-    bpy.ops.character_dna.sync_native_runtime()
+    engine.restore()
 
 
 def before_undo() -> None:
@@ -144,6 +207,8 @@ def after_undo() -> None:
 
 def suspend(instance: Any) -> bool:
     """Give an editor or animation baker exclusive access to output channels."""
+    if any(carrier.library or carrier.override_library for carrier in engine.carriers(instance)):
+        raise ValueError("Linked character data is read-only; edit the source file or append the character")
     was_active = engine.active(instance)
     identity = engine.instance_id(instance)
     if was_active:
@@ -186,43 +251,80 @@ def with_authoring_output(function: Callable[..., Any]) -> Callable[..., Any]:
 
 
 def native_scene_operation(function: Callable[..., Any]) -> Callable[..., Any]:
-    """Suspend owned drivers while an operator duplicates or remaps scene IDs."""
+    """Release the active source's drivers and rebuild only it and its duplicates."""
 
     @functools.wraps(function)
     def wrapped(operator: Any, context: Any) -> Any:
-        had_bindings = bool(engine.carriers())
-        if had_bindings:
-            engine.discard()
-            engine.invalidate()
-        try:
+        from ..utilities import get_active_rig_instance, get_addon_window_manager_properties
+
+        scene = context.scene
+        source = get_active_rig_instance()
+        if source is None:
             return function(operator, context)
+        source_name = source.name
+        instances = getattr(scene, ToolInfo.NAME).rig_instance_list
+        existing_names = {instance.name for instance in instances}
+        had_bindings = bool(engine.carriers(instances[source_name]))
+        window_properties = get_addon_window_manager_properties(context)
+        previous_evaluation = window_properties.evaluate_dependency_graph
+        try:
+            with preserve_bindings():
+                window_properties.evaluate_dependency_graph = False
+                try:
+                    engine.discard(instances[source_name])
+                    return function(operator, context)
+                finally:
+                    instances = getattr(scene, ToolInfo.NAME).rig_instance_list
+                    rebuild_names = ([source_name] if had_bindings else []) + [
+                        instance.name for instance in instances if instance.name not in existing_names
+                    ]
+                    for name in rebuild_names:
+                        instance = instances.get(name)
+                        if instance is not None:
+                            rebuild(instance)
         finally:
-            if had_bindings:
-                reconcile()
+            window_properties.evaluate_dependency_graph = previous_evaluation
 
     return wrapped
 
 
 def register() -> None:
     """Register the runtime's rebuild operator, driver callback and deferred startup."""
-    bpy.utils.register_class(CHARACTER_DNA_OT_sync_native_runtime)
+    operator = bpy.types.Operator.bl_rna_get_subclass_py(CHARACTER_DNA_OT_sync_native_runtime.__name__)
+    if operator is not None and operator is not CHARACTER_DNA_OT_sync_native_runtime:
+        bpy.utils.unregister_class(operator)
+    if operator is not CHARACTER_DNA_OT_sync_native_runtime:
+        bpy.utils.register_class(CHARACTER_DNA_OT_sync_native_runtime)
     bpy.app.driver_namespace[engine.NAMESPACE] = engine.solve
-    bpy.app.timers.register(_startup, first_interval=0.0)
+    if _after_import not in bpy.app.handlers.blend_import_post:
+        bpy.app.handlers.blend_import_post.append(_after_import)
+    if not bpy.app.timers.is_registered(_startup):
+        bpy.app.timers.register(_startup, first_interval=0.0)
+
+
+@bpy.app.handlers.persistent
+def _after_import(_context: Any) -> None:
+    """Hydrate library-imported sessions without changing saved scene data."""
+    if engine.capability()[0]:
+        engine.hydrate()
 
 
 def _startup() -> None:
-    _apply_requested()
+    engine.hydrate()
 
 
 def unregister() -> None:
-    """Leave no owned output drivers, native sessions or scheduled transitions behind."""
+    """Release registered runtime services while preserving saved driver bindings."""
     ui_refresh.clear()
     if bpy.app.timers.is_registered(_apply_requested):
         bpy.app.timers.unregister(_apply_requested)
     if bpy.app.timers.is_registered(_startup):
         bpy.app.timers.unregister(_startup)
-    engine.discard()
+    if _after_import in bpy.app.handlers.blend_import_post:
+        bpy.app.handlers.blend_import_post.remove(_after_import)
     engine.invalidate()
     _suspended.clear()
     bpy.app.driver_namespace.pop(engine.NAMESPACE, None)
-    bpy.utils.unregister_class(CHARACTER_DNA_OT_sync_native_runtime)
+    operator = bpy.types.Operator.bl_rna_get_subclass_py(CHARACTER_DNA_OT_sync_native_runtime.__name__)
+    if operator is not None:
+        bpy.utils.unregister_class(operator)

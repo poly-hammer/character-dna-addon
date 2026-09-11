@@ -9,6 +9,7 @@ from bl_ui.generic_ui_list import draw_ui_list
 # local imports
 from ..constants import PRO_EDITORS, PanelOrder, ToolInfo
 from ..typing import *  # noqa: F403
+from .callbacks import is_face_board_readonly, is_readonly_id, is_reference_readonly
 
 
 def get_active_rig_instance() -> "RigInstance | None":
@@ -117,6 +118,7 @@ class CHARACTER_DNA_UL_rig_instances(bpy.types.UIList):
         active_data: "CharacterSceneProperties",
         active_prop_name: str,
     ):
+        layout.enabled = not is_reference_readonly(item)
         layout.prop(item, "auto_evaluate", text="")
 
         row = layout.row()
@@ -162,6 +164,7 @@ class CHARACTER_DNA_PT_face_pose_tags(bpy.types.Panel):
         face_board = scene_properties.face_board
 
         layout = self.layout
+        layout.enabled = not is_face_board_readonly(get_active_rig_instance())
         row = layout.row(align=True)
         row.label(text="Match")
         row.prop(face_board, "tag_match_mode", expand=True)
@@ -195,6 +198,7 @@ class CHARACTER_DNA_PT_face_board(RigInstanceDependentPanel):
             return
 
         instance = get_active_rig_instance()
+        self.layout.enabled = not is_face_board_readonly(instance)
         if instance and instance.is_pro and instance.raw_control_editor.is_editing:
             self.layout.enabled = False
 
@@ -247,6 +251,7 @@ class CHARACTER_DNA_PT_face_board_footer(bpy.types.Panel):
         # Greyed out while the Raw Control Editor holds an edit session, exactly
         # as the button behaved when it lived inside the parent panel's draw.
         instance = get_active_rig_instance()
+        layout.enabled = not is_reference_readonly(instance) and not is_face_board_readonly(instance)
         if instance and instance.is_pro and instance.raw_control_editor.is_editing:
             layout.enabled = False
 
@@ -283,14 +288,19 @@ class CHARACTER_DNA_PT_animation_panel(bpy.types.Panel):
             return
 
         if not error:
+            instance = get_active_rig_instance()
             box = self.layout.box()
+            box.enabled = not is_face_board_readonly(instance)
             box.label(text="Face Board:")
             split = box.split(factor=0.5)
             split.scale_y = 1.5
             split.operator(f"{ToolInfo.NAME}.import_face_board_animation", icon="IMPORT", text="Import")
-            split.operator(f"{ToolInfo.NAME}.bake_face_board_animation", icon="ACTION", text="Bake")
+            column = split.column()
+            column.enabled = not is_reference_readonly(instance)
+            column.operator(f"{ToolInfo.NAME}.bake_face_board_animation", icon="ACTION", text="Bake")
 
             box = self.layout.box()
+            box.enabled = not is_reference_readonly(instance)
             box.label(text="Body Animation:")
             component_type = "body"
             row = box.row()
@@ -325,6 +335,8 @@ class CHARACTER_DNA_PT_view_options(RigInstanceDependentPanel):
         if not error:
             active_index = properties.rig_instance_list_active_index
             instance = properties.rig_instance_list[active_index]
+            readonly = is_reference_readonly(instance)
+            self.layout.enabled = instance.get("reference_mode") != "LINK"
             # Resolve the linked objects once. The visibility property getters each do a
             # relatively expensive RNA path round-trip, so we read the icon state directly
             # from the objects here instead of re-invoking the getters in the icon ternary.
@@ -338,11 +350,12 @@ class CHARACTER_DNA_PT_view_options(RigInstanceDependentPanel):
             col.enabled = bool(instance.head_material)
             col.label(text="Head Material Color:")
             row = col.row()
+            row.enabled = not readonly and not is_readonly_id(instance.head_material)
             row.prop(view_options, "active_material_preview", text="")
             row = col.row()
             row.label(text="Bone Visibility:")
             row = col.row()
-            row.enabled = bool(head_rig)
+            row.enabled = bool(head_rig) and not readonly
             row.prop(
                 view_options,
                 "show_head_bones",
@@ -350,7 +363,7 @@ class CHARACTER_DNA_PT_view_options(RigInstanceDependentPanel):
                 icon="HIDE_OFF" if head_rig and not head_rig.hide_get() else "HIDE_ON",
             )
             row = col.row()
-            row.enabled = bool(body_rig)
+            row.enabled = bool(body_rig) and not readonly
             row.prop(
                 view_options,
                 "show_body_bones",
@@ -360,11 +373,11 @@ class CHARACTER_DNA_PT_view_options(RigInstanceDependentPanel):
 
             # Bone Visibility toggles for matching, volume, and internal bones.
             row = col.row()
-            row.enabled = view_options.show_head_bones
+            row.enabled = view_options.show_head_bones and not readonly
             row.prop(instance.view_options, "hide_volume_bones", text="Hide Volume")
 
             row = col.row()
-            row.enabled = view_options.show_head_bones
+            row.enabled = view_options.show_head_bones and not readonly
             row.prop(instance.view_options, "solo_internal_bones", text="Solo Internal")
 
             row = col.row()
@@ -374,11 +387,12 @@ class CHARACTER_DNA_PT_view_options(RigInstanceDependentPanel):
             col.enabled = bool(instance.head_mesh)
             col.label(text="Active LOD:")
             row = col.row()
+            row.enabled = not readonly
             row.prop(view_options, "active_lod", text="")
             row = col.row()
             row.label(text="Control Visibility:")
             row = col.row()
-            row.enabled = bool(face_board)
+            row.enabled = bool(face_board) and not is_face_board_readonly(instance)
             row.prop(
                 view_options,
                 "show_face_board",
@@ -386,7 +400,7 @@ class CHARACTER_DNA_PT_view_options(RigInstanceDependentPanel):
                 icon="HIDE_OFF" if face_board and not face_board.hide_get() else "HIDE_ON",
             )
             row = col.row()
-            row.enabled = bool(control_rig)
+            row.enabled = bool(control_rig) and not is_readonly_id(control_rig)
             row.prop(
                 view_options,
                 "show_control_rig",
@@ -436,6 +450,9 @@ class CHARACTER_DNA_PT_rig_instance(bpy.types.Panel):
 
         if enabled:
             row = col.row()
+            row.enabled = not is_reference_readonly(
+                properties.rig_instance_list[properties.rig_instance_list_active_index]
+            )
             row.operator(f"{ToolInfo.NAME}.duplicate_rig_instance", icon="DUPLICATE", text="")
 
             row = col.row()
@@ -474,7 +491,7 @@ class CHARACTER_DNA_PT_rig_instance_head_sub_panel(bpy.types.Panel):
         if len(properties.rig_instance_list) > 0:
             instance = properties.rig_instance_list[active_index]
             row = self.layout.row()
-            row.enabled = instance.auto_evaluate
+            row.enabled = instance.auto_evaluate and not is_reference_readonly(instance)
             row.prop(instance, "auto_evaluate_head", text="Head")
 
     def draw(self, context: "Context"):
@@ -487,6 +504,7 @@ class CHARACTER_DNA_PT_rig_instance_head_sub_panel(bpy.types.Panel):
             instance = properties.rig_instance_list[active_index]
 
             box = self.layout.box()
+            box.enabled = not is_reference_readonly(instance)
             row = box.row()
             row.alert = False
             bad_path = instance.head_dna_file_path and not Path(bpy.path.abspath(instance.head_dna_file_path)).exists()
@@ -532,7 +550,7 @@ class CHARACTER_DNA_PT_rig_instance_body_sub_panel(bpy.types.Panel):
         if len(properties.rig_instance_list) > 0:
             instance = properties.rig_instance_list[active_index]
             row = self.layout.row()
-            row.enabled = instance.auto_evaluate
+            row.enabled = instance.auto_evaluate and not is_reference_readonly(instance)
             row.prop(instance, "auto_evaluate_body", text="Body")
 
     def draw(self, context: "Context"):
@@ -545,6 +563,7 @@ class CHARACTER_DNA_PT_rig_instance_body_sub_panel(bpy.types.Panel):
             instance = properties.rig_instance_list[active_index]
 
             box = self.layout.box()
+            box.enabled = not is_reference_readonly(instance)
             row = box.row()
             row.alert = False
             bad_path = instance.body_dna_file_path and not Path(bpy.path.abspath(instance.body_dna_file_path)).exists()
@@ -582,6 +601,7 @@ class CHARACTER_DNA_PT_rig_instance_footer_sub_panel(RigInstanceDependentPanel):
             return
 
         row = self.layout.row()
+        row.enabled = not is_reference_readonly(instance)
         row.prop(instance, "head_to_body_constraint_influence", text="Head to Body Constraint Influence")
         self.layout.separator()
         row = self.layout.row()
@@ -609,6 +629,7 @@ class CHARACTER_DNA_PT_output_panel(RigInstanceDependentPanel):
         if not error:
             active_index = properties.rig_instance_list_active_index
             instance = properties.rig_instance_list[active_index]
+            self.layout.enabled = not is_reference_readonly(instance)
             grid = self.layout.grid_flow(row_major=True, columns=2, even_columns=True, even_rows=True, align=True)
             col = grid.column()
             col.label(text="Component:")
@@ -680,6 +701,7 @@ class CHARACTER_DNA_PT_output_buttons_sub_panel(bpy.types.Panel):
             row = self.layout.row()
             active_index = properties.rig_instance_list_active_index
             instance = properties.rig_instance_list[active_index]
+            self.layout.enabled = not is_reference_readonly(instance)
             row.prop(instance.output, "run_validations")
             if instance.is_pro:
                 row.prop(instance.output, "auto_update_lods", text="Update LODs")
@@ -706,12 +728,9 @@ class CHARACTER_DNA_PT_migrate_legacy_data(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context: "Context") -> bool:
-        from .. import utilities
+        from ..runtime.ui_refresh import migration_needed
 
-        # Show the manual migration fallback whenever data saved by another edition
-        # or an older version is present. Auto-migration on file load normally
-        # clears this first, so the panel stays hidden in the common case.
-        return utilities.detect_legacy_data(context.scene) is not None
+        return migration_needed(context.scene)
 
     def draw(self, context: "Context"):
         if not self.layout:

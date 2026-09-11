@@ -360,7 +360,6 @@ def notify_rig_instances_changed(instance: "RigInstance | None" = None) -> None:
 def setup_scene(*_: Any) -> None:
     from ..runtime import controller, engine
 
-    engine.discard()
     engine.invalidate()
     # Auto-migrate rig-instance data saved by a different addon edition (Free vs
     # Pro) or an older version before initializing, so reopening a .blend always
@@ -377,11 +376,10 @@ def setup_scene(*_: Any) -> None:
     # initialize the rig instances
     for instance in getattr(scene_properties, "rig_instance_list", []):
         try:
-            instance.initialize()
-
             # notify any registered callbacks that a rig instance has been set up in the scene, so they can perform
             # any necessary actions
-            notify_rig_instances_changed(instance)
+            with controller.preserve_bindings():
+                notify_rig_instances_changed(instance)
         except Exception as error:
             logger.exception(f"Failed to set up rig instance '{instance.name}': {error}")
 
@@ -389,13 +387,14 @@ def setup_scene(*_: Any) -> None:
 
 
 def teardown_scene(*_: Any) -> None:
-    from ..runtime import engine
+    from ..runtime import controller, engine
 
     engine.invalidate()
     scene_properties = getattr(bpy.context.scene, ToolInfo.NAME, object)
 
-    for instance in getattr(scene_properties, "rig_instance_list", []):
-        instance.destroy()
+    with controller.preserve_bindings():
+        for instance in getattr(scene_properties, "rig_instance_list", []):
+            instance.destroy()
     logger.info("De-allocated Rig Logic instances...")
 
 
@@ -670,7 +669,9 @@ def set_objects_origins(scene_objects: list[bpy.types.Object], location: Vector)
         apply_transforms(scene_object, location=True, rotation=True, scale=True)
 
 
-def rename_rig_instance(instance: "RigInstance", old_name: str, new_name: str):
+def rename_rig_instance(instance: "RigInstance", old_name: str, new_name: str):  # noqa: PLR0912
+    from ..runtime import controller, engine
+
     if instance.face_board:
         instance.face_board.name = replace_instance_prefix(instance.face_board.name, old_name, new_name)
         instance.face_board.data.name = replace_instance_prefix(instance.face_board.data.name, old_name, new_name)
@@ -725,7 +726,15 @@ def rename_rig_instance(instance: "RigInstance", old_name: str, new_name: str):
 
     # this frees up the instance data under the old name, since all data is
     # namespaced under the instance name
-    instance.destroy()
+    with controller.preserve_bindings():
+        instance.destroy()
+    for carrier in engine.carriers(instance):
+        if not carrier.library and not carrier.override_library:
+            carrier["character_name"] = new_name
+            carrier.name = replace_instance_prefix(carrier.name, old_name, new_name)
+    drivers = bpy.data.collections.get((f"{old_name}_drivers", None))
+    if drivers:
+        drivers.name = f"{new_name}_drivers"
 
 
 def rename_as_lod0_meshes(mesh_objects: list[bpy.types.Object]):
@@ -1343,6 +1352,140 @@ def detect_legacy_data(scene: bpy.types.Scene) -> tuple[str, str] | None:
     return None
 
 
+def detect_runtime_migration(scene: bpy.types.Scene) -> bool:
+    """Detect outdated saved bindings on real rigs, independently of live sessions."""
+    from ..runtime import engine
+
+    properties = getattr(scene, ToolInfo.NAME, None)
+    for instance in getattr(properties, "rig_instance_list", ()):
+        if _runtime_migration_components(instance) and engine.binding_issues(instance):
+            return True
+    return False
+
+
+def migrate_runtime_data(context: "Context") -> tuple[str, int, int]:
+    """Preflight the batch, convert metadata, and rebuild only outdated local rigs.
+
+    Return the metadata conversion kind, upgraded count, and unchanged count.
+    """
+    from ..runtime import controller, engine
+
+    properties = get_addon_scene_properties(context)
+    instances = list(properties.rig_instance_list)
+    targets = [
+        instance
+        for instance in instances
+        if _runtime_migration_components(instance) and engine.binding_issues(instance)
+    ]
+    sources = list(targets)
+    detected = detect_legacy_data(context.scene)
+    if detected:
+        addon_id, data_key = detected
+        existing_names = {instance.name for instance in instances}
+        if data_key:
+            sources.extend(
+                source
+                for source in _rig_instance_sources(get_raw_scene_data(context.scene, addon_id), data_key)
+                if (_field(source, "name") or _field(source, "instance_name")) not in existing_names
+            )
+        else:
+            sources.extend(
+                {
+                    "name": collection.name[:-5],
+                    "head_rig": bpy.data.objects.get(collection.name[:-5] + "_head_rig"),
+                    "body_rig": bpy.data.objects.get(collection.name[:-5] + "_body_rig"),
+                }
+                for collection in context.scene.collection.children_recursive
+                if collection.name.endswith("_lod0") and collection.name[:-5] not in existing_names
+            )
+    eligible = [source for source in sources if _runtime_migration_components(source)]
+    _preflight_runtime_migration(eligible)
+    if eligible:
+        available, reason = engine.capability()
+        if not available:
+            raise RuntimeError(reason)
+    migrate_type = migrate_legacy_data(context)
+    upgraded = 0
+    unchanged = 0
+    for instance in properties.rig_instance_list:
+        if not _runtime_migration_components(instance) or not engine.binding_issues(instance):
+            unchanged += 1
+            continue
+        controller.rebuild(instance)
+        issues = engine.binding_issues(instance)
+        if issues:
+            raise RuntimeError(f"{instance.name}: runtime migration incomplete: {'; '.join(issues)}")
+        upgraded += 1
+    return migrate_type, upgraded, unchanged
+
+
+def _preflight_runtime_migration(instances: list[Any]) -> None:  # noqa: PLR0912
+    from ..runtime import bindings, engine
+
+    issues = []
+    for instance in instances:
+        name = _field(instance, "name") or _field(instance, "instance_name")
+        carriers = engine.carriers(instance)
+        for carrier in carriers:
+            version = carrier.get("schema_version", 1)
+            if not isinstance(version, int) or version > engine.SCHEMA_VERSION:
+                issues.append(f"{name}: unsupported future runtime schema {version}; update Character DNA")
+        owners = list(carriers)
+        scene = getattr(instance, "id_data", None)
+        if scene is not None:
+            owners.append(scene)
+        for field in ("head_rig", "body_rig", "face_board", "control_rig", "head_mesh", "body_mesh"):
+            owner = _resolve_datablock(_field(instance, field), bpy.data.objects)
+            if isinstance(owner, bpy.types.Object):
+                owners.extend((owner, owner.data))
+        for carrier in carriers:
+            for target in carrier.get("targets", ()):
+                owner = target.get("owner")
+                if owner is not None and target.get("embedded", False):
+                    owner = owner.node_tree
+                if owner is None:
+                    continue
+                owners.append(owner)
+                animation = owner.animation_data
+                path, index = target["path"], max(0, target["index"])
+                curve = animation.drivers.find(path, index=index) if animation else None
+                if curve and not bindings.owned_curve(curve, carrier):
+                    issues.append(f"{name}: conflicting driver on {owner.name}:{path}[{index}]")
+                if (path, index) in bindings._animated_channels(owner):  # noqa: SLF001
+                    issues.append(f"{name}: keyframed native output on {owner.name}:{path}[{index}]")
+        if any(
+            owner is not None
+            and (
+                owner.library
+                or not owner.is_editable
+                or (owner.override_library and owner.override_library.is_system_override)
+            )
+            for owner in owners
+        ):
+            issues.append(f"{name}: linked or protected data; open the source .blend, migrate there, and save it")
+        for component in _runtime_migration_components(instance):
+            path = _field(instance, f"{component}_dna_file_path")
+            if not path or not Path(bpy.path.abspath(path)).is_file():
+                issues.append(
+                    f"{name}: missing {component} DNA file path ({path or 'not set'}); assign an existing .dna"
+                )
+    if issues:
+        raise ValueError("Cannot migrate rig runtime: " + "; ".join(issues))
+
+
+def _runtime_migration_components(instance: Any) -> list[str]:
+    return [
+        component
+        for component in ("head", "body")
+        if isinstance(
+            (rig := _resolve_datablock(_field(instance, f"{component}_rig"), bpy.data.objects)), bpy.types.Object
+        )
+        and rig.type == "ARMATURE"
+        and isinstance(rig.data, bpy.types.Armature)
+        and rig.data.bones
+    ]
+
+
 def _resolve_datablock(value: Any, collection: bpy.types.bpy_prop_collection) -> bpy.types.ID | None:
     """Resolve a rig-instance pointer field to a datablock in ``collection``.
 
@@ -1352,13 +1495,15 @@ def _resolve_datablock(value: Any, collection: bpy.types.bpy_prop_collection) ->
     """
     if not value:
         return None
+    if isinstance(value, bpy.types.ID):
+        return value
     name = value if isinstance(value, str) else getattr(value, "name", None)
     if not name:
         return None
     return collection.get(name)
 
 
-def _copy_rig_instance_fields(target_properties: "CharacterSceneProperties", source: Any) -> None:
+def _copy_rig_instance_fields(target_properties: "CharacterSceneProperties", source: Any) -> None:  # noqa: PLR0912
     """Create a rig instance on ``target_properties`` from a migration ``source``.
 
     ``source`` is either a live ``RigInstance`` (sibling edition) or a raw
@@ -1399,8 +1544,35 @@ def _copy_rig_instance_fields(target_properties: "CharacterSceneProperties", sou
         instance.output.folder_path = output_folder_path
 
     head_to_body_constraint_influence = _field(source, "head_to_body_constraint_influence")
-    if head_to_body_constraint_influence is not None:
+    if (
+        head_to_body_constraint_influence is not None
+        and head_to_body_constraint_influence != instance.head_to_body_constraint_influence
+    ):
         instance.head_to_body_constraint_influence = head_to_body_constraint_influence
+
+    for field in (
+        "auto_evaluate",
+        "auto_evaluate_head",
+        "auto_evaluate_body",
+        "evaluate_bones",
+        "evaluate_shape_keys",
+        "evaluate_texture_masks",
+        "evaluate_rbfs",
+    ):
+        value = _field(source, field)
+        if value is not None and value != getattr(instance, field):
+            setattr(instance, field, value)
+    identity = source.get("native_runtime_id")
+    if identity:
+        instance["native_runtime_id"] = identity
+    view_options = _field(source, "view_options")
+    if view_options is not None:
+        for prop in instance.view_options.bl_rna.properties:
+            if prop.identifier == "rna_type" or prop.is_readonly or prop.type in {"POINTER", "COLLECTION"}:
+                continue
+            value = _field(view_options, prop.identifier)
+            if value is not None and value != getattr(instance.view_options, prop.identifier):
+                setattr(instance.view_options, prop.identifier, value)
 
 
 def migrate_by_collection_data(context: "Context", addon_id: str) -> None:
@@ -1424,8 +1596,23 @@ def migrate_by_collection_data(context: "Context", addon_id: str) -> None:
     bpy.context.scene.pop(addon_id, None)
 
 
-@exclude_rig_instance_evaluation
 def migrate_legacy_data(
+    context: "Context",
+) -> Literal["default", "collection_data", "cross_edition", "legacy_format"]:
+    """Convert edition metadata without changing evaluation state or rebuilding rigs."""
+    from ..runtime import controller
+
+    properties = get_addon_window_manager_properties(context)
+    previous_evaluation = properties.evaluate_dependency_graph
+    properties.evaluate_dependency_graph = False
+    try:
+        with controller.preserve_bindings():
+            return _migrate_legacy_data(context)
+    finally:
+        properties.evaluate_dependency_graph = previous_evaluation
+
+
+def _migrate_legacy_data(
     context: "Context",
 ) -> Literal["default", "collection_data", "cross_edition", "legacy_format"]:
     """Migrate rig-instance data saved by a different addon edition or version.
@@ -1472,6 +1659,7 @@ def migrate_legacy_data(
         name = _field(source, "name") or _field(source, "instance_name")
         if name and name not in existing_names:
             _copy_rig_instance_fields(target_properties, source)
+            existing_names.append(name)
 
     migrate_type: Literal["cross_edition", "legacy_format"] = (
         "cross_edition" if data_key == "rig_instance_list" else "legacy_format"

@@ -18,6 +18,8 @@ from mathutils import Euler, Matrix, Vector
 # local imports
 from ..constants import (
     BODY_MAPS,
+    EXCLUDED_FACE_BOARD_CONTROLS,
+    FACE_BOARD_SWITCHES,
     HEAD_MAPS,
     HEAD_TO_BODY_LOD_MAPPING,
     INTERNAL_BONE_COLLECTION,
@@ -45,6 +47,36 @@ _face_pose_search_items: list[tuple[str, str, str, int, int]] = []
 # name (e.g. "speech"). Populated when the dynamic tag properties are built at
 # addon registration time.
 _face_pose_tag_property_map: dict[str, str] = {}
+
+
+def is_readonly_id(owner: bpy.types.ID | None) -> bool:
+    """Whether an actual write target belongs to a library or protected override."""
+    return bool(owner and (owner.library or (owner.override_library and owner.override_library.is_system_override)))
+
+
+def is_reference_readonly(instance: "RigInstance | None", component: str | None = None) -> bool:
+    """Whether source metadata and authoring are protected, even before runtime adoption."""
+    if instance is None:
+        return False
+    if instance.get("reference_mode") in {"LINK", "EDITABLE_LINK"}:
+        return True
+    components = (component,) if component else ("head", "body")
+    for component_name in components:
+        rig = getattr(instance, f"{component_name}_rig", None)
+        if is_readonly_id(rig) or is_readonly_id(getattr(rig, "data", None)):
+            return True
+
+    from ..runtime.engine import bound_carriers
+
+    return any(
+        (carrier.library or carrier.override_library) and (component is None or carrier.get("component") == component)
+        for carrier in bound_carriers(instance)
+    )
+
+
+def is_face_board_readonly(instance: "RigInstance | None") -> bool:
+    """Keep editable-link face controls writable without granting source authoring."""
+    return bool(instance and (instance.get("reference_mode") == "LINK" or is_readonly_id(instance.face_board)))
 
 
 def get_active_head() -> "CharacterComponentHead | None":
@@ -383,6 +415,9 @@ def update_face_pose_filter(self: "CharacterFaceBoardProperties", context: "Cont
     """
     from ..properties import face_pose_preview_collections
 
+    if is_face_board_readonly(get_active_rig_instance()) or is_readonly_id(self.id_data):
+        return
+
     preview_collection = face_pose_preview_collections["face_poses"]
     # Invalidate the cache so the items callback rebuilds the filtered list.
     preview_collection.face_pose_previews_cache_key = None
@@ -408,6 +443,8 @@ def update_face_pose_category(self: "CharacterFaceBoardProperties", context: "Co
     """Category change handler. Disables any enabled tag filters that do not belong
     to the newly selected category so out-of-category tags can never filter the pose
     list down to nothing, then refreshes the filtered pose enum and selection."""
+    if is_face_board_readonly(get_active_rig_instance()) or is_readonly_id(self.id_data):
+        return
     allowed_tags = set(get_tags_for_category(self.category))
     for property_name, tag_name in _face_pose_tag_property_map.items():
         if tag_name not in allowed_tags and getattr(self, property_name, False):
@@ -430,7 +467,7 @@ def _set_face_board_switch(bone_name: str, value: bool):
     """Sets a face board switch bone on/off and re-evaluates the active rig instance
     so the dependent constraints and rig logic update to match."""
     instance = get_active_rig_instance()
-    if not instance or not instance.face_board:
+    if not instance or not instance.face_board or is_face_board_readonly(instance):
         return
     pose_bone = instance.face_board.pose.bones.get(bone_name)
     if not pose_bone:
@@ -566,18 +603,26 @@ def set_bake_end_frame(self: "BakeAnimationBase", value: int):
 
 
 def set_active_lod(self: "CharacterViewOptionsProperties", value: int):
+    from ..runtime.engine import sync_settings
     from ..utilities import set_hidden
 
+    instance = _get_view_options_owner(self)
+    if is_reference_readonly(instance) or is_readonly_id(self.id_data):
+        return
     self["active_lod"] = value
     if not bpy.context.scene:
         return
 
-    instance = _get_view_options_owner(self)
     if not instance:
         return
 
+    sync_settings(instance)
     for scene_object in bpy.context.scene.objects:
-        if scene_object.name.startswith(instance.name) and scene_object.type == "MESH":
+        if (
+            scene_object.name.startswith(instance.name)
+            and scene_object.type == "MESH"
+            and not is_readonly_id(scene_object)
+        ):
             ignored_names = [
                 f"{instance.name}_eyeshell_lod{value}_mesh",
                 f"{instance.name}_eyeEdge_lod{value}_mesh",
@@ -592,7 +637,7 @@ def set_active_lod(self: "CharacterViewOptionsProperties", value: int):
     # un-hide the body lod. There are 2 head lods per body lod
     body_lod_index = HEAD_TO_BODY_LOD_MAPPING.get(value)
     body_lod_object = bpy.data.objects.get(f"{instance.name}_body_lod{body_lod_index}_mesh")
-    if body_lod_object:
+    if body_lod_object and not is_readonly_id(body_lod_object):
         set_hidden(body_lod_object, False)
 
 
@@ -600,7 +645,7 @@ def set_show_head_bones(self: "CharacterViewOptionsProperties", value: bool):
     from ..utilities import set_hidden
 
     instance = _get_view_options_owner(self)
-    if instance and instance.head_rig:
+    if instance and instance.head_rig and not is_reference_readonly(instance) and not is_readonly_id(instance.head_rig):
         set_hidden(instance.head_rig, not value)
 
 
@@ -608,7 +653,7 @@ def set_show_face_board(self: "CharacterViewOptionsProperties", value: bool):
     from ..utilities import set_hidden
 
     instance = _get_view_options_owner(self)
-    if instance and instance.face_board:
+    if instance and instance.face_board and not is_face_board_readonly(instance):
         set_hidden(instance.face_board, not value)
 
 
@@ -616,7 +661,12 @@ def set_show_control_rig(self: "CharacterViewOptionsProperties", value: bool):
     from ..utilities import set_hidden
 
     instance = _get_view_options_owner(self)
-    if instance and instance.control_rig:
+    if (
+        instance
+        and instance.control_rig
+        and instance.get("reference_mode") != "LINK"
+        and not is_readonly_id(instance.control_rig)
+    ):
         set_hidden(instance.control_rig, not value)
 
 
@@ -624,7 +674,7 @@ def set_show_body_bones(self: "CharacterViewOptionsProperties", value: bool):
     from ..utilities import set_hidden
 
     instance = _get_view_options_owner(self)
-    if instance and instance.body_rig:
+    if instance and instance.body_rig and not is_reference_readonly(instance) and not is_readonly_id(instance.body_rig):
         set_hidden(instance.body_rig, not value)
 
 
@@ -642,10 +692,15 @@ def get_hide_volume_bones(self: "CharacterViewOptionsProperties") -> bool:
 
 def set_hide_volume_bones(self: "CharacterViewOptionsProperties", value: bool):
     instance = _get_view_options_owner(self)
-    if not instance:
+    if not instance or is_reference_readonly(instance):
         return
     for rig_object in (instance.head_rig, instance.body_rig):
-        if rig_object and isinstance(rig_object.data, bpy.types.Armature):
+        if (
+            rig_object
+            and not is_readonly_id(rig_object)
+            and isinstance(rig_object.data, bpy.types.Armature)
+            and not is_readonly_id(rig_object.data)
+        ):
             collection = rig_object.data.collections.get(VOLUME_BONE_COLLECTION)
             if collection:
                 collection.is_visible = not value
@@ -665,10 +720,15 @@ def get_solo_internal_bones(self: "CharacterViewOptionsProperties") -> bool:
 
 def set_solo_internal_bones(self: "CharacterViewOptionsProperties", value: bool):
     instance = _get_view_options_owner(self)
-    if not instance:
+    if not instance or is_reference_readonly(instance):
         return
     head_rig = instance.head_rig
-    if head_rig and isinstance(head_rig.data, bpy.types.Armature):
+    if (
+        head_rig
+        and not is_readonly_id(head_rig)
+        and isinstance(head_rig.data, bpy.types.Armature)
+        and not is_readonly_id(head_rig.data)
+    ):
         collection = head_rig.data.collections.get(INTERNAL_BONE_COLLECTION)
         if collection:
             collection.is_solo = value
@@ -691,18 +751,23 @@ def get_copied_rig_instance_name(self: "DuplicateRigInstance") -> str:
 
 
 def set_active_material_preview(self: "CharacterViewOptionsProperties", value: int):
+    instance = _get_view_options_owner(self)
+    if is_reference_readonly(instance) or is_readonly_id(self.id_data):
+        return
     self["active_material_preview"] = value
     input_name = "Factor"
 
-    instance = _get_view_options_owner(self)
     if not instance:
         return
 
-    head_node_group = get_head_texture_logic_node(instance.head_material)
-    body_node_group = get_body_texture_logic_node(instance.body_material)
-
-    for node_group in [head_node_group, body_node_group]:
-        if not node_group or not node_group.node_tree:
+    for material, get_node in (
+        (instance.head_material, get_head_texture_logic_node),
+        (instance.body_material, get_body_texture_logic_node),
+    ):
+        if not material or is_readonly_id(material) or is_readonly_id(material.node_tree):
+            continue
+        node_group = get_node(material)
+        if not node_group or not node_group.node_tree or is_readonly_id(node_group.node_tree):
             continue
 
         # combined
@@ -795,6 +860,11 @@ def poll_body_mesh(self: "RigInstance", scene_object: bpy.types.Object) -> bool:
 
 
 def update_evaluate_rbfs_value(self: "RigInstance", context: "Context"):
+    from ..runtime.engine import sync_settings
+
+    if is_reference_readonly(self):
+        return
+    sync_settings(self)
     # Avoid circular import
     try:
         from ..editors.rbf_editor.utilities import update_evaluate_rbfs_value as _update
@@ -804,7 +874,25 @@ def update_evaluate_rbfs_value(self: "RigInstance", context: "Context"):
         logger.debug("Core module missing. This function will not work.")
 
 
-def update_face_pose(self: "RigInstance", context: "Context"):
+def _apply_reference_face_pose(instance: "RigInstance", preview: str) -> None:
+    """Apply expression controls only; referenced head/body poses remain source-owned."""
+    from ..utilities import reset_face_board_controls
+
+    if not instance.face_board or is_face_board_readonly(instance):
+        return
+    pose_path = Path(preview).parent / "pose.json"
+    if not pose_path.exists():
+        return
+    with pose_path.open() as stream:
+        data = json.load(stream)
+    reset_face_board_controls(instance.face_board)
+    for bone_name, transform in data.get("face_board", {}).items():
+        bone = instance.face_board.pose.bones.get(bone_name)
+        if bone and bone_name not in FACE_BOARD_SWITCHES + EXCLUDED_FACE_BOARD_CONTROLS:
+            bone.location = Vector(transform["location"])
+
+
+def update_face_pose(self: "CharacterFaceBoardProperties", context: "Context"):
     # The sentinel item shown when no pose matches the active filters is inert.
     if getattr(self, "face_pose_previews", "") == NO_FACE_POSE:
         return
@@ -822,31 +910,37 @@ def update_face_pose(self: "RigInstance", context: "Context"):
     selected_armature_objects = {obj for obj in context.selected_objects or [] if obj.type == "ARMATURE"}
 
     active_instance = get_active_rig_instance()
-    if not active_instance:
+    if not active_instance or not active_instance.face_board or is_face_board_readonly(active_instance):
         return
 
     addon_scene_properties = get_addon_scene_properties()
     addon_window_manager_properties = get_addon_window_manager_properties()
+    previous_evaluation = addon_window_manager_properties.evaluate_dependency_graph
     addon_window_manager_properties.evaluate_dependency_graph = False
 
-    # update all instances with the same face board
-    for instance in addon_scene_properties.rig_instance_list:
-        if instance.face_board == active_instance.face_board:
-            body = get_body(instance.name)
-            if body:
-                body.set_pose()
-            head = get_head(instance.name)
-            if head:
-                head.set_pose()
-
+    try:
+        for instance in addon_scene_properties.rig_instance_list:
+            if instance.face_board != active_instance.face_board or is_face_board_readonly(instance):
+                continue
+            if is_reference_readonly(instance):
+                _apply_reference_face_pose(instance, self.face_pose_previews)
+            else:
+                body = get_body(instance.name)
+                if body:
+                    body.set_pose()
+                head = get_head(instance.name)
+                if head:
+                    head.set_pose()
             instances_to_update.append(instance)
 
-    if not active_instance.face_board.hide_get():
-        selected_armature_objects.add(active_instance.face_board)
+        if not active_instance.face_board.hide_get():
+            selected_armature_objects.add(active_instance.face_board)
 
-    switch_to_pose_mode(*selected_armature_objects)
-
-    addon_window_manager_properties.evaluate_dependency_graph = True
+        selected_armature_objects = {obj for obj in selected_armature_objects if not is_readonly_id(obj)}
+        if selected_armature_objects:
+            switch_to_pose_mode(*selected_armature_objects)
+    finally:
+        addon_window_manager_properties.evaluate_dependency_graph = previous_evaluation
 
     # Evaluate all instances that share that face board
     for instance in instances_to_update:
@@ -854,6 +948,8 @@ def update_face_pose(self: "RigInstance", context: "Context"):
 
 
 def update_head_to_body_constraint_influence(self: "RigInstance", context: "Context"):  # noqa: ARG001
+    if is_reference_readonly(self) or is_readonly_id(self.head_rig):
+        return
     head = get_active_head()
     if head:
         head.set_head_to_body_constraint_influence(self.head_to_body_constraint_influence)
@@ -916,6 +1012,8 @@ def get_body_image_output_items(instance: "RigInstance") -> list[tuple[bpy.types
 
 
 def update_instance_name(self: "RigInstance", context: "Context"):
+    if is_reference_readonly(self) or is_readonly_id(self.id_data):
+        return
     from ..utilities import get_addon_scene_properties
 
     addon_scene_properties = get_addon_scene_properties(context)
@@ -941,6 +1039,8 @@ def update_body_output_items(self: "RigInstance | None", context: "Context"):  #
     addon_scene_properties = get_addon_scene_properties(context)
 
     for instance in addon_scene_properties.rig_instance_list:
+        if is_reference_readonly(instance) or is_readonly_id(instance.id_data):
+            continue
         # Recover a cleared body_mesh pointer from the canonically-named mesh that is
         # still skinned to the body rig. A lost pointer otherwise blocks this sync.
         if instance and instance.body_rig and not instance.body_mesh:
@@ -1011,6 +1111,8 @@ def update_head_output_items(self: "RigInstance | None", context: "Context"):  #
     addon_scene_properties = get_addon_scene_properties(context)
 
     for instance in addon_scene_properties.rig_instance_list:
+        if is_reference_readonly(instance) or is_readonly_id(instance.id_data):
+            continue
         # Recover a cleared head_mesh pointer from the canonically-named mesh that is
         # still skinned to the head rig. A lost pointer otherwise blocks this sync.
         if instance and instance.head_rig and not instance.head_mesh:

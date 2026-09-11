@@ -73,6 +73,7 @@ def end_render() -> None:
 
 class RigInstance(bpy.types.PropertyGroup):
     from .runtime.controller import auto_evaluation_changed
+    from .runtime.engine import sync_settings
 
     name: bpy.props.StringProperty(
         default="my_metahuman",
@@ -106,16 +107,19 @@ class RigInstance(bpy.types.PropertyGroup):
     )  # pyright: ignore[reportInvalidTypeForm]
     evaluate_bones: bpy.props.BoolProperty(
         default=True,
+        update=sync_settings,
         name="Evaluate Bones",
         description="Whether to evaluate bone positions based on the face board controls",
     )  # pyright: ignore[reportInvalidTypeForm]
     evaluate_shape_keys: bpy.props.BoolProperty(
         default=True,
+        update=sync_settings,
         name="Evaluate Shape Keys",
         description="Whether to evaluate shape keys based on the face board controls",
     )  # pyright: ignore[reportInvalidTypeForm]
     evaluate_texture_masks: bpy.props.BoolProperty(
         default=True,
+        update=sync_settings,
         name="Evaluate Texture Masks",
         description="Whether to evaluate texture masks based on the face board controls",
     )  # pyright: ignore[reportInvalidTypeForm]
@@ -1012,6 +1016,13 @@ class RigInstance(bpy.types.PropertyGroup):
                     pose_bone.rotation_mode = mode
 
     def head_initialize(self, update_raw_control_list: bool = True):
+        from .ui.callbacks import is_reference_readonly
+
+        if is_reference_readonly(self, "head"):
+            raise RuntimeError(
+                "Head authoring is unavailable for a linked reference. Edit the source .blend file or use Append."
+            )
+
         from .bindings import riglogic  # pyright: ignore[reportAttributeAccessIssue]
         from .dna_io import get_dna_reader
 
@@ -1068,6 +1079,13 @@ class RigInstance(bpy.types.PropertyGroup):
         self.data[self.cache_key("head", "initialized")] = True
 
     def body_initialize(self, update_rbf_solver_list: bool = True):
+        from .ui.callbacks import is_reference_readonly
+
+        if is_reference_readonly(self, "body"):
+            raise RuntimeError(
+                "Body authoring is unavailable for a linked reference. Edit the source .blend file or use Append."
+            )
+
         from .bindings import riglogic  # pyright: ignore[reportAttributeAccessIssue]
         from .dna_io import get_dna_reader
 
@@ -1381,6 +1399,16 @@ class RigInstance(bpy.types.PropertyGroup):
         from .runtime import controller, engine
 
         if dependency_graph is not None or not is_main_thread() or controller.is_suspended(self):
+            return
+        if engine.carriers(self):
+            engine.adopt(self)
+            if not callbacks.is_reference_readonly(self) and (
+                (self.head_rig and not self.head_initialized) or (self.body_rig and not self.body_initialized)
+            ):
+                with controller.preserve_bindings():
+                    self.initialize()
+            engine.sync_settings(self)
+            bpy.context.view_layer.update()
             return
         if not self.head_initialized and self.head_rig:
             self.head_initialize()

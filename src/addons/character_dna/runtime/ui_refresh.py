@@ -15,6 +15,43 @@ PLAYBACK_INTERVAL = 1.0 / 20.0
 IDLE_INTERVAL = 0.25
 SUBSCRIPTION_LIFETIME = 0.75
 _subscribers: dict[tuple[int, int, int], float] = {}
+_migration: dict[int, bool] = {}
+_migration_pending: set[int] = set()
+
+
+def migration_needed(scene: Any) -> bool:
+    """Read cached migration state and defer cache misses outside panel drawing."""
+    key = scene.as_pointer()
+    if key not in _migration:
+        _migration_pending.add(key)
+        if not bpy.app.timers.is_registered(_refresh_migration):
+            bpy.app.timers.register(_refresh_migration, first_interval=0.0)
+    return _migration.get(key, False)
+
+
+def invalidate_migration() -> None:
+    """Invalidate structural UI state without doing validation in the caller."""
+    _migration.clear()
+
+
+def _refresh_migration() -> None:
+    from ..utilities import detect_legacy_data, detect_runtime_migration
+
+    pending = _migration_pending.copy()
+    _migration_pending.clear()
+    for scene in bpy.data.scenes:
+        key = scene.as_pointer()
+        if key in pending:
+            _migration[key] = detect_legacy_data(scene) is not None or detect_runtime_migration(scene)
+    context = getattr(bpy, "context", None)
+    manager = getattr(context, "window_manager", None)
+    for window in getattr(manager, "windows", ()):
+        if window.scene.as_pointer() in pending:
+            for area in window.screen.areas:
+                if area.type == "VIEW_3D":
+                    for region in area.regions:
+                        if region.type == "UI":
+                            region.tag_redraw()
 
 
 def watch(context: Any, instance: Any) -> None:
@@ -59,5 +96,9 @@ def _refresh() -> float | None:
 def clear() -> None:
     """Drop all UI identities before load, undo, add-on reload or disable."""
     _subscribers.clear()
+    _migration.clear()
+    _migration_pending.clear()
+    if bpy.app.timers.is_registered(_refresh_migration):
+        bpy.app.timers.unregister(_refresh_migration)
     if bpy.app.timers.is_registered(_refresh):
         bpy.app.timers.unregister(_refresh)
