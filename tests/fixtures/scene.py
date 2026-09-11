@@ -247,6 +247,12 @@ def _add_reference_control_rig(instance: "RigInstance", root: bpy.types.Collecti
     bone.roll = 0.3
     bpy.ops.object.mode_set(mode="OBJECT")
     instance.control_rig = control
+    widget_mesh = bpy.data.meshes.new("Arbitrary control artwork")
+    widget_mesh.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [(0, 1), (1, 2), (2, 0)], [])
+    widget = bpy.data.objects.new("Unrelated display geometry", widget_mesh)
+    widget_parent = bpy.data.objects.new("Unrelated display parent", None)
+    widget.parent = widget_parent
+    control.pose.bones["DEF-upper_arm.L"].custom_shape = widget
     constraints = bpy.data.collections.new("reference_control_constraints")
     root.children.link(constraints)
     constraints.hide_viewport = True

@@ -25,6 +25,12 @@ class SavedScene(bpy.types.PropertyGroup):
     rig_logic_instance_list: bpy.props.CollectionProperty(type=SavedInstance)  # pyright: ignore[reportInvalidTypeForm]
 
 
+class SavedAssemblyScene(bpy.types.PropertyGroup):
+    """Read Assembly's saved per-character records without enabling that addon."""
+
+    rig_instance_proxies: bpy.props.CollectionProperty(type=SavedInstance)  # pyright: ignore[reportInvalidTypeForm]
+
+
 def main() -> None:
     """Write a JSON descriptor; never enable an addon or save the opened blend."""
     import addon_utils
@@ -42,6 +48,8 @@ def main() -> None:
             addon_utils.disable(addon, default_set=False)
         bpy.utils.register_class(SavedInstance)
         bpy.utils.register_class(SavedScene)
+        bpy.utils.register_class(SavedAssemblyScene)
+        bpy.types.Scene.character_assembly = bpy.props.PointerProperty(type=SavedAssemblyScene)
         for edition in ADDON_IDS:
             setattr(bpy.types.Scene, edition, bpy.props.PointerProperty(type=SavedScene))
         bpy.ops.wm.open_mainfile(filepath=args.blend_file, use_scripts=False)

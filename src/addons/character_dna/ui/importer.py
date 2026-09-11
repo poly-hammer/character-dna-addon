@@ -256,6 +256,30 @@ class ImportAnimation(ImportAsset):
         row.prop(operator, "prefix_component_name")
 
 
+class CHARACTER_DNA_LINK_OPTIONS_PT_panel(bpy.types.Panel):
+    bl_space_type = "FILE_BROWSER"
+    bl_region_type = "TOOL_PROPS"
+    bl_label = "Options"
+    bl_parent_id = "FILE_PT_operator"
+    bl_options = {"HEADER_LAYOUT_EXPAND"}
+
+    @classmethod
+    def poll(cls, context: "Context") -> bool:
+        operator = context.space_data.active_operator  # type: ignore[attr-defined]
+        return (
+            operator is not None
+            and operator.bl_idname == f"{ToolInfo.NAME.upper()}_OT_append_or_link_metahuman"
+            and operator.operation_type == "LINK"
+        )
+
+    def draw(self, context: "Context"):
+        if not self.layout:
+            return
+
+        operator = context.space_data.active_operator  # type: ignore[attr-defined]
+        self.layout.prop(operator, "editable_rig")
+
+
 class LinkAppendCharacterImportHelper(ImportHelper):
     """
     This class subclasses the import helper to define a custom file browser
@@ -295,8 +319,6 @@ class LinkAppendCharacterImportHelper(ImportHelper):
 
         row = layout.row()
         row.prop(operator, "operation_type", expand=True)
-        if operator.operation_type == "LINK":
-            layout.prop(operator, "editable_rig")
         file_path = Path(bpy.path.abspath(operator.filepath))
 
         if not operator.filepath or not file_path.is_file():

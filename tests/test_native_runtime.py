@@ -491,6 +491,27 @@ def test_native_frame_rejects_invalid_buffers(native_head):
     assert native.session_statistics(session) == {"solves": 1, "cache_hits": 1}
 
 
+def test_excluded_character_does_not_solve(native_head):
+    """Scene references must not run native evaluation for an excluded character."""
+    scene = bpy.context.scene
+    layer = bpy.context.view_layer.layer_collection.children[native_head.name]
+    original_frame = scene.frame_current
+    scene.frame_set(1)
+    layer.exclude = True
+    bpy.context.view_layer.update()
+    calls = {key: record["calls"] for key, record in engine._records.items()}
+    try:
+        for frame in (2, 3):
+            scene.frame_set(frame)
+        assert calls == {key: record["calls"] for key, record in engine._records.items()}
+        layer.exclude = False
+        scene.frame_set(4)
+        assert any(record["calls"] > calls[key] for key, record in engine._records.items())
+    finally:
+        layer.exclude = False
+        scene.frame_set(original_frame)
+
+
 def test_native_frame_plan_rejects_invalid_indices(native_head):
     """Reject out-of-range controls and cyclic eye chains before publishing a plan."""
     record = next(record for record in engine._records.values() if record["component"] == "head")

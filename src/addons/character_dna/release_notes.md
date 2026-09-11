@@ -1,13 +1,19 @@
+## Major Changes
+
+* Re-designed RigLogic integration for x3.7 speed up to total rig instance evaluation
+
+## Minor Changes
+
+* Updated Legacy migration operator to convert existing rig instances to newly re-designed RigLogic integration
+* Updated Append and Link functionality to append data within a rig instance collection, while maintaining RigLogic connection
+* The Link operation now has a `Editable Rig` option to make rig controls native to the scene, while linking everything else
+
 ## Patch Changes
 
 * Fixed face board import to properly exclude bones not effecting DNA GUI controls
-* Fixed a crash importing a character whose collection was excluded from the view layer or left outside the scene
-* Fixed a crash toggling the face board, switching LODs, or entering pose mode on a character not in the view layer
 * Fixed a character's collections being moved out of the view layer when its asset collection was deleted
 * Fixed the face rig silently stopping evaluation after a re-initialize that Blender would not let complete
-* Fixed exporting a selected component when its DNA file had been moved or deleted
 * Fixed baking the face board when its action held channels other than pose bone transforms
-* Fixed an error when a panel drew while the addon was being disabled or reloaded
 
 ## Tests Passing On
 

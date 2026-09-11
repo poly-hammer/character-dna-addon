@@ -11,6 +11,8 @@ Open **File → Import → MetaHuman Append/Link (.blend)** and select a `.blend
 
 ![Append/Link a MetaHuman from a .blend](../images/append-link/file_dialog.png)
 
+When linking, there is an option `Editable Rig` that can be turned on. This make's the linked MetaHuman's face board and control rig native to the blender scene, thus allowing you to pose and animated with the rigs while not being able to edit the other data on the MetaHuman objects.
+
 ## Keep the Collection Names Intact
 
 !!! warning

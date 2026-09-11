@@ -48,6 +48,46 @@ def _dependencies() -> dict[Any, set[Any]]:
     return result
 
 
+def _encode_assembly(value: Any) -> Any:
+    if isinstance(value, bpy.types.Object):
+        return {"$object": _identity(value)}
+    if hasattr(value, "items"):
+        return {key: _encode_assembly(item) for key, item in value.items() if key != "reference_restored"}
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return [_encode_assembly(item) for item in value]
+
+
+def _assembly_metadata(scene: Any, instance: Any) -> dict | None:
+    name = instance.get("name") or instance.get("instance_name")
+    group = getattr(scene, "character_assembly", None)
+    if group is None:
+        group = scene.get("character_assembly")
+    proxies = group.get("rig_instance_proxies", ()) if group is not None else ()
+    saved = next((proxy for proxy in proxies if proxy.get("rig_instance_name") == name), None)
+    if saved is None:
+        saved = instance.get("reference_assembly")
+    if saved is None:
+        return None
+    data = _encode_assembly(saved)
+    if data.get("manifest_path"):
+        data["manifest_path"] = bpy.path.abspath(data["manifest_path"])
+    for component in data.get("components", ()):
+        if component.get("source_path"):
+            component["source_path"] = bpy.path.abspath(component["source_path"])
+    return data
+
+
+def _remap_assembly(value: Any, objects: dict) -> Any:
+    if isinstance(value, dict):
+        if "$object" in value:
+            return objects[value["$object"]]
+        return {key: _remap_assembly(item, objects) for key, item in value.items() if item is not None}
+    if isinstance(value, list):
+        return [_remap_assembly(item, objects) for item in value]
+    return value
+
+
 def describe_instance(scene: Any, edition: str, instance: Any) -> dict:  # noqa: PLR0912
     """Describe saved ID properties without registering or initializing the addon."""
     name = instance.get("name") or instance.get("instance_name")
@@ -173,6 +213,7 @@ def describe_instance(scene: Any, edition: str, instance: Any) -> dict:  # noqa:
             for carrier in carriers
         ],
         "settings": settings,
+        "assembly": _assembly_metadata(scene, instance),
         "issues": sorted(set(issues)),
         "output_folder_path": instance.get("output_folder_path") or instance.get("output", {}).get("folder_path", ""),
     }
@@ -418,7 +459,8 @@ def _editable_objects(objects: dict[str, Any], descriptor: dict) -> dict[str, An
 
 def _local_collections(descriptor: dict, objects: dict[str, Any]) -> Any:
     collections = {}
-    widgets = _widget_objects(objects.get(descriptor["pointers"].get("face_board")), set(objects.values()))
+    members = set(objects.values())
+    widgets = set().union(*(_widget_objects(owner, members) for owner in members if owner.type == "ARMATURE"))
 
     def create(item: dict) -> Any:
         if item["id"] in collections:
@@ -594,6 +636,8 @@ def import_characters(  # noqa: PLR0912, PLR0915
                 owner = objects.get(descriptor["pointers"].get(field))
                 if owner is not None:
                     instance[field] = owner
+            if descriptor.get("assembly") is not None:
+                instance["reference_assembly"] = _remap_assembly(descriptor["assembly"], objects)
             for component in ("head", "body"):
                 instance[f"{component}_dna_file_path"] = descriptor[f"{component}_dna_file_path"]
                 source_material = descriptor["pointers"].get(f"{component}_material")

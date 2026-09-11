@@ -572,6 +572,8 @@ def solve(owner: Any, graph: Any) -> float:
     try:
         if not owner.is_evaluated or owner == record["carrier"]:
             raise RuntimeError("Native output publication requires evaluated carrier storage")
+        if graph.view_layer.objects.get(original.name) != original:
+            return float(owner.get("epoch", 0.0))
         instance = _resolve_instance(record["carrier"], graph.scene)
         component = record["component"]
         if component == "switches":

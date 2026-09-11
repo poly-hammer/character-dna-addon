@@ -945,6 +945,10 @@ def _assert_reference_control_rig(  # noqa: PLR0915
     control = instance.control_rig
     body = instance.body_rig
     assert control is not None and body is not None
+    widget = control.pose.bones["DEF-upper_arm.L"].custom_shape
+    assert widget is not None, "Control-rig custom shapes must survive reference imports"
+    assert widget not in bpy.context.scene.objects.values()
+    assert widget.parent not in bpy.context.scene.objects.values()
     root = instance["reference_root"]
     assert control in root.objects.values()
     animation = control.animation_data
