@@ -48,6 +48,23 @@ def test_runtime_still_rejects_original_output_storage(monkeypatch):
     assert "unsafe" in engine._errors
 
 
+def test_removed_carrier_record_is_pruned(monkeypatch):
+    """Deleting a character hierarchy outside the add-on must not break panel lookups."""
+    carrier = bpy.data.objects.new("RemovedNativeCarrier", None)
+    pointer = carrier.as_pointer()
+    monkeypatch.setattr(engine, "_records", {pointer: {"carrier": carrier}})
+    monkeypatch.setattr(engine, "_warnings", {pointer: "stale"})
+    monkeypatch.setattr(engine, "_models", {("model", False): object()})
+    bpy.data.objects.remove(carrier)
+
+    instance = {"head_rig": None, "body_rig": None, "face_board": None}
+    assert engine.bound_carriers(instance) == []
+    assert not engine.active(instance)
+    assert engine._records == {}
+    assert engine._warnings == {}
+    assert engine._models == {}
+
+
 @pytest.mark.parametrize("problem", ["legacy", "missing_dna", "corrupt_bindings", "native_failure"])
 def test_runtime_hydration_classifies_expected_states(monkeypatch, caplog, problem):
     """Migration and moved files warn; broken current bindings and native failures error."""

@@ -105,14 +105,30 @@ def _belongs_to(carrier: Any, instance: Any) -> bool:
     return owner is not None and carrier.get("face" if component == "switches" else "rig") == owner
 
 
+def _live_records() -> list[dict[str, Any]]:
+    """Drop records whose Blender carrier ID was removed outside the add-on."""
+    records = []
+    for key, record in tuple(_records.items()):
+        try:
+            record["carrier"].as_pointer()
+        except ReferenceError:
+            _records.pop(key, None)
+            _warnings.pop(key, None)
+        else:
+            records.append(record)
+    if not _records:
+        _models.clear()
+    return records
+
+
 def active(instance: Any) -> bool:
     """Whether native drivers own any output channels for the instance."""
-    return any(_belongs_to(record["carrier"], instance) for record in _records.values())
+    return any(_belongs_to(record["carrier"], instance) for record in _live_records())
 
 
 def bound_carriers(instance: Any) -> list[Any]:
     """Read active carrier ownership without traversing scene objects from the UI."""
-    return [record["carrier"] for record in _records.values() if _belongs_to(record["carrier"], instance)]
+    return [record["carrier"] for record in _live_records() if _belongs_to(record["carrier"], instance)]
 
 
 def invalidate() -> None:
@@ -131,7 +147,7 @@ def clear_contexts() -> None:
     """Retire completed graph sessions without accessing Blender IDs."""
     global _generation
     _generation += 1
-    for record in _records.values():
+    for record in _live_records():
         record["contexts"].clear()
         record.pop("last_context", None)
 
@@ -141,6 +157,7 @@ def discard(instance: Any = None) -> None:
     from .ui_refresh import invalidate_migration
 
     invalidate_migration()
+    _live_records()
     for carrier in carriers(instance):
         if carrier.library or carrier.override_library:
             continue
@@ -159,6 +176,7 @@ def release_records(instance: Any = None) -> None:
     if instance is None:
         invalidate()
         return
+    _live_records()
     for carrier in carriers(instance):
         _records.pop(carrier.as_pointer(), None)
         _warnings.pop(carrier.as_pointer(), None)
@@ -271,6 +289,7 @@ def adopt(instance: Any = None) -> int:
     available, reason = capability()
     if not available:
         raise RuntimeError(reason)
+    _live_records()
     found = carriers(instance)
     issues = (
         binding_issues(instance)
@@ -368,6 +387,7 @@ def hydrate() -> None:
     """Adopt newly loaded compatible carriers without retiring existing sessions."""
     if not capability()[0]:
         return
+    _live_records()
     bpy.app.driver_namespace[NAMESPACE] = solve
     for carrier in carriers():
         try:
@@ -565,6 +585,7 @@ def solve(owner: Any, graph: Any) -> float:
     from .frame import buffers, capture
 
     original = owner.original
+    _live_records()
     record = _records.get(original.as_pointer())
     if record is None:
         warn_unavailable(original)
@@ -681,7 +702,7 @@ def _head_record(instance: Any) -> dict[str, Any] | None:
     return next(
         (
             record
-            for record in _records.values()
+            for record in _live_records()
             if _belongs_to(record["carrier"], instance) and record["component"] == "head"
         ),
         None,
@@ -720,11 +741,7 @@ def _store_preview(record: dict[str, Any], outputs: array, controls: dict[str, A
 def preview_controls(instance: Any, state: Any, component: str = "head") -> bool:
     """Publish a calculated manual head pose through the existing native drivers."""
     record = next(
-        (
-            item
-            for item in _records.values()
-            if _belongs_to(item["carrier"], instance) and item["component"] == component
-        ),
+        (item for item in _live_records() if _belongs_to(item["carrier"], instance) and item["component"] == component),
         None,
     )
     if record is None:
@@ -809,7 +826,7 @@ def ui_raw_control_value(instance: Any, index: int, graph: Any) -> float | None:
     identity = instance_id(instance)
     if not identity:
         return None
-    for record in _records.values():
+    for record in _live_records():
         if not _belongs_to(record["carrier"], instance) or record["component"] != "head":
             continue
         carrier = record["carrier"].evaluated_get(graph)
@@ -829,7 +846,7 @@ def ui_raw_control_value(instance: Any, index: int, graph: Any) -> float | None:
 
 def mark_authoring_current(instance: Any, component: str) -> None:
     """Keep an explicit tool calculation from being overwritten by a repeated getter."""
-    for record in _records.values():
+    for record in _live_records():
         if _belongs_to(record["carrier"], instance) and record["component"] == component:
             record["authoring_revision"] = record["calls"]
 
@@ -839,7 +856,7 @@ def synchronize_authoring(instance: Any, component: str, state: Any) -> Any:
     identity = instance_id(instance)
     if state is None or not identity:
         return state
-    for record in _records.values():
+    for record in _live_records():
         if not _belongs_to(record["carrier"], instance) or record["component"] != component:
             continue
         context = record.get("last_context")
