@@ -1353,11 +1353,13 @@ def detect_legacy_data(scene: bpy.types.Scene) -> tuple[str, str] | None:
 
 
 def detect_runtime_migration(scene: bpy.types.Scene) -> bool:
-    """Detect outdated saved bindings on real rigs, independently of live sessions."""
-    from ..runtime import engine
+    """Detect outdated saved bindings, excluding outputs temporarily owned by editors."""
+    from ..runtime import controller, engine
 
     properties = getattr(scene, ToolInfo.NAME, None)
     for instance in getattr(properties, "rig_instance_list", ()):
+        if controller.is_suspended(instance):
+            continue
         if _runtime_migration_components(instance) and engine.binding_issues(instance):
             return True
     return False
@@ -1372,6 +1374,9 @@ def migrate_runtime_data(context: "Context") -> tuple[str, int, int]:
 
     properties = get_addon_scene_properties(context)
     instances = list(properties.rig_instance_list)
+    editing = [instance.name for instance in instances if controller.is_suspended(instance)]
+    if editing:
+        raise ValueError(f"Commit or revert active edits before migrating: {', '.join(editing)}")
     targets = [
         instance
         for instance in instances

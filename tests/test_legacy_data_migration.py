@@ -149,6 +149,30 @@ def test_detection_uses_saved_graph_not_session(
     assert detect_legacy_data(empty_scene) is None
 
 
+@pytest.mark.parametrize("saved_editor", [False, True])
+def test_editor_owned_rig_is_not_runtime_migration(empty_scene, monkeypatch, saved_editor):
+    instance = _make_runtime_instance(empty_scene)
+    instance["native_runtime_id"] = "editing-instance"
+    instance["native_editor_resume"] = saved_editor
+    monkeypatch.setattr(controller, "_suspended", set() if saved_editor else {"editing-instance"})
+    assert controller.is_suspended(instance)
+    assert engine.binding_issues(instance)
+    assert not detect_runtime_migration(empty_scene)
+
+    other = _make_runtime_instance(empty_scene, "Other")
+    other["native_runtime_id"] = "other-instance"
+    assert detect_runtime_migration(empty_scene)
+
+
+def test_migration_rejects_active_editor_before_mutation(empty_scene, monkeypatch):
+    instance = _make_runtime_instance(empty_scene)
+    instance["native_editor_resume"] = True
+    monkeypatch.setattr(misc, "migrate_legacy_data", lambda _context: pytest.fail("Must not migrate during editing"))
+    monkeypatch.setattr(engine, "binding_issues", lambda _instance: pytest.fail("Editor outputs are incomplete"))
+    with pytest.raises(ValueError, match=r"(?i)commit or revert"):
+        misc.migrate_runtime_data(bpy.context)
+
+
 @pytest.mark.parametrize("previous_flag", [False, True])
 @pytest.mark.parametrize("failure", [False, True])
 def test_metadata_preserves_evaluation_state(
@@ -391,6 +415,28 @@ def test_real_migration_preserves_animation_and_evaluation(portable_head, layout
     scene.frame_set(10)
     opened = head.evaluated_get(bpy.context.evaluated_depsgraph_get()).pose.bones["FACIAL_C_Jaw"].matrix.copy()
     assert neutral != opened
+
+
+def test_current_rig_authoring_is_not_legacy(portable_head) -> None:
+    from character_dna.runtime import ui_refresh
+
+    instance = portable_head
+    scene = bpy.context.scene
+    assert engine.active(instance)
+    assert engine.binding_issues(instance) == []
+    with controller.authoring_operation(instance):
+        assert controller.is_suspended(instance)
+        assert engine.carriers(instance) == []
+        assert engine.binding_issues(instance)
+        assert not detect_runtime_migration(scene)
+        ui_refresh.migration_needed(scene)
+        ui_refresh._refresh_migration()
+        assert not ui_refresh.migration_needed(scene)
+        with pytest.raises(ValueError, match=r"Commit or revert"):
+            misc.migrate_runtime_data(bpy.context)
+    assert not controller.is_suspended(instance)
+    assert engine.binding_issues(instance) == []
+    assert not detect_runtime_migration(scene)
 
 
 def test_current_schema_without_session_is_not_legacy(portable_head) -> None:
