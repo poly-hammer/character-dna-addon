@@ -58,6 +58,15 @@ def rebuild(instance: Any) -> None:
         _transitioning = previous
 
 
+def ensure_bindings(instance: Any) -> None:
+    """Bind newly enabled local components before validating the saved runtime."""
+    if engine.missing_components(instance) and not any(
+        carrier.library or carrier.override_library for carrier in engine.carriers(instance)
+    ):
+        rebuild(instance)
+    engine.adopt(instance)
+
+
 @contextmanager
 def preserve_bindings():
     """Keep portable drivers while display-name changes release authoring caches."""
@@ -110,7 +119,7 @@ def reconcile() -> None:  # noqa: PLR0912
                                 for carrier in outdated:
                                     engine.warn_unavailable(carrier, _warning)
                                 continue
-                            engine.adopt(instance)
+                            ensure_bindings(instance)
                             if not any(
                                 carrier.library or carrier.override_library for carrier in engine.carriers(instance)
                             ) and (

@@ -20,6 +20,7 @@ from .bindings import (
     Target,
     add_variable,
     install_targets,
+    mute_targets,
     owned_curve,
     remove_targets,
     validate_targets,
@@ -215,6 +216,21 @@ def sync_settings(instance: Any, _context: Any = None) -> None:
         if dict(carrier.get("settings", {})) != settings:
             carrier["settings"] = settings
             carrier.update_tag()
+        component = "head" if carrier["component"] == "switches" else carrier["component"]
+        mute_targets(carrier, not (instance.auto_evaluate and getattr(instance, f"auto_evaluate_{component}")))
+
+
+def missing_components(instance: Any) -> list[str]:
+    """Find enabled components that do not yet have persisted output bindings."""
+    found = {carrier["component"] for carrier in carriers(instance)}
+    return [
+        component
+        for component in ("head", "body")
+        if getattr(instance, f"{component}_rig")
+        and instance.auto_evaluate
+        and getattr(instance, f"auto_evaluate_{component}")
+        and component not in found
+    ]
 
 
 def _describe_carrier(carrier: Any, instance: Any) -> None:
@@ -270,14 +286,7 @@ def binding_issues(instance: Any) -> list[str]:
     """Report persisted runtime compatibility, independent of current evaluation state."""
     found = carriers(instance)
     issues = [issue for carrier in found for issue in carrier_issues(carrier)]
-    issues.extend(
-        f"Missing persisted {component} native runtime"
-        for component in ("head", "body")
-        if getattr(instance, f"{component}_rig")
-        and instance.auto_evaluate
-        and getattr(instance, f"auto_evaluate_{component}")
-        and not any(carrier.get("component") == component for carrier in found)
-    )
+    issues.extend(f"Missing persisted {component} native runtime" for component in missing_components(instance))
     return issues
 
 
@@ -875,7 +884,8 @@ def synchronize_authoring(instance: Any, component: str, state: Any) -> Any:
     return state
 
 
-def _install_switches(instance: Any, identity: str) -> None:
+def switch_targets(instance: Any) -> tuple[list[Target], list[str], int, array]:
+    """Describe face switches for both persistent drivers and explicit sampling."""
     face = instance.face_board
     targets = []
     switches = []
@@ -901,6 +911,12 @@ def _install_switches(instance: Any, identity: str) -> None:
             targets.append(Target(visibility.id_data, visibility.path_from_id("hide"), -1, len(switches)))
             switches.append("CTRL_lookAtSwitch")
             values.append(float(visibility.hide))
+    return targets, switches, visibility_start, values
+
+
+def _install_switches(instance: Any, identity: str) -> None:
+    face = instance.face_board
+    targets, switches, visibility_start, values = switch_targets(instance)
     if not targets:
         return
     validate_targets(targets)

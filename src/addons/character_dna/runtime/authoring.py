@@ -127,7 +127,7 @@ def bone_transforms(instance: Any, component: str, collect: bool = False) -> lis
     engine.native_module().transform_into(
         record["plan"], array("d", state.getJointOutputs()), values, component == "body"
     )
-    bound = engine.active(instance)
+    bound = engine.active(instance) and instance.auto_evaluate and getattr(instance, f"auto_evaluate_{component}")
     if bound:
         engine.preview_controls(instance, state, component)
     result = []
@@ -143,3 +143,25 @@ def bone_transforms(instance: Any, component: str, collect: bool = False) -> lis
         if collect:
             result.append((name, location, rotation, scale))
     return result
+
+
+def evaluate_once(instance: Any, component: str) -> None:
+    """Apply one native sample while automatic output drivers are disabled."""
+    if component == "head" and instance.face_board:
+        targets, switches, visibility_start, _values = engine.switch_targets(instance)
+        for index, (target, switch) in enumerate(zip(targets, switches, strict=True)):
+            value = instance.face_board.pose.bones[switch].location.y
+            path, _, property_name = target.path.rpartition(".")
+            owner = target.owner.path_resolve(path)
+            setattr(owner, property_name, value < 0.99 if index >= visibility_start else value)
+        bpy.context.view_layer.update()
+    sample(instance, component)
+    if instance.evaluate_bones:
+        bone_transforms(instance, component)
+    if component == "head":
+        if instance.evaluate_shape_keys:
+            instance.update_head_shape_keys()
+        if instance.evaluate_texture_masks:
+            instance.update_head_texture_masks()
+    getattr(instance, f"{component}_rig").update_tag()
+    bpy.context.view_layer.update()

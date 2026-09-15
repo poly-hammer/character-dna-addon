@@ -105,6 +105,20 @@ def install_targets(carrier: Any, targets: list[Target]) -> None:
         raise
 
 
+def mute_targets(carrier: Any, muted: bool) -> None:
+    """Release output channels immediately without deleting their portable bindings."""
+    for item in carrier.get("targets", []):
+        owner = item.get("owner")
+        if owner and item.get("embedded", False):
+            owner = owner.node_tree
+        if owner is None or owner.animation_data is None:
+            continue
+        curve = owner.animation_data.drivers.find(item["path"], index=max(0, item["index"]))
+        if curve and owned_curve(curve, carrier) and curve.mute != muted:
+            curve.mute = muted
+            owner.update_tag()
+
+
 def remove_targets(carrier: Any) -> None:
     """Remove only recorded, still-owned drivers; preserve user replacements."""
     for item in carrier.get("targets", []):

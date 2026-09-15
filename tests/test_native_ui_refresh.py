@@ -90,7 +90,8 @@ def test_raw_ui_snapshot_is_lazy_and_graph_local(monkeypatch):
     graphs = [handle(20, mode="VIEWPORT"), handle(21, mode="RENDER")]
     sessions = [object(), object()]
     rig = object()
-    carrier = SimpleNamespace(
+    carrier = handle(
+        10,
         evaluated_get=lambda graph: handle(graph.as_pointer() + 100),
         get={"component": "head", "rig": rig}.get,
     )
@@ -124,7 +125,7 @@ def test_raw_ui_read_never_initializes_a_missing_graph(monkeypatch):
         "identity": "ada",
         "component": "head",
         "contexts": {},
-        "carrier": SimpleNamespace(evaluated_get=lambda _graph: handle(30), get={"component": "head", "rig": rig}.get),
+        "carrier": handle(10, evaluated_get=lambda _graph: handle(30), get={"component": "head", "rig": rig}.get),
     }
     monkeypatch.setattr(engine, "_records", {"head": record})
     native = Mock()
@@ -141,7 +142,8 @@ def test_raw_ui_uses_rig_ownership_when_identities_collide(monkeypatch):
     records = {}
     for index, rig in enumerate(rigs):
         pointer = 100 + index
-        carrier = SimpleNamespace(
+        carrier = handle(
+            pointer,
             get={"component": "head", "rig": rig}.get,
             evaluated_get=lambda _graph, pointer=pointer: handle(pointer),
         )
@@ -199,7 +201,7 @@ def test_ui_ownership_does_not_scan_scene_objects(monkeypatch):
 
     rig = SimpleNamespace(library=None, override_library=None)
     instance = SimpleNamespace(bl_rna=True, head_rig=rig, body_rig=None, get=lambda _key, default=None: default)
-    carrier = SimpleNamespace(get={"component": "head", "rig": rig}.get, library=None, override_library=None)
+    carrier = handle(123, get={"component": "head", "rig": rig}.get, library=None, override_library=None)
     monkeypatch.setattr(engine, "_records", {123: {"carrier": carrier}})
     monkeypatch.setattr(engine, "carriers", lambda *_args: pytest.fail("UI reads must not scan scene objects"))
     for _ in range(10):

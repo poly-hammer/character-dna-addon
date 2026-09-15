@@ -1395,28 +1395,37 @@ class RigInstance(bpy.types.PropertyGroup):
             logger.debug("Could not import the raw control editor module to update the head raw control list.")
 
     def evaluate(self, component: "ComponentType" = "all", dependency_graph: bpy.types.Depsgraph | None = None):
-        """Ensure the character is bound; Blender's graph owns all live evaluation."""
+        """Update live drivers and explicitly sample requested disabled components."""
         from .runtime import controller, engine
 
         if dependency_graph is not None or not is_main_thread() or controller.is_suspended(self):
             return
         if engine.carriers(self):
-            engine.adopt(self)
+            controller.ensure_bindings(self)
             if not callbacks.is_reference_readonly(self) and (
                 (self.head_rig and not self.head_initialized) or (self.body_rig and not self.body_initialized)
             ):
                 with controller.preserve_bindings():
                     self.initialize()
             engine.sync_settings(self)
-            bpy.context.view_layer.update()
-            return
-        if not self.head_initialized and self.head_rig:
-            self.head_initialize()
-        if not self.body_initialized and self.body_rig:
-            self.body_initialize()
-        if not engine.active(self) and self.auto_evaluate:
-            engine.install(self)
+        else:
+            if not self.head_initialized and self.head_rig:
+                self.head_initialize()
+            if not self.body_initialized and self.body_rig:
+                self.body_initialize()
+            if not engine.active(self) and self.auto_evaluate:
+                engine.install(self)
         bpy.context.view_layer.update()
+        if not callbacks.is_reference_readonly(self):
+            from .runtime.authoring import evaluate_once
+
+            for name in ("body", "head"):
+                if (
+                    component in (name, "all")
+                    and getattr(self, f"{name}_initialized")
+                    and not (self.auto_evaluate and getattr(self, f"auto_evaluate_{name}"))
+                ):
+                    evaluate_once(self, name)
 
     def update_head_switch_values(self):
         """Switches are outputs of the dependency-ordered runtime carrier."""
