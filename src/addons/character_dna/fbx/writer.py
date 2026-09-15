@@ -15,6 +15,7 @@ import bpy
 import numpy as np
 
 from ..constants import HAS_ACTION_SLOTS, IS_BLENDER_5
+from ..validators.animation import is_face_board_animation_control
 from .maths import (
     ensure_continuity,
     quat_conjugate,
@@ -340,7 +341,7 @@ def write_face_board_animation(
 
     for pose_bone in armature.pose.bones:
         name = pose_bone.name
-        if name in exclude_bones:
+        if not is_face_board_animation_control(name, exclude_bones):
             continue
 
         node_index = node_indices.get(name)

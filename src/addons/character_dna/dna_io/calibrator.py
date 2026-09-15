@@ -15,6 +15,7 @@ from ..bindings import dna  # pyright: ignore[reportAttributeAccessIssue]
 from ..constants import (
     BONE_DELTA_THRESHOLD,
     HEAD_TO_BODY_LOD_MAPPING,
+    NORMAL_DELTA_THRESHOLD,
     SHAPE_KEY_BASIS_NAME,
     SHAPE_KEY_DELTA_THRESHOLD,
     SHAPE_KEY_NAME_MAX_LENGTH,
@@ -35,6 +36,39 @@ class DNACalibrator(DNAExporter, DNAImporter):
 
         This is only available in the Pro edition and when the output option is enabled."""
         return bool(self._instance.output.auto_update_lods) and self._instance.is_pro
+
+    def validate(self) -> tuple[bool, str, str, Callable | None]:
+        valid, title, message, fix = super().validate()
+        if not valid:
+            return (valid, title, message, fix)
+
+        # A calibration writes back into the DNA's own vertex arrays by index, so a mesh that
+        # gained vertices has nowhere to write them. Overwriting is unaffected, hence the override.
+        mesh_index_lookup = {
+            self._dna_reader.getMeshName(index): index for index in range(self._dna_reader.getMeshCount())
+        }
+        mismatched = []
+        for mesh_objects in self._export_lods.values():
+            for mesh_object, _ in mesh_objects:
+                real_name = utilities.remove_instance_prefix(mesh_object.name, self._instance.name)
+                mesh_index = mesh_index_lookup.get(real_name)
+                if mesh_index is None:
+                    continue
+                dna_vertex_count = len(self._dna_reader.getVertexPositionXs(mesh_index))
+                scene_vertex_count = len(mesh_object.data.vertices)
+                if scene_vertex_count != dna_vertex_count:
+                    mismatched.append(f'"{mesh_object.name}" has {scene_vertex_count}, DNA has {dna_vertex_count}')
+
+        if mismatched:
+            return (
+                False,
+                "Vertex count mismatch. Calibrating requires the DNA's topology.",
+                "\n".join(mismatched)
+                + "\n\nRemove the added or deleted vertices, or set the export method to Overwrite.",
+                None,
+            )
+
+        return (True, "Success", "All validations passed.", None)
 
     def _get_body_mesh_lookup(
         self, lod_index: int, mesh_name: str, head_to_body_edge_loop_mapping: dict[str, dict[int, int]]
@@ -118,6 +152,15 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 y_values = self._dna_reader.getVertexPositionYs(mesh_index)
                 z_values = self._dna_reader.getVertexPositionZs(mesh_index)
 
+                # Reachable when the user turned validations off, since the loop below indexes the
+                # DNA's arrays with the scene mesh's own vertex indices.
+                if vertex_indices and max(vertex_indices) >= len(x_values):
+                    logger.warning(
+                        f'Skipping "{real_name}", it has more vertices than the DNA mesh '
+                        f"({max(vertex_indices) + 1} vs {len(x_values)}). Use the Overwrite method instead."
+                    )
+                    continue
+
                 for vertex_index in vertex_indices:
                     # See if we can get the vertex position from the body mesh lookup first,
                     # so that we have an exact match
@@ -143,6 +186,67 @@ class DNACalibrator(DNAExporter, DNAImporter):
 
         propagated_writes = self._propagate_lods_from_lod0(lod0_mesh_writes, scene_calibrated_lower_lod_indices)
         self._align_seams(lod0_mesh_writes, propagated_writes)
+
+    def calibrate_normals(self):
+        """Write the scene's custom split normals back over the DNA's own.
+
+        Unlike the export this never rewrites the vertex layouts, so the DNA keeps its own
+        splits and each face corner is reached the way :meth:`set_mesh_normals` reads it:
+        through the layout index the face carries, then the normal index that layout holds.
+        Several corners routinely share one normal index, so the last one wins -- which is
+        correct, because they only share it while they agree.
+        """
+        mesh_index_lookup = {
+            self._dna_reader.getMeshName(index): index for index in range(self._dna_reader.getMeshCount())
+        }
+
+        for lod_index, mesh_objects in self._export_lods.items():
+            logger.info(f"Calibrating LOD {lod_index} normals...")
+            for mesh_object, _ in mesh_objects:
+                real_name = utilities.remove_instance_prefix(mesh_object.name, self._instance.name)
+                mesh_index = mesh_index_lookup.get(real_name)
+                if mesh_index is None:
+                    continue
+
+                mesh = mesh_object.data
+                if not isinstance(mesh, bpy.types.Mesh) or not mesh.loops:
+                    continue
+
+                logger.info(f'Calibrating "{real_name}" normals...')
+                split_normals = self.get_mesh_split_normals(mesh_object)
+
+                x_values = self._dna_reader.getVertexNormalXs(mesh_index)
+                y_values = self._dna_reader.getVertexNormalYs(mesh_index)
+                z_values = self._dna_reader.getVertexNormalZs(mesh_index)
+                normal_indices = self._dna_reader.getVertexLayoutNormalIndices(mesh_index)
+
+                for polygon in mesh.polygons:
+                    layout_indices = self._dna_reader.getFaceVertexLayoutIndices(mesh_index, polygon.index)
+                    corner = dict(
+                        zip(
+                            (mesh.loops[index].vertex_index for index in polygon.loop_indices),
+                            layout_indices,
+                            strict=False,
+                        )
+                    )
+                    for loop_index in polygon.loop_indices:
+                        layout_index = corner.get(mesh.loops[loop_index].vertex_index)
+                        if layout_index is None:
+                            continue
+                        normal = split_normals.get((polygon.index, mesh.loops[loop_index].vertex_index))
+                        if normal is None:
+                            continue
+
+                        normal_index = normal_indices[layout_index]
+                        dna_normal = Vector((x_values[normal_index], y_values[normal_index], z_values[normal_index]))
+                        # Only touch what moved, so untouched normals keep their exact DNA value.
+                        if (normal - dna_normal).length > NORMAL_DELTA_THRESHOLD:
+                            x_values[normal_index] = normal.x
+                            y_values[normal_index] = normal.y
+                            z_values[normal_index] = normal.z
+
+                normals = [[x, y, z] for x, y, z in zip(x_values, y_values, z_values, strict=False)]
+                self._dna_writer.setVertexNormals(meshIndex=mesh_index, normals=normals)
 
     def _propagate_lods_from_lod0(
         self, lod0_mesh_writes: dict[int, list[list[float]]], skip_mesh_indices: set[int]
@@ -591,6 +695,9 @@ class DNACalibrator(DNAExporter, DNAImporter):
 
         if self._include_meshes:
             self.calibrate_vertex_positions()
+            if self._include_normals:
+                self._report("Calibrating normals...")
+                self.calibrate_normals()
         if self._include_shape_keys:
             self._report("Calibrating shape keys...")
             self.calibrate_shape_keys()

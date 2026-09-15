@@ -30,7 +30,7 @@ import shutil  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 # import this to ensure that mathutils is available
-import bpy  # pyright: ignore
+import bpy  # noqa: E402, F401  # pyright: ignore
 import pytest  # noqa: E402
 
 from mathutils import Euler, Vector  # noqa: E402
@@ -61,27 +61,9 @@ def pytest_unconfigure() -> None:
       avoiding both the access violation and the allocator's memory report.
     - Elsewhere, ``os._exit`` is sufficient.
     """
-    import faulthandler
+    from utilities.process import exit_blender
 
-    # Flush buffered output before the hard exit so nothing is lost.
-    sys.stdout.flush()
-    sys.stderr.flush()
-
-    # pytest installs faulthandler; disable it so the hard exit stays quiet.
-    faulthandler.disable()
-
-    if sys.platform == "win32":
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        # Use explicit 64-bit-safe signatures so the (HANDLE)-1 current-process
-        # pseudo handle isn't truncated by ctypes' default c_int marshalling.
-        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
-        kernel32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
-        kernel32.TerminateProcess.restype = ctypes.c_int
-        kernel32.TerminateProcess(kernel32.GetCurrentProcess(), _session_exit_code)
-
-    os._exit(_session_exit_code)
+    exit_blender(_session_exit_code)
 
 
 def pytest_configure():
@@ -165,7 +147,6 @@ def changed_head_bone_location() -> tuple[Vector, Vector]:
     # change bone location (blender value, dna value)
     return (
         Vector((0.0, 0.005, 0.02)),  # relative change blender value Z-up
-        # Vector((0.0671469, 0.319794, 9.78912)), # original dna value Y-up
         Vector((0.0671469, 0.643585, 11.8251)),  # new dna value Y-up
     )
 
@@ -195,6 +176,40 @@ def changed_head_vertex_location() -> tuple[Vector, Vector, Vector]:
         Vector((0.85206276, 170.66174, -4.644782)),  # original dna value Y-up
         Vector((0.8358, 175.288, -5.9853077)),  # new dna value Y-up
     )
+
+
+@pytest.fixture(scope="session")
+def changed_head_normal_index() -> int:
+    """A different vertex than the moved one, so the two changes stay independent.
+
+    Ada's head DNA stores one normal per position and every layout's normal index equals its
+    position index, so this addresses DNA normal index 12000 as well as vertex 12000.
+    """
+    return 12000
+
+
+@pytest.fixture(scope="session")
+def changed_head_normal_vector() -> tuple[Vector, Vector, Vector]:
+    # change vertex normal (blender value, original dna value, new dna value)
+    # Tilts one corner's normal so all three axes move by well over the tolerance.
+    return (
+        Vector((0.5, 0.5, 0.7071067811865476)),  # new blender value Z-up, unit length
+        Vector((0.310416, 0.676806, -0.667514)),  # original dna value Y-up
+        Vector((0.5, 0.7071067811865476, -0.5)),  # new dna value Y-up
+    )
+
+
+@pytest.fixture(scope="session")
+def changed_head_normal_neighbours() -> list[int]:
+    """Normals that follow the moved vertex rather than the normal edit.
+
+    Blender encodes a custom normal against a space derived from the surrounding geometry, so
+    moving ``changed_head_vertex_index`` re-decodes the normals of its one ring as well. These
+    are the vertices sharing a face with vertex 11955 -- a superset of what actually crosses
+    ``NORMAL_DELTA_THRESHOLD`` -- captured from scratches/probe_normal_diag.py. They are
+    allowed to differ, so only the deliberate change is asserted to have moved.
+    """
+    return [3018, 5430, 5999, 10705, 10708, 11955, 18021, 23985, 23986]
 
 
 @pytest.fixture(scope="session")
@@ -241,7 +256,7 @@ def temp_folder():
     if temp_folder.exists():
         shutil.rmtree(temp_folder)
 
-    os.makedirs(temp_folder, exist_ok=True)
+    temp_folder.mkdir(parents=True, exist_ok=True)
 
     yield temp_folder
 

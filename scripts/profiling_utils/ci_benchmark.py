@@ -1,5 +1,5 @@
 """
-CI Benchmark Runner for MetaHuman DNA Addon.
+CI Benchmark Runner for Character DNA.
 
 This script is designed to run as part of a CI pipeline to:
 1. Load a test DNA file
@@ -110,8 +110,7 @@ def parse_args() -> argparse.Namespace:
         dest="import_shape_keys",
         action="store_true",
         default=False,
-        help="Import shape keys after loading DNA and profile shape key evaluation "
-        "(slower load, but enables the head_shape_keys benchmark segment)",
+        help="Include shape-key output drivers and deformation in the full graph benchmark (slower load)",
     )
     parser.add_argument(
         "--format",
@@ -383,10 +382,8 @@ def run_benchmark(args: argparse.Namespace) -> int:
     print(f"shape_keys={'ON' if args.import_shape_keys else 'OFF'}")
     print(f"full_evaluation_mean_ms={results.full_evaluation.mean_ms:.3f}")
     print(f"full_evaluation_p95_ms={results.full_evaluation.p95_ms:.3f}")
-    print(f"head_cpp_mean_ms={results.head_manager_calculate.mean_ms:.3f}")
-    print(f"body_cpp_mean_ms={results.body_manager_calculate.mean_ms:.3f}")
-    print(f"head_shape_keys_mean_ms={results.head_shape_keys.mean_ms:.3f}")
-    print(f"head_shape_keys_p95_ms={results.head_shape_keys.p95_ms:.3f}")
+    print(f"native_head_mean_ms={results.head_evaluation.mean_ms:.3f}")
+    print(f"native_body_mean_ms={results.body_evaluation.mean_ms:.3f}")
 
     if results.full_evaluation.mean_ms > 0:
         fps = 1000 / results.full_evaluation.mean_ms

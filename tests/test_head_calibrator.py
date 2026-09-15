@@ -61,7 +61,8 @@ def test_bone_behaviors(original_head_dna_json_data, calibrated_head_dna_json_da
     ("mesh_name", "attribute", "axis_name"),
     get_test_mesh_geometry_params(
         vertex_positions=True,
-        normals=True,
+        # Off while `import_normals` has no UI control, so no imported mesh carries the DNA's normals.
+        normals=False,
         uvs=True,
         dna_file_path=HEAD_DNA_FILE,
         ci_required=CI_CALIBRATE_MESH_NAMES,
@@ -76,6 +77,9 @@ def test_mesh_geometry(
     changed_head_mesh_name: int,
     changed_head_vertex_index: int,
     changed_head_vertex_location: tuple[Vector, Vector, Vector],
+    changed_head_normal_index: int,
+    changed_head_normal_vector: tuple[Vector, Vector, Vector],
+    changed_head_normal_neighbours: list[int],
     changed_head_lower_lod_vertices: list[dict],
 ):
     assert_mesh_geometry(
@@ -87,6 +91,9 @@ def test_mesh_geometry(
         changed_mesh_name=changed_head_mesh_name,
         changed_vertex_index=changed_head_vertex_index,
         changed_vertex_location=changed_head_vertex_location,
+        changed_normal_index=changed_head_normal_index,
+        changed_normal_vector=changed_head_normal_vector,
+        changed_normal_neighbours=changed_head_normal_neighbours,
         lower_lod_vertices=changed_head_lower_lod_vertices,
         tolerance=TOLERANCE[attribute],
         assert_mesh_indices=True,

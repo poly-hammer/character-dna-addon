@@ -33,8 +33,9 @@ class CHARACTER_DNA_FILE_DATA_PT_panel(bpy.types.Panel):
         layout = self.layout
         row = layout.row()
         row.prop(operator, "import_mesh")
-        row = layout.row()
-        # TODO: Fix implementation normals import
+        # TODO: Support importing normals again, only when Blender supports normals on
+        # shape keys. Otherwise, we hit the closed eyelid artifact problem.
+        # row = layout.row()  # noqa: ERA001
         # row.prop(operator, "import_normals")  # noqa: ERA001
         row = layout.row()
         row.prop(operator, "import_bones")
@@ -255,6 +256,30 @@ class ImportAnimation(ImportAsset):
         row.prop(operator, "prefix_component_name")
 
 
+class CHARACTER_DNA_LINK_OPTIONS_PT_panel(bpy.types.Panel):
+    bl_space_type = "FILE_BROWSER"
+    bl_region_type = "TOOL_PROPS"
+    bl_label = "Options"
+    bl_parent_id = "FILE_PT_operator"
+    bl_options = {"HEADER_LAYOUT_EXPAND"}
+
+    @classmethod
+    def poll(cls, context: "Context") -> bool:
+        operator = context.space_data.active_operator  # type: ignore[attr-defined]
+        return (
+            operator is not None
+            and operator.bl_idname == f"{ToolInfo.NAME.upper()}_OT_append_or_link_metahuman"
+            and operator.operation_type == "LINK"
+        )
+
+    def draw(self, context: "Context"):
+        if not self.layout:
+            return
+
+        operator = context.space_data.active_operator  # type: ignore[attr-defined]
+        self.layout.prop(operator, "editable_rig")
+
+
 class LinkAppendCharacterImportHelper(ImportHelper):
     """
     This class subclasses the import helper to define a custom file browser
@@ -262,29 +287,28 @@ class LinkAppendCharacterImportHelper(ImportHelper):
 
     bl_options = {"UNDO"}
 
+    @staticmethod
+    def _source_stamp(file_path: str) -> str:
+        path = Path(bpy.path.abspath(file_path)).resolve()
+        stat = path.stat()
+        return f"{path}:{stat.st_size}:{stat.st_mtime_ns}"
+
     def refresh_meta_human_list(self, operator: bpy.types.Operator):
         self.meta_human_list.clear()  # type: ignore[attr-defined]
         scene_properties = utilities.get_addon_scene_properties()
         rig_instance_names = [i.name for i in scene_properties.rig_instance_list]
 
-        with bpy.data.libraries.load(operator.filepath) as (data_from, _data_to):  # type: ignore[arg-type]
-            object_names = list(data_from.objects)
-
-            for name in data_from.collections:
-                if (f"{name}_head_lod0_mesh" in object_names and f"{name}_head_rig" in object_names) or (
-                    f"{name}_body_lod0_mesh" in object_names and f"{name}_body_rig" in object_names
-                ):
-                    item = operator.meta_human_list.add()  # type: ignore[attr-defined]
-                    item.name = name
-                    item.include = False
-                    # disable items that would cause name conflicts with existing rig instances
-                    if name in rig_instance_names:
-                        item.enabled = False
-                    else:
-                        item.enabled = True
+        data, error = utilities.extract_rig_instance_data_from_blend_file(Path(bpy.path.abspath(operator.filepath)))
+        if error:
+            operator.report({"WARNING"}, error)
+        for name in data:
+            item = operator.meta_human_list.add()  # type: ignore[attr-defined]
+            item.name = name
+            item.include = False
+            item.enabled = name not in rig_instance_names
 
         # save the current filepath to detect changes
-        operator.previous_file_path = operator.filepath  # type: ignore[attr-defined]
+        operator.previous_file_path = self._source_stamp(operator.filepath)  # type: ignore[attr-defined]
 
     def draw(self, context: "Context"):
         layout = self.layout  # type: ignore
@@ -328,7 +352,7 @@ class LinkAppendCharacterImportHelper(ImportHelper):
         row.label(text=f"Choose MetaHuman(s) to {operator.operation_type.lower()}:")
 
         # only refresh the list if the selected file path has changed
-        if operator.previous_file_path != operator.filepath:
+        if operator.previous_file_path != self._source_stamp(operator.filepath):
             self.refresh_meta_human_list(operator)
 
         for item in operator.meta_human_list:

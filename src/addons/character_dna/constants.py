@@ -76,6 +76,14 @@ SCALE_FACTOR = 100.0
 SHAPE_KEY_NAME_MAX_LENGTH = 63
 SHAPE_KEY_DELTA_THRESHOLD = 1e-6
 BONE_DELTA_THRESHOLD = 1e-3
+NORMAL_DELTA_THRESHOLD = 0.1
+"""Below this a changed normal cannot be told apart from Blender's own storage noise.
+
+``normals_split_custom_set`` does not hold a normal exactly. Measured over Ada's 96008 head
+corners the round trip moves a normal by a mean of 5e-5 and a p99 of 3.2e-4, but by as much as
+0.0709 on a handful it cannot represent at all. A tighter threshold rewrites nearly every
+normal with its quantized value instead of leaving the untouched ones alone.
+"""
 SHAPE_KEY_BASIS_NAME = "Basis"
 BONE_TAIL_OFFSET = 1 / (SCALE_FACTOR * SCALE_FACTOR * 10)
 CUSTOM_BONE_SHAPE_SCALE = Vector([0.15] * 3)
@@ -241,7 +249,7 @@ EYE_AIM_BONES = [
 
 FACE_BOARD_SWITCHES = ["CTRL_rigLogicSwitch", "CTRL_lookAtSwitch", "CTRL_faceGUIfollowHead", "CTRL_eyesAimFollowHead"]
 
-EXCLUDED_FACE_BOARD_CONTROLS = ["CTRL_rigLogic", "CTRL_expressions", "CTRL_faceGUI", "CTRL_C_eyesAim"]
+EXCLUDED_FACE_BOARD_CONTROLS = ["CTRL_rigLogic", "CTRL_expressions", "CTRL_faceGUI"]
 
 HEAD_TO_BODY_LOD_MAPPING = {0: 0, 1: 0, 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 7: 3}
 

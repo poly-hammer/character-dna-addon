@@ -14,7 +14,7 @@ import pytest
 
 from mathutils import Quaternion
 
-from character_dna import rig_instance
+from character_dna.runtime import engine
 
 
 # 45 degrees about the head's local z, which is a neck-driver rotation the head RBFs read.
@@ -99,31 +99,29 @@ def test_head_rig_rotation_updates_the_eye_aim_solve(load_head_only_dna):
 
 
 def test_head_rig_updates_are_not_repeated_for_rig_logic_own_writes(load_head_only_dna):
-    """Rig logic writes head bones, which re-tags the armature. That echo must not re-evaluate."""
+    """Unchanged graph updates do not cause another native solve."""
     instance = get_instance()
     enter_pose_mode(instance.head_rig)
 
     instance.head_rig.pose.bones["head"].rotation_quaternion = TURNED_HEAD
     bpy.context.view_layer.update()
 
-    armature_name = instance.head_rig.data.name
-    dependency_graph = bpy.context.evaluated_depsgraph_get()
+    record = next(record for record in engine._records.values() if record["component"] == "head")
+    session = record["last_context"]["session"]
+    before = engine.native_module().session_statistics(session)["solves"]
+    bpy.context.view_layer.update()
+    assert engine.native_module().session_statistics(session)["solves"] == before
 
-    assert rig_instance._get_armature_update_component(instance, armature_name, dependency_graph) is None
-
-    # a genuine change to a driver bone is still picked up
     instance.head_rig.pose.bones["neck_01"].rotation_quaternion = TURNED_HEAD
     bpy.context.view_layer.update()
-    dependency_graph = bpy.context.evaluated_depsgraph_get()
-    instance.data.pop(instance.cache_key("head", "input_signature"), None)
-
-    assert rig_instance._get_armature_update_component(instance, armature_name, dependency_graph) == "head"
+    assert engine.native_module().session_statistics(session)["solves"] > before
 
 
 def test_head_evaluates_without_a_face_board(load_head_only_dna):
     """The face board only supplies GUI control positions; the neck solve must not depend on it."""
     instance = get_instance()
     instance.face_board = None
+    bpy.ops.character_dna.sync_native_runtime()
     enter_pose_mode(instance.head_rig)
 
     before = get_neck_raw_controls(instance)
@@ -133,3 +131,43 @@ def test_head_evaluates_without_a_face_board(load_head_only_dna):
 
     assert after != before
     assert after["head.qz"] == pytest.approx(0.3827, abs=1e-3)
+
+
+def test_head_initialize_leaves_no_rotation_mode_to_write(load_head_only_dna):
+    """Blender rejects the write attempt itself in a locked context, so a second initialize,
+    which is what every depsgraph update triggers, must find nothing left to assign."""
+    instance = get_instance()
+    instance.head_initialize()
+
+    assert instance.head_initialized
+    for pose_bone in instance.head_rig.pose.bones:
+        expected = "XYZ" if pose_bone.name.startswith("FACIAL_") else "QUATERNION"
+        assert pose_bone.rotation_mode == expected, pose_bone.name
+
+
+def test_head_initialize_keeps_the_previous_state_when_id_writes_are_locked(load_head_only_dna, monkeypatch):
+    """A failed re-initialize used to leave the rig destroyed and stop it animating for the session."""
+    instance = get_instance()
+    instance.head_initialize()
+
+    def locked(*_args, **_kwargs):
+        raise AttributeError("Writing to ID classes in this context is not allowed")
+
+    monkeypatch.setattr(type(instance), "_apply_head_rotation_modes", locked)
+    instance.head_initialize()
+
+    assert instance.head_initialized
+    assert instance.head_instance is not None
+
+
+def test_head_initialize_still_raises_a_genuine_attribute_error(load_head_only_dna, monkeypatch):
+    """Only Blender's locked-write error is tolerated; a real coding fault must not be swallowed."""
+    instance = get_instance()
+
+    def broken(*_args, **_kwargs):
+        raise AttributeError("'NoneType' object has no attribute 'pose'")
+
+    monkeypatch.setattr(type(instance), "_apply_head_rotation_modes", broken)
+
+    with pytest.raises(AttributeError, match="NoneType"):
+        instance.head_initialize()

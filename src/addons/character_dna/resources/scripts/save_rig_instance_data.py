@@ -1,143 +1,78 @@
-import os
-import traceback
-import bpy # pyright: ignore[reportMissingImports]
+"""Inspect saved characters without running source scripts or addon startup."""
+
+import argparse
+import importlib.util
 import json
 import sys
-import argparse
-import addon_utils # pyright: ignore[reportMissingImports]
+import traceback
+
 from pathlib import Path
 
-ADDON_IDS = [
-    "meta_human_dna",
-    "meta_human_dna_pro",
-    "character_dna",
-    "character_dna_pro",
-]
+import bpy
 
-DATA_KEYS = [
-    "rig_instance_list",
-    "rig_logic_instance_list"
-]
 
-def is_addon_installed(addon_name: str) -> bool:
-    for mod in addon_utils.modules(): # type: ignore
-        if mod.__name__ == addon_name:
-            return True
-    return False
+ADDON_IDS = ("meta_human_dna", "meta_human_dna_pro", "character_dna", "character_dna_pro")
 
-def ensure_addon_enabled(addon_name: str, scripts_folder: Path):
-    # check all disabled addons and install if needed
-    if not is_addon_installed(addon_name): # type: ignore
-        # otherwise, install it
-        script_directory = bpy.context.preferences.filepaths.script_directories.get(addon_name) # type: ignore
-        if script_directory:
-            bpy.context.preferences.filepaths.script_directories.remove(script_directory) # type: ignore
 
-        script_directory = bpy.context.preferences.filepaths.script_directories.new() # type: ignore
-        script_directory.name = addon_name
-        script_directory.directory = str(scripts_folder)
-        sys.path.append(str(scripts_folder))
+class SavedInstance(bpy.types.PropertyGroup):
+    """Expose persisted fields only, with no callbacks or runtime initialization."""
 
-    # check if the addon is enabled
-    if not addon_utils.check(addon_name)[1]:
-        # otherwise, enable it
-        addon_utils.enable(addon_name, default_set=True)
 
-def main():
-    # Get arguments after '--'
-    if '--' in sys.argv:
-        argv = sys.argv[sys.argv.index('--') + 1:]
-    else:
-        argv = []
+class SavedScene(bpy.types.PropertyGroup):
+    """Read both generations of the saved instance list."""
+
+    rig_instance_list: bpy.props.CollectionProperty(type=SavedInstance)  # pyright: ignore[reportInvalidTypeForm]
+    rig_logic_instance_list: bpy.props.CollectionProperty(type=SavedInstance)  # pyright: ignore[reportInvalidTypeForm]
+
+
+class SavedAssemblyScene(bpy.types.PropertyGroup):
+    """Read Assembly's saved per-character records without enabling that addon."""
+
+    rig_instance_proxies: bpy.props.CollectionProperty(type=SavedInstance)  # pyright: ignore[reportInvalidTypeForm]
+
+
+def main() -> None:
+    """Write a JSON descriptor; never enable an addon or save the opened blend."""
+    import addon_utils
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data-file', type=str, help='Where to save the rig instance data')
-    parser.add_argument('--blend-file', type=str, help='The blend file to extract data from')
-    parser.add_argument('--addon-folder', type=str, help='The addon folder to use')
-    parser.add_argument('--addon-name', type=str, help='The addon name to use')
-    args = parser.parse_args(argv)
-
+    parser.add_argument("--data-file", required=True)
+    parser.add_argument("--blend-file", required=True)
+    parser.add_argument("--addon-folder")
+    parser.add_argument("--addon-name")
+    args = parser.parse_args(sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else [])
     data_file = Path(args.data_file)
-
+    data_file.parent.mkdir(parents=True, exist_ok=True)
     try:
-        bpy.ops.wm.open_mainfile(filepath=args.blend_file)
-
-        # Ensure the addon is enabled
-        ensure_addon_enabled(args.addon_name, Path(args.addon_folder))
-
-        os.makedirs(data_file.parent, exist_ok=True)
+        for addon in list(bpy.context.preferences.addons.keys()):
+            addon_utils.disable(addon, default_set=False)
+        bpy.utils.register_class(SavedInstance)
+        bpy.utils.register_class(SavedScene)
+        bpy.utils.register_class(SavedAssemblyScene)
+        bpy.types.Scene.character_assembly = bpy.props.PointerProperty(type=SavedAssemblyScene)
+        for edition in ADDON_IDS:
+            setattr(bpy.types.Scene, edition, bpy.props.PointerProperty(type=SavedScene))
+        bpy.ops.wm.open_mainfile(filepath=args.blend_file, use_scripts=False)
+        module_path = Path(__file__).resolve().parents[2] / "utilities" / "reference.py"
+        spec = importlib.util.spec_from_file_location("character_reference_inspector", module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
         data = {}
+        for scene in bpy.data.scenes:
+            for edition in ADDON_IDS:
+                group = getattr(scene, edition)
+                for instance in (*group.rig_instance_list, *group.rig_logic_instance_list):
+                    name = instance.get("name") or instance.get("instance_name")
+                    if not name:
+                        continue
+                    if name in data:
+                        data[name]["issues"].append("Ambiguous character name across saved scenes or editions")
+                    else:
+                        data[name] = module.describe_instance(scene, edition, instance)
+        data_file.write_text(json.dumps(data), encoding="utf-8")
+    except Exception:
+        data_file.with_name(f"{data_file.stem}_error.log").write_text(traceback.format_exc(), encoding="utf-8")
 
-        def field(obj, key):
-            # A live RigInstance (registered edition) is read via RNA attribute; a
-            # raw IDProperty group (old prototype) is read via `.get`.
-            if hasattr(obj, 'bl_rna'):
-                return getattr(obj, key, None)
-            if hasattr(obj, 'get'):
-                return obj.get(key)
-            return None
-
-        def name_of(value):
-            return value.name if value else None
-
-        for addon_id in ADDON_IDS:
-            # Read registered editions (current + read-only sibling) via attribute
-            # access so data saved by EITHER edition (character_dna or
-            # character_dna_pro) is found regardless of which one is enabled. Saved
-            # PointerProperty data is only exposed once a matching property is
-            # registered, so subscript access would miss the sibling edition. The
-            # old prototype stored plain custom properties, read via subscript.
-            group = getattr(bpy.context.scene, addon_id, None)
-            if group is None:
-                group = bpy.context.scene.get(addon_id)
-            if not group:
-                continue
-
-            if hasattr(group, 'bl_rna'):
-                sources = list(group.rig_instance_list)
-            else:
-                sources = []
-                for key in DATA_KEYS:
-                    value = group.get(key)
-                    if value:
-                        sources = list(value)
-                        break
-
-            for i in sources:
-                name = field(i, 'name') or field(i, 'instance_name')
-                if not name:
-                    continue
-
-                # Output folder: the current format nests it under `output`; the
-                # old prototype stored it flat as `output_folder_path`.
-                output_folder_path = field(i, 'output_folder_path')
-                if output_folder_path is None:
-                    output = field(i, 'output')
-                    if output is not None:
-                        output_folder_path = field(output, 'folder_path')
-
-                data[name] = {
-                    'face_board': name_of(field(i, 'face_board')),
-                    'head_mesh': name_of(field(i, 'head_mesh')),
-                    'head_rig': name_of(field(i, 'head_rig')),
-                    'head_material': name_of(field(i, 'head_material')),
-                    'head_dna_file_path': bpy.path.abspath(field(i, 'head_dna_file_path') or ''),
-                    'control_rig': name_of(field(i, 'control_rig')),
-                    'body_mesh': name_of(field(i, 'body_mesh')),
-                    'body_rig': name_of(field(i, 'body_rig')),
-                    'body_material': name_of(field(i, 'body_material')),
-                    'body_dna_file_path': bpy.path.abspath(field(i, 'body_dna_file_path') or ''),
-                    'output_folder_path': output_folder_path or '',
-                }
-
-
-    except Exception as error:
-        with open(f'{data_file.parent / data_file.stem}_error.log', 'w') as f:
-            f.write(str(error) + traceback.format_exc())
-            return
-
-    with open(data_file, 'w') as f:
-        json.dump(data, f)
 
 if __name__ == "__main__":
     main()

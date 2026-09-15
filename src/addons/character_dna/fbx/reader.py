@@ -28,6 +28,7 @@ from .maths import decompose_matrix, ensure_continuity, quat_normalize
 logger = logging.getLogger(__name__)
 
 DEFAULT_FRAME_RATE = 30.0
+MAX_CLIP_BUFFER_BYTES = 1024**3
 
 # ufbx CoordinateAxis values.
 AXIS_NAMES = {
@@ -211,7 +212,7 @@ def load_fbx_animation(file_path: str | Path, frame_rate: float | None = None) -
 
     Raises:
         FileNotFoundError: If the file does not exist.
-        ValueError: If the file contains no node hierarchy.
+        ValueError: If the file contains no node hierarchy or the sampled clip is too large.
         ImportError: If the ufbx bindings are not installed.
     """
     file_path = Path(file_path)
@@ -241,7 +242,7 @@ def load_fbx_animation_buffer(
         The loaded clip, in the file's native space and units.
 
     Raises:
-        ValueError: If the buffer contains no node hierarchy.
+        ValueError: If the buffer contains no node hierarchy or the sampled clip is too large.
         ImportError: If the ufbx bindings are not installed.
     """
     ufbx = _require_ufbx()
@@ -263,7 +264,7 @@ def _build_clip(scene: Any, frame_rate: float | None) -> FbxAnimationClip:
         The converted clip.
 
     Raises:
-        ValueError: If the scene has no node hierarchy.
+        ValueError: If the scene has no node hierarchy or the sampled clip is too large.
     """
     file_frame_rate = float(scene.settings.frames_per_second or 0.0)
     if frame_rate is None:
@@ -297,6 +298,14 @@ def _build_clip(scene: Any, frame_rate: float | None) -> FbxAnimationClip:
 
     duration = max(baked.playback_duration, baked.key_time_max, 0.0)
     num_frames = max(round(duration * frame_rate) + 1, 1)
+    buffer_bytes = num_frames * (num_nodes * 7 + 1) * np.dtype(np.float64).itemsize
+    if buffer_bytes > MAX_CLIP_BUFFER_BYTES:
+        raise ValueError(
+            f"FBX take {take_name!r} requires {num_frames:,} frames across {num_nodes:,} nodes "
+            f"at {frame_rate:g} fps ({buffer_bytes / 1024**3:.2f} GiB of animation buffers; "
+            f"limit {MAX_CLIP_BUFFER_BYTES / 1024**3:g} GiB). "
+            "Check the FBX take's start/end times and re-export a shorter range, or import at a lower frame rate."
+        )
     sample_times = np.arange(num_frames, dtype=np.float64) / frame_rate
 
     rotations = np.broadcast_to(rest_rotations[None], (num_frames, num_nodes, 4)).copy()

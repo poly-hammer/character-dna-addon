@@ -2,9 +2,15 @@ import pytest
 
 from mathutils import Euler, Vector
 
-from constants import CI_EXPORT_MESH_NAMES, HEAD_DNA_FILE, IGNORED_BONE_ROTATIONS_ON_EXPORT, TOLERANCE
-from utilities.assertions import assert_bone_definitions, assert_mesh_geometry
-from utilities.dna_data import get_test_bone_definitions_params, get_test_mesh_geometry_params
+from constants import (
+    CI_EXPORT_MESH_NAMES,
+    HEAD_DNA_FILE,
+    IGNORED_BONE_ROTATIONS_ON_EXPORT,
+    NORMAL_ROUND_TRIP_BOUNDS,
+    TOLERANCE,
+)
+from utilities.assertions import assert_bone_definitions, assert_mesh_corner_normals, assert_mesh_geometry
+from utilities.dna_data import get_mesh_names, get_test_bone_definitions_params, get_test_mesh_geometry_params
 
 
 @pytest.mark.parametrize(
@@ -69,4 +75,30 @@ def test_mesh_geometry(
         assert_index_order=False,
         tolerance=TOLERANCE[attribute],
         output_method="export",
+    )
+
+
+@pytest.mark.skip(reason="`import_normals` has no UI control, so no imported mesh carries the DNA's normals")
+@pytest.mark.parametrize(
+    "mesh_name", [name for name in get_mesh_names(HEAD_DNA_FILE) if name.endswith("_lod0_mesh")]
+)
+def test_mesh_normals(
+    original_head_dna_json_data,
+    exported_head_dna_json_data,
+    mesh_name: str,
+    changed_head_mesh_name: str,
+    changed_head_normal_index: int,
+    changed_head_normal_vector: tuple[Vector, Vector, Vector],
+    changed_head_normal_neighbours: list[int],
+):
+    """The export rewrites the layouts, so normals are compared where they still mean the same
+    thing: the normal each face corner resolves to."""
+    assert_mesh_corner_normals(
+        expected_data=original_head_dna_json_data,
+        current_data=exported_head_dna_json_data,
+        mesh_name=mesh_name,
+        changed_mesh_name=changed_head_mesh_name,
+        changed_normal_index=changed_head_normal_index,
+        changed_normal_neighbours=changed_head_normal_neighbours,
+        bounds=NORMAL_ROUND_TRIP_BOUNDS,
     )

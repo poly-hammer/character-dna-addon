@@ -49,6 +49,15 @@ TOLERANCE = {
     "skinWeights": 1e-5,
 }
 
+NORMAL_ROUND_TRIP_BOUNDS = {"mean": 1e-3, "p99": 5e-3, "max": 0.1}
+"""How far an exported normal may drift, which is set by Blender's storage rather than by us.
+
+``normals_split_custom_set`` does not hold a normal exactly, and the export rewrites every
+normal from the scene rather than only the ones that moved. Measured over Ada's 96008 head
+corners the drift is a mean of 5e-5 and a p99 of 3.2e-4, with a worst case of 0.0709 on the
+few it cannot represent, so these leave roughly an order of magnitude of headroom.
+"""
+
 # Maximum allowed angular difference (in degrees) between an expected and an exported/calibrated
 # joint orientation. Joint rotations are compared as a whole-orientation angular difference rather
 # than per-axis euler components, since near gimbal lock individual axes can differ noticeably while

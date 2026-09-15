@@ -139,8 +139,7 @@ class CharacterComponentHead(CharacterComponentBase):
         utilities.toggle_expand_in_outliner()
 
         # switch to pose mode on the face gui object
-        if face_board_object and bpy.context.view_layer:
-            bpy.context.view_layer.objects.active = face_board_object
+        if face_board_object and utilities.set_active(face_board_object):
             utilities.position_face_board(
                 head_mesh_object=self.head_mesh_object,
                 head_rig_object=self.head_rig_object,

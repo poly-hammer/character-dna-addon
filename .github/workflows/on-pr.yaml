@@ -30,7 +30,7 @@ jobs:
   #   with:
   #     python-version: "3.11"
   #     blender-version: "4.5"
-  #     runner-os: "ubuntu-internal"
+  #     runner-os: "ubuntu-latest"
   #     addon-id: "character_dna"
   #     base: "character-dna"
   #     base-branch: ${{ github.head_ref }}
@@ -70,7 +70,7 @@ jobs:
     with:
       python-version: "3.13"
       blender-version: "5.2"
-      runner-os: "ubuntu-internal"
+      runner-os: "ubuntu-latest"
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}

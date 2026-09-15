@@ -9,6 +9,7 @@ from pathlib import Path
 # third party imports
 import bmesh
 import bpy
+import numpy as np
 
 from mathutils import Matrix, Vector
 
@@ -43,6 +44,7 @@ class DNAExporter:
         textures: bool = True,
         vertex_colors: bool = True,
         vertex_groups: bool = True,
+        normals: bool = False,
         file_name: str | None = None,
         component_type: ComponentType | None = None,
         reader: "BinaryStreamReader | None" = None,
@@ -61,6 +63,7 @@ class DNAExporter:
         self._include_bones = bones
         self._include_textures = textures
         self._include_vertex_colors = vertex_colors
+        self._include_normals = normals
         self._zero_shape_deltas = zero_shape_deltas
         self._progress_callback = progress_callback
         # Seam alignment between the head and body neck edge loop. ``seam_follower``
@@ -351,14 +354,66 @@ class DNAExporter:
         return indices, positions
 
     @staticmethod
-    def get_mesh_vertex_normals(bmesh_object: bmesh.types.BMesh) -> tuple[list[int], list[list[float]]]:
+    def get_mesh_split_normals(mesh_object: bpy.types.Object) -> dict[tuple[int, int], Vector]:
+        """The mesh's custom split normals in DNA space, keyed by ``(face index, vertex index)``.
+
+        The DNA gives a normal per face corner, reached through the vertex layout the way UVs
+        are, so a vertex on a hard edge carries a different normal per face. Reading Blender's
+        per-vertex normal instead collapses those splits and loses the DNA's own shading.
+
+        Keyed by face corner rather than by loop index because the export splits the mesh along
+        its UV islands first, which renumbers loops and vertices but leaves faces alone.
+        """
+        mesh = mesh_object.data
+        if not isinstance(mesh, bpy.types.Mesh) or not mesh.loops:
+            return {}
+
+        flat = np.empty(len(mesh.loops) * 3, dtype=np.float32)
+        mesh.corner_normals.foreach_get("vector", flat)
+        # A rotation needs no inverse transpose, so the normals take the same matrix the
+        # vertices do -- but never the linear unit, because a normal is a direction.
+        rotation = np.array(
+            Matrix.Rotation(math.radians(-90), 3, "X"),  # type: ignore[arg-type]
+            dtype=np.float32,
+        )
+        rotated = flat.reshape(-1, 3) @ rotation.T
+
+        vertex_index = np.empty(len(mesh.loops), dtype=np.int32)
+        mesh.loops.foreach_get("vertex_index", vertex_index)
+
+        normals: dict[tuple[int, int], Vector] = {}
+        for polygon in mesh.polygons:
+            for loop_index in polygon.loop_indices:
+                normals[(polygon.index, int(vertex_index[loop_index]))] = Vector(rotated[loop_index])
+        return normals
+
+    @staticmethod
+    def get_mesh_vertex_normals(
+        bmesh_object: bmesh.types.BMesh,
+        split_normals: dict[tuple[int, int], Vector] | None = None,
+        duplicate_lookup: dict | None = None,
+    ) -> tuple[list[int], list[list[float]]]:
+        """One normal per vertex of the UV-split mesh, which is what a layout slot addresses.
+
+        Splitting along UV islands has already separated most corners that disagree, so each
+        surviving vertex takes the normal of any face it still belongs to.
+        """
+        split_normals = split_normals or {}
+        duplicate_lookup = duplicate_lookup or {}
         indices = []
         normals = []
-        # TODO: Use split_normals from Mesh instead. Also check if these are stored as triangles?
-        # https://docs.blender.org/api/current/bpy.types.MeshLoopTriangle.html
 
         for vert in bmesh_object.verts:
-            normals.append([vert.normal.x * SCALE_FACTOR, vert.normal.y * SCALE_FACTOR, vert.normal.z * SCALE_FACTOR])
+            original_index = duplicate_lookup.get(vert.index, vert.index)
+            normal = next(
+                (
+                    split_normals[(face.index, original_index)]
+                    for face in vert.link_faces
+                    if (face.index, original_index) in split_normals
+                ),
+                vert.normal,
+            )
+            normals.append([normal.x, normal.y, normal.z])
             indices.append(vert.index)
         return indices, normals
 
@@ -585,6 +640,10 @@ class DNAExporter:
         real_name = utilities.remove_instance_prefix(mesh_object.name, self._prefix)
 
         logger.info(f'Exporting mesh: "{mesh_object.name}" to DNA as "{real_name}"...')
+        # Read before the UV split, which renumbers the loops these are addressed by. With
+        # normals excluded the layout still needs an array to point at, so
+        # ``get_mesh_vertex_normals`` falls back to the geometry's own normals.
+        split_normals = self.get_mesh_split_normals(mesh_object) if self._include_normals else {}
         self._dna_writer.clearFaceVertexLayoutIndices(meshIndex=mesh_index)
         self._dna_writer.clearSkinWeights(meshIndex=mesh_index)
         # Blend shape targets are (re)written by ``export_shape_keys`` -- either
@@ -600,7 +659,11 @@ class DNAExporter:
         vertex_indices, vertex_positions = self.get_mesh_vertex_positions(
             bmesh_object=bmesh_object, duplicate_lookup=split_to_original_vert_lookup
         )
-        normal_indices, normals = self.get_mesh_vertex_normals(bmesh_object=bmesh_object)
+        normal_indices, normals = self.get_mesh_vertex_normals(
+            bmesh_object=bmesh_object,
+            split_normals=split_normals,
+            duplicate_lookup=split_to_original_vert_lookup,
+        )
         uv_indices, uvs = self.get_mesh_vertex_uvs(bmesh_object=bmesh_object)
         faces = self.get_mesh_faces(bmesh_object=bmesh_object)
 

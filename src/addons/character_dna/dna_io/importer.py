@@ -244,20 +244,45 @@ class DNAImporter:
                 vertex_group.add(index=[vertex.index], weight=weight, type="REPLACE")
 
     def set_mesh_normals(self, mesh_index: int, mesh: bpy.types.Mesh):
+        """Import the DNA's own normals as custom split normals.
+
+        The DNA keeps normals in an array of their own, reached through the vertex layout the way
+        UVs are, so a vertex on a hard edge carries a different normal per face corner. Reading
+        them per vertex collapses those splits, and indexing the layout array by a position index
+        reads some other vertex's normal outright -- the layout is longer than the position array.
+
+        These are also what lets the head sit invisibly on the body: the head and body DNAs agree
+        on the normal at every shared seam vertex, so normals Blender derives from the faces
+        instead disagree by several degrees there and leave a shading crease along the join.
+        """
         x_values = self._dna_reader.getVertexNormalXs(mesh_index)
         y_values = self._dna_reader.getVertexNormalYs(mesh_index)
         z_values = self._dna_reader.getVertexNormalZs(mesh_index)
         normal_indices = self._dna_reader.getVertexLayoutNormalIndices(mesh_index)
-        mesh.normals_split_custom_set_from_vertices(
-            [
-                [
-                    x_values[normal_indices[index]] * self._linear_modifier,
-                    y_values[normal_indices[index]] * self._linear_modifier,
-                    z_values[normal_indices[index]] * self._linear_modifier,
-                ]
-                for index in self._index_to_vert
-            ]  # pyright: ignore[reportArgumentType]
-        )
+
+        loop_normals = [(0.0, 0.0, 1.0)] * len(mesh.loops)
+        for polygon in mesh.polygons:
+            layout_indices = self._dna_reader.getFaceVertexLayoutIndices(mesh_index, polygon.index)
+            corner = dict(
+                zip(
+                    (mesh.loops[index].vertex_index for index in polygon.loop_indices),
+                    layout_indices,
+                    strict=False,
+                )
+            )
+            for loop_index in polygon.loop_indices:
+                layout_index = corner.get(mesh.loops[loop_index].vertex_index)
+                if layout_index is None:
+                    continue
+                normal_index = normal_indices[layout_index]
+                # A normal is a direction, so the DNA's linear unit does not apply to it.
+                loop_normals[loop_index] = (
+                    x_values[normal_index],
+                    y_values[normal_index],
+                    z_values[normal_index],
+                )
+
+        mesh.normals_split_custom_set(loop_normals)
 
     def set_mesh_vertex_positions(self, mesh_index: int, bmesh_object: bmesh.types.BMesh):
         x_values = self._dna_reader.getVertexPositionXs(mesh_index)
@@ -440,8 +465,7 @@ class DNAImporter:
         # Ensure a single, named color attribute that is both active and active-render
         self.normalize_color_attributes(mesh)
 
-        # Add custom split normals
-        # Todo: Implement the custom split normals import. Currently, not correctly implemented
+        # The DNA's own normals, which are what makes the head sit seamlessly on the body.
         if self._import_properties.import_normals:
             self.set_mesh_normals(mesh_index, mesh)
 

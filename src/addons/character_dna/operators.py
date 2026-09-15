@@ -13,7 +13,6 @@ import bpy
 from . import constants, utilities
 from .components import CharacterComponentBody, CharacterComponentHead, get_meta_human_component
 from .constants import (
-    FACE_BOARD_NAME,
     HEAD_TEXTURE_LOGIC_NODE_LABEL,
     HEAD_TEXTURE_LOGIC_NODE_NAME,
     NUMBER_OF_HEAD_LODS,
@@ -24,6 +23,7 @@ from .fbx.reader import FbxAnimationClip
 from .properties import BlendFileCharacterCollection, CharacterImportProperties
 from .typing import *  # noqa: F403
 from .ui import callbacks, importer
+from .utilities import reference
 from .validators import ValidationReport
 
 
@@ -148,6 +148,7 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
 
     bl_idname = f"{ToolInfo.NAME}.append_or_link_metahuman"
     bl_label = "Import"
+    bl_options = {"REGISTER", "UNDO"}
     filename_ext = ".blend"
 
     filter_glob: bpy.props.StringProperty(
@@ -165,11 +166,27 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
         ],
         default="APPEND",
     )  # pyright: ignore[reportInvalidTypeForm]
+    editable_rig: bpy.props.BoolProperty(
+        name="Editable Rig",
+        description="Make the source face board and control rig local and editable while linking character assets",
+        default=False,
+    )  # pyright: ignore[reportInvalidTypeForm]
     meta_human_list: bpy.props.CollectionProperty(type=BlendFileCharacterCollection)  # pyright: ignore[reportInvalidTypeForm]
     meta_human_names: bpy.props.StringProperty(default="")  # pyright: ignore[reportInvalidTypeForm]
 
-    def execute(self, context: "Context") -> set[str]:  # noqa: PLR0912, PLR0915
+    def execute(self, context: "Context") -> set[str]:
         file_path = self.filepath  # type: ignore[attr-defined]
+        try:
+            selected_names = reference.validate_names(
+                self.meta_human_names.split(",")
+                if self.meta_human_names
+                else [item.name for item in self.meta_human_list if item.include],
+                reference.scene_names(context.scene)
+                | {instance.name for instance in utilities.get_addon_scene_properties(context).rig_instance_list},
+            )
+        except ValueError as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
         if not file_path:
             self.report({"ERROR"}, "You must select a .blend file")
             return {"CANCELLED"}
@@ -178,7 +195,7 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
             self.report({"ERROR"}, f"File not found: {file_path}")
             return {"CANCELLED"}
 
-        if bpy.data.filepath == file_path:
+        if bpy.data.filepath and Path(bpy.data.filepath).resolve() == Path(bpy.path.abspath(file_path)).resolve():
             self.report({"ERROR"}, "You cannot import a MetaHuman from the current .blend file")
             return {"CANCELLED"}
 
@@ -192,115 +209,27 @@ class AppendOrLinkCharacter(bpy.types.Operator, importer.LinkAppendCharacterImpo
                 f"running Blender {bpy.app.version_string}. This may cause import issues.",
             )
 
-        addon_scene_properties = utilities.get_addon_scene_properties(context)
-
-        # this is for headless imports and automated tests
-        if self.meta_human_names:
-            self.meta_human_list.clear()
-            for name in self.meta_human_names.split(","):
-                item = self.meta_human_list.add()
-                item.name = name
-                item.include = True
-
-        # track the current control objects
-        current_control_objects = []
-        for instance in addon_scene_properties.rig_instance_list:
-            if instance.face_board:
-                current_control_objects.extend(pose_bone.custom_shape for pose_bone in instance.face_board.pose.bones)
-
-        collection_names = []
-        with bpy.data.libraries.load(
-            filepath=file_path,
-            link=self.operation_type == "LINK",
-            relative=self.relative_path,
-        ) as (data_from, data_to):  # type: ignore[arg-type]
-            # we only append/link the collections that the user has selected
-            for item in self.meta_human_list:
-                if item.include:
-                    for collection_name in data_from.collections:
-                        if collection_name == item.name:
-                            data_to.collections.append(collection_name)
-                            collection_names.append(collection_name)
-
-        # extract the rig instance data from the blend file
-        data, error = utilities.extract_rig_instance_data_from_blend_file(Path(bpy.path.abspath(file_path)))
+        data, error = utilities.extract_rig_instance_data_from_blend_file(abs_file_path)
         if error:
             logger.error(error)
             self.report({"ERROR"}, f"Failed to extract rig instance data from blend file: {error}")
             return {"CANCELLED"}
-
         if not data:
             self.report({"ERROR"}, "Failed to read rig instance data in blend file")
             return {"CANCELLED"}
 
-        # link the collections to the scene
-        for collection_name in collection_names:
-            collection = bpy.data.collections.get(collection_name)
-            if collection and context.scene:
-                context.scene.collection.children.link(collection)
-
-            # delete the face board and its control object shapes if they exist
-            face_board = bpy.data.objects.get(f"{collection_name}_{FACE_BOARD_NAME}")
-            if face_board and face_board.pose:
-                for pose_bone in face_board.pose.bones:
-                    if pose_bone.custom_shape and pose_bone.custom_shape not in current_control_objects:
-                        control_object = pose_bone.custom_shape
-                        pose_bone.custom_shape = None
-                        bpy.data.objects.remove(control_object, do_unlink=True)
-                # remove the face board object
-                bpy.data.objects.remove(face_board, do_unlink=True)
-
-            # Extract the rig instance data from the .blend file and set them on the new rig instance
-            instance = utilities.add_rig_instance(name=collection_name)
-            instance.head_dna_file_path = data[collection_name]["head_dna_file_path"]
-            instance.head_mesh = bpy.data.objects.get(data[collection_name]["head_mesh"] or "")
-            instance.head_rig = bpy.data.objects.get(data[collection_name]["head_rig"] or "")
-            instance.head_material = bpy.data.materials.get(data[collection_name]["head_material"] or "")
-            instance.body_mesh = bpy.data.objects.get(data[collection_name]["body_mesh"] or "")
-            instance.body_rig = bpy.data.objects.get(data[collection_name]["body_rig"] or "")
-            instance.body_material = bpy.data.materials.get(data[collection_name]["body_material"] or "")
-            instance.body_dna_file_path = data[collection_name]["body_dna_file_path"]
-            instance.output.folder_path = data[collection_name]["output_folder_path"]
-
-            # duplicate the face board if there is one already in the scene
-            if any(i.face_board for i in addon_scene_properties.rig_instance_list):
-                instance.face_board = utilities.duplicate_face_board(name=collection_name)
-            # otherwise import it
+        try:
+            descriptors = reference.validate_descriptors(data, selected_names)
+            mode = "EDITABLE_LINK" if self.operation_type == "LINK" and self.editable_rig else self.operation_type
+            reference.import_characters(context, str(abs_file_path), descriptors, mode, self.relative_path)
+        except Exception as error:
+            if isinstance(error, reference.LegacyDataError):
+                logger.warning("%s", error)
+                self.report({"WARNING"}, reference.MIGRATION_MESSAGE)
             else:
-                instance.face_board = utilities.import_face_board(name=collection_name)
-
-            # position the face board next to the head mesh
-            if instance.face_board:
-                utilities.position_face_board(
-                    head_mesh_object=instance.head_mesh,
-                    head_rig_object=instance.head_rig,
-                    face_board_object=instance.face_board,
-                )
-                if self.operation_type == "LINK":
-                    if collection:
-                        utilities.group_face_board_with_linked_collection(
-                            face_board=instance.face_board,
-                            linked_collection=collection,
-                            collection_name=collection_name,
-                        )
-                else:
-                    utilities.move_to_collection(
-                        scene_objects=[instance.face_board], collection_name=collection_name, exclusively=True
-                    )
-
-                utilities.constrain_face_board_to_head(
-                    face_board_object=instance.face_board,
-                    head_rig_object=instance.head_rig,
-                    body_rig_object=instance.body_rig,
-                    bone_name="CTRL_faceGUI",
-                )
-                utilities.constrain_face_board_to_head(
-                    face_board_object=instance.face_board,
-                    head_rig_object=instance.head_rig,
-                    body_rig_object=instance.body_rig,
-                    bone_name="CTRL_C_eyesAim",
-                )
-
+                logger.exception("Failed to import character objects")
+                self.report({"ERROR"}, f"Failed to import character: {error}")
+            return {"CANCELLED"}
         return {"FINISHED"}
 
 
@@ -1025,6 +954,19 @@ class ForceEvaluate(bpy.types.Operator):
     bl_label = "Force Evaluate"
 
     def execute(self, context: "Context") -> set[str]:
+        instance = callbacks.get_active_rig_instance()
+        if callbacks.is_reference_readonly(instance):
+            from .runtime import engine
+
+            try:
+                engine.release_records(instance)
+                engine.adopt(instance)
+                context.view_layer.update()
+            except (RuntimeError, ValueError, OSError) as error:
+                self.report({"ERROR"}, str(error))
+                return {"CANCELLED"}
+            return {"FINISHED"}
+
         utilities.teardown_scene()
         utilities.setup_scene()
         instance = callbacks.get_active_rig_instance()
@@ -1077,6 +1019,17 @@ class MapRawToGuiControls(bpy.types.Operator):
         if not instance:
             return {"CANCELLED"}
 
+        if callbacks.is_face_board_readonly(instance):
+            self.report({"ERROR"}, "The linked face board is read-only. Use Editable Link or Append to edit controls.")
+            return {"CANCELLED"}
+
+        if callbacks.is_reference_readonly(instance, "head"):
+            self.report(
+                {"ERROR"},
+                "Raw-to-GUI mapping is unavailable for a linked head. Edit the source .blend file or use Append.",
+            )
+            return {"CANCELLED"}
+
         if not instance.head_initialized:
             instance.head_initialize()
 
@@ -1117,22 +1070,23 @@ class MigrateLegacyData(bpy.types.Operator):
 
     bl_idname = f"{ToolInfo.NAME}.migrate_legacy_data"
     bl_label = "Migrate Legacy Data"
+    bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context: "Context") -> set[str]:
-        migrate_type = utilities.migrate_legacy_data(context)
-        ops = utilities.get_addon_ops_module()
-        ops.force_evaluate()
+        try:
+            migrate_type, upgraded, unchanged = utilities.migrate_runtime_data(context)
+        except (RuntimeError, ValueError, OSError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
 
-        if migrate_type == "collection_data":
+        if migrate_type != "default" or upgraded:
             self.report(
-                {"WARNING"},
-                "Migrated legacy data using collection data. DNA file paths were NOT recovered and you will need "
-                "to update them manually.",
+                {"INFO"},
+                f"Migrated rig data; upgraded {upgraded} runtime(s), {unchanged} unchanged. "
+                "Save the .blend file before appending or linking it.",
             )
-        elif migrate_type in {"cross_edition", "legacy_format"}:
-            self.report({"INFO"}, "Migrated rig instance data. Save the .blend file to keep the changes.")
         else:
-            self.report({"INFO"}, "No legacy data found to migrate.")
+            self.report({"INFO"}, f"No migration needed; {unchanged} instance(s) unchanged.")
         return {"FINISHED"}
 
 
@@ -1204,6 +1158,7 @@ class SendToMetaHumanCreator(bpy.types.Operator):
                         linear_modifier=component.linear_modifier,
                         file_name=f"{component.component_type}.dna",
                         component_type=component.component_type,
+                        normals=instance.output.export_normals,
                         seam_reference_dna_path=seam_reference_dna_path,
                     )
                 elif instance.output.method == "overwrite":
@@ -1212,6 +1167,7 @@ class SendToMetaHumanCreator(bpy.types.Operator):
                         linear_modifier=component.linear_modifier,
                         file_name=f"{component.component_type}.dna",
                         component_type=component.component_type,
+                        normals=instance.output.export_normals,
                     )
                 component_exporters.append((component, dna_io_instance))
 
@@ -1274,6 +1230,14 @@ class ExportSelectedComponent(bpy.types.Operator):
                 self.report({"ERROR"}, "File must be saved to use a relative path")
                 return {"CANCELLED"}
 
+            if not component.dna_reader:
+                self.report(
+                    {"ERROR"},
+                    f'The {component.component_type} DNA file "{component.dna_file_path}" could not be read. '
+                    "Please re-select it under the Rig Instance panel.",
+                )
+                return {"CANCELLED"}
+
             dna_io_instance: DNAExporter = None  # type: ignore[assignment]
             if instance.output.method == "calibrate":
                 # When re-exporting only the head, conform its neck seam onto a body
@@ -1291,6 +1255,7 @@ class ExportSelectedComponent(bpy.types.Operator):
                     file_name=f"{component.component_type}.dna",
                     component_type=component.component_type,
                     textures=False,
+                    normals=instance.output.export_normals,
                     seam_reference_dna_path=seam_reference_dna_path,
                 )
             elif instance.output.method == "overwrite":
@@ -1300,6 +1265,7 @@ class ExportSelectedComponent(bpy.types.Operator):
                     file_name=f"{component.component_type}.dna",
                     component_type=component.component_type,
                     textures=False,
+                    normals=instance.output.export_normals,
                 )
 
             valid, title, message, fix = dna_io_instance.run()
@@ -1433,6 +1399,7 @@ class DuplicateRigInstance(bpy.types.Operator):
 
     bl_idname = f"{ToolInfo.NAME}.duplicate_rig_instance"
     bl_label = "Duplicate Rig Instance"
+    bl_options = {"REGISTER", "UNDO"}
 
     new_name: bpy.props.StringProperty(
         name="New Name",
@@ -1452,7 +1419,19 @@ class DuplicateRigInstance(bpy.types.Operator):
         default=True,
     )  # pyright: ignore[reportInvalidTypeForm]
 
-    def execute(self, context: "Context") -> set[str]:  # noqa: PLR0912, PLR0915
+    from .runtime.controller import native_scene_operation
+
+    def execute(self, context: "Context") -> set[str]:
+        instance = callbacks.get_active_rig_instance()
+        if instance is None:
+            self.report({"ERROR"}, "Select a rig instance to duplicate.")
+            return {"CANCELLED"}
+        if instance.get("reference_mode") in {"LINK", "EDITABLE_LINK"}:
+            self.report(
+                {"ERROR"}, "Linked characters cannot be duplicated. Append the character from its source file first."
+            )
+            return {"CANCELLED"}
+
         new_folder = Path(bpy.path.abspath(self.new_folder))
         if not bpy.path.abspath(self.new_folder) and not bpy.data.filepath:
             self.report({"ERROR"}, "File must be saved to use a relative path")
@@ -1467,12 +1446,13 @@ class DuplicateRigInstance(bpy.types.Operator):
             self.report({"ERROR"}, f"Folder not found: {new_folder}")
             return {"CANCELLED"}
 
+        return self._duplicate(context)
+
+    @native_scene_operation
+    def _duplicate(self, context: "Context") -> set[str]:  # noqa: PLR0912, PLR0915
+        new_folder = Path(bpy.path.abspath(self.new_folder))
         instance = callbacks.get_active_rig_instance()
         addon_scene_properties = utilities.get_addon_scene_properties(context)
-        addon_window_manager_properties = utilities.get_addon_window_manager_properties(context)
-        # Pause dependency graph evaluation until the end of this operator to avoid unnecessary evaluations
-        # while we are copying and modifying objects
-        addon_window_manager_properties.evaluate_dependency_graph = False
         if instance:
             # Cache instance name before the loop because CollectionProperty.add() can
             # invalidate all existing Python wrappers to items in the collection, causing
@@ -1643,6 +1623,8 @@ class DuplicateRigInstance(bpy.types.Operator):
                     else:
                         new_instance: "RigInstance" = addon_scene_properties.rig_instance_list.add()  # noqa: UP037
 
+                    instance = addon_scene_properties.rig_instance_list[instance_name]
+
                     # now set the values on the instance
                     new_instance.name = self.new_name
                     setattr(new_instance, f"{component_type}_dna_file_path", str(new_dna_file_path))
@@ -1695,8 +1677,7 @@ class DuplicateRigInstance(bpy.types.Operator):
                         utilities.constrain_head_to_body(new_instance)
 
         # notify all handlers that the rig instance list has been updated
-        utilities.setup_scene()
-        addon_window_manager_properties.evaluate_dependency_graph = True
+        utilities.notify_rig_instances_changed(addon_scene_properties.rig_instance_list.get(self.new_name))
         return {"FINISHED"}
 
     def invoke(self, context: "Context", event: bpy.types.Event) -> set[str] | None:
@@ -1843,7 +1824,38 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
         default=True,
     )  # pyright: ignore[reportInvalidTypeForm]
 
+    @staticmethod
+    def _associated_data(
+        instance: "RigInstance",
+    ) -> tuple[list[bpy.types.Collection], set[bpy.types.Object], set[bpy.types.Image]]:
+        objects = set()
+        images = set()
+        if "reference_root" in instance:
+            root = instance.get("reference_root")
+            collections = [root] if root else []
+        else:
+            collections = []
+            for component_type in ("body", "head"):
+                for item in getattr(instance.output, f"{component_type}_item_list"):
+                    if item.scene_object:
+                        objects.add(item.scene_object)
+                    if item.image_object:
+                        images.add(item.image_object)
+                for collection_name in [instance.name] + [
+                    f"{instance.name}_{component_type}_lod{index}" for index in range(NUMBER_OF_HEAD_LODS)
+                ]:
+                    collection = bpy.data.collections.get((collection_name, None))
+                    if collection and collection not in collections:
+                        collections.append(collection)
+        for collection in list(collections):
+            for child in collection.children_recursive:
+                if child not in collections:
+                    collections.append(child)
+        return collections, objects, images
+
     def execute(self, context: "Context") -> set[str]:
+        from .runtime import engine
+
         addon_scene_properties = utilities.get_addon_scene_properties(context)
         my_list = addon_scene_properties.rig_instance_list
         active_index = self._resolve_active_index(my_list)
@@ -1851,24 +1863,29 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
             self.report({"WARNING"}, "There is no rig instance to remove")
             return {"CANCELLED"}
 
+        instance = my_list[active_index]
+        engine.release_records(instance)
+        objects = set()
+        images = set()
         if self.delete_associated_data:
-            instance = my_list[active_index]
-            for component_type in ["body", "head"]:
-                for item in getattr(instance.output, f"{component_type}_item_list"):
-                    if item.scene_object:
-                        bpy.data.objects.remove(item.scene_object, do_unlink=True)
-                    if item.image_object:
-                        bpy.data.images.remove(item.image_object, do_unlink=True)
-
-                # remove the collections for the component type
-                for collection_name in [instance.name] + [
-                    f"{instance.name}_{component_type}_lod{i}" for i in range(NUMBER_OF_HEAD_LODS)
-                ]:
-                    collection = bpy.data.collections.get(collection_name)
-                    if collection:
-                        bpy.data.collections.remove(collection, do_unlink=True)
+            collections, objects, images = self._associated_data(instance)
+            for collection in reversed(collections):
+                if collection.library or collection.override_library:
+                    continue
+                for owner in list(collection.objects):
+                    objects.add(owner)
+                    collection.objects.unlink(owner)
+                bpy.data.collections.remove(collection, do_unlink=True)
 
         my_list.remove(active_index)
+        unused = {owner for owner in objects if owner.library is None and owner.users == 0}
+        while unused:
+            objects.difference_update(unused)
+            bpy.data.batch_remove(ids=unused)
+            unused = {owner for owner in objects if owner.library is None and owner.users == 0}
+        for image in images:
+            if image.library is None and image.users == 0:
+                bpy.data.images.remove(image)
         to_index = min(active_index, len(my_list) - 1)
         addon_scene_properties.rig_instance_list_active_index = to_index
         # notify registered callbacks that a rig instance was removed from the list

@@ -126,9 +126,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: character-dna-addon/reports/profiling/benchmark-baseline.json
-          key: benchmark-baseline-blender-${{ inputs.blender-version }}-${{ inputs.runner-os }}-latest
+          key: benchmark-native-v2-blender-${{ inputs.blender-version }}-${{ inputs.runner-os }}-latest
           restore-keys: |
-            benchmark-baseline-blender-${{ inputs.blender-version }}-${{ inputs.runner-os }}-
+            benchmark-native-v2-blender-${{ inputs.blender-version }}-${{ inputs.runner-os }}-
 
       - name: Check Baseline Exists
         id: baseline-check
@@ -221,12 +221,18 @@ jobs:
             character-dna-addon/comparison_output.txt
           retention-days: 30
 
+      - name: Prepare New Baseline
+        if: steps.baseline-check.outputs.baseline_exists == 'false' && inputs.is-push == true
+        run: cp reports/profiling/current/current.json reports/profiling/benchmark-baseline.json
+        working-directory: character-dna-addon
+        shell: bash
+
       - name: Save as New Baseline (if none exists)
         if: steps.baseline-check.outputs.baseline_exists == 'false' && inputs.is-push == true
         uses: actions/cache/save@v5
         with:
-          path: character-dna-addon/reports/profiling/current/current.json
-          key: benchmark-baseline-blender-${{ inputs.blender-version }}-${{ inputs.runner-os }}-latest
+          path: character-dna-addon/reports/profiling/benchmark-baseline.json
+          key: benchmark-native-v2-blender-${{ inputs.blender-version }}-${{ inputs.runner-os }}-latest
 
       - name: Notify Baseline Created
         if: steps.baseline-check.outputs.baseline_exists == 'false' && inputs.is-push == true

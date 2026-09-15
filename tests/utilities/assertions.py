@@ -142,6 +142,9 @@ def assert_mesh_geometry(
     changed_mesh_name: int,
     changed_vertex_index: int,
     changed_vertex_location: tuple[Vector, Vector, Vector],
+    changed_normal_index: int | None = None,
+    changed_normal_vector: tuple[Vector, Vector, Vector] | None = None,
+    changed_normal_neighbours: list[int] | None = None,
     lower_lod_vertices: list[dict] | None = None,
     assert_mesh_indices: bool = True,
     assert_index_order: bool = True,
@@ -181,10 +184,19 @@ def assert_mesh_geometry(
     # this ensures that we don't assert that the vertex was moved in the dna if it was not moved in blender by
     # comparing the original and new dna vertex positions
     changed_position = False
+    changed_index = changed_vertex_index
+    tolerated: set[int] = set()
     if attribute == "positions":
         changed_position = (
             getattr(changed_vertex_location[1], axis_name) - getattr(changed_vertex_location[-1], axis_name) != 0.0
         )
+    elif attribute == "normals" and changed_normal_vector is not None:
+        # Normal index equals position index in the DNA, so this indexes the same arrays.
+        changed_index = changed_normal_index
+        changed_position = (
+            getattr(changed_normal_vector[1], axis_name) - getattr(changed_normal_vector[-1], axis_name) != 0.0
+        )
+        tolerated = set(changed_normal_neighbours or ())
 
     expected_indices = expected_data[DNA_GEOMETRY_VERSION]["meshes"][expected_mesh_index]["layouts"][attribute]
     current_indices = current_data[DNA_GEOMETRY_VERSION]["meshes"][current_mesh_index]["layouts"][attribute]
@@ -208,10 +220,12 @@ def assert_mesh_geometry(
             current_value = current_values[current_index]
 
             # if this is the changed vertex and the axis value is not ignored
-            if mesh_name == changed_mesh_name and expected_index == changed_vertex_index and changed_position:
+            if mesh_name == changed_mesh_name and expected_index == changed_index and changed_position:
                 assert (
                     expected_value != pytest.approx(current_value, abs=tolerance)
-                ), f"Mesh {mesh_name} {attribute} {axis_name} vertex index {changed_vertex_index} should not match, since it was moved in blender."
+                ), f"Mesh {mesh_name} {attribute} {axis_name} vertex index {changed_index} should not match, since it was changed in blender."
+            elif mesh_name == changed_mesh_name and expected_index in tolerated:
+                continue
             else:
                 assert (
                     expected_value == pytest.approx(current_value, abs=tolerance)
@@ -229,12 +243,97 @@ def assert_mesh_geometry(
         for expected_value, current_value in zip(sorted_expected_values, sorted_current_values, strict=False):
             if expected_value != pytest.approx(current_value, abs=tolerance) and changed_position:
                 assert (
-                    expected_values[changed_vertex_index] == expected_value
-                ), f"Mesh {mesh_name} {attribute} {axis_name} value mismatch. The vertex index that was moved was {changed_vertex_index} but this is not that one."
+                    expected_values[changed_index] == expected_value
+                ), f"Mesh {mesh_name} {attribute} {axis_name} value mismatch. The vertex index that was changed was {changed_index} but this is not that one."
             else:
                 assert (
                     expected_value == pytest.approx(current_value, abs=tolerance)
                 ), f"Mesh {mesh_name} {attribute} {axis_name} value mismatch. Expected {expected_value} but has {current_value}."
+
+
+def get_corner_normals(data: dict, mesh_name: str) -> dict[tuple[int, int], Vector]:
+    """The normal every face corner resolves to, keyed by ``(face index, position index)``.
+
+    An export rebuilds the vertex layouts -- one slot per UV-split vertex rather than the
+    source DNA's one per position -- so the normal array legitimately changes length and its
+    indices mean different things on each side. What a corner actually resolves to does not.
+    """
+    mesh_index = data[DNA_DEFINITION_VERSION]["meshNames"].index(mesh_name)
+    mesh = data[DNA_GEOMETRY_VERSION]["meshes"][mesh_index]
+    normal_indices = mesh["layouts"]["normals"]
+    position_indices = mesh["layouts"]["positions"]
+    xs, ys, zs = mesh["normals"]["xs"], mesh["normals"]["ys"], mesh["normals"]["zs"]
+
+    corners: dict[tuple[int, int], Vector] = {}
+    for face_index, face in enumerate(mesh["faces"]):
+        for layout_index in face["layoutIndices"]:
+            normal_index = normal_indices[layout_index]
+            corners[(face_index, position_indices[layout_index])] = Vector(
+                (xs[normal_index], ys[normal_index], zs[normal_index])
+            )
+    return corners
+
+
+def assert_mesh_corner_normals(
+    expected_data: dict,
+    current_data: dict,
+    mesh_name: str,
+    changed_mesh_name: str,
+    changed_normal_index: int,
+    changed_normal_neighbours: list[int],
+    bounds: dict[str, float],
+):
+    """Every face corner keeps the normal it had, except the ones deliberately changed.
+
+    The export rewrites every normal from the scene rather than only the ones that moved, so
+    it carries Blender's custom-normal storage error on all of them. That error is a
+    distribution, not a per-corner bound -- a handful of corners cannot be represented at all
+    -- so the whole spread is asserted instead. A wrong rotation, a wrong index or the linear
+    unit applied to a direction all move the mean, not just the tail.
+    """
+    expected = get_corner_normals(expected_data, mesh_name)
+    current = get_corner_normals(current_data, mesh_name)
+
+    assert set(expected) == set(current), (
+        f"Mesh {mesh_name} face corners changed. Expected {len(expected)} corners but has {len(current)}, "
+        f"so the exported layouts no longer address the same geometry."
+    )
+
+    tolerated = set(changed_normal_neighbours) if mesh_name == changed_mesh_name else set()
+    errors = []
+    changed_corners = 0
+
+    for key, expected_normal in expected.items():
+        _, position_index = key
+        current_normal = current[key]
+
+        assert current_normal.length == pytest.approx(1.0, abs=1e-3), (
+            f"Mesh {mesh_name} normal at corner {key} has length {current_normal.length}, not 1. "
+            f"A normal is a direction, so the DNA's linear unit must not be applied to it."
+        )
+
+        if mesh_name == changed_mesh_name and position_index == changed_normal_index:
+            changed_corners += 1
+            assert (expected_normal - current_normal).length > bounds["max"], (
+                f"Mesh {mesh_name} normal at corner {key} should not match, since it was changed in blender."
+            )
+        elif position_index not in tolerated:
+            errors.append((expected_normal - current_normal).length)
+
+    if mesh_name == changed_mesh_name:
+        assert changed_corners, f"Vertex {changed_normal_index} was never reached on mesh {mesh_name}."
+
+    errors.sort()
+    measured = {
+        "mean": sum(errors) / len(errors),
+        "p99": errors[int(len(errors) * 0.99)],
+        "max": errors[-1],
+    }
+    for name, limit in bounds.items():
+        assert measured[name] <= limit, (
+            f"Mesh {mesh_name} normal round trip {name} error is {measured[name]:.6f}, over the {limit} limit. "
+            f"Measured over {len(errors)} corners: {measured}."
+        )
 
 
 def assert_skin_weights(

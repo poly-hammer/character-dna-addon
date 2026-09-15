@@ -233,6 +233,15 @@ class CharacterOutputProperties(bpy.types.PropertyGroup):
         ),
         default=True,
     )  # pyright: ignore[reportInvalidTypeForm]
+    export_normals: bpy.props.BoolProperty(
+        name="Normals",
+        description=(
+            "Whether to write the scene's normals over the DNA's own. Off by default because the DNA's "
+            "authored normals are what let the head sit invisibly on the body, and Blender's are not "
+            "imported by default"
+        ),
+        default=False,
+    )  # pyright: ignore[reportInvalidTypeForm]
 
     head_item_list: bpy.props.CollectionProperty(type=OutputData)  # pyright: ignore[reportInvalidTypeForm]
     head_item_active_index: bpy.props.IntProperty()  # pyright: ignore[reportInvalidTypeForm]
@@ -340,7 +349,9 @@ class CharacterAddonProperties:
 class CharacterImportProperties(get_dna_import_property_group_base_class()):
     import_mesh: bpy.props.BoolProperty(default=True, name="Mesh", description="Whether to import the head meshes")  # pyright: ignore[reportInvalidTypeForm]
     import_normals: bpy.props.BoolProperty(
-        default=False, name="Normals", description="Whether to import custom split normals on the head meshes"
+        default=False,
+        name="Normals",
+        description="Whether to import the DNA's own custom split normals",
     )  # pyright: ignore[reportInvalidTypeForm]
     import_bones: bpy.props.BoolProperty(
         default=True, name="Bones", description="Whether to import the bones for the head"

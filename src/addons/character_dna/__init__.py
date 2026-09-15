@@ -9,6 +9,7 @@ import bpy
 import bpy.utils.previews  # pyright: ignore[reportMissingModuleSource, reportUnusedImport]
 
 from . import constants, manual_map, operators, properties, rig_instance, utilities
+from .runtime import controller as native_runtime
 from .ui import addon_preferences, importer, menus, view_3d
 
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(constants.ToolInfo.NAME)
 bl_info = {
     "name": "Character DNA",
     "author": "Poly Hammer",
-    "version": (0, 12, 9),
+    "version": (0, 13, 5),
     "blender": (4, 5, 0),
     "location": "File > Import > MetaHuman DNA",
     "description": (
@@ -70,6 +71,7 @@ classes = [
     importer.CHARACTER_DNA_LODS_PT_panel,
     importer.CHARACTER_DNA_EXTRAS_PT_panel,
     importer.CHARACTER_DNA_FILE_INFO_PT_panel,
+    importer.CHARACTER_DNA_LINK_OPTIONS_PT_panel,
     view_3d.CHARACTER_DNA_PT_face_pose_tags,
     view_3d.CHARACTER_DNA_PT_face_board,
     view_3d.CHARACTER_DNA_PT_face_board_footer,
@@ -138,9 +140,7 @@ def register():
 
     utilities.init_sentry()
 
-    # Arm the main thread evaluation drain up front; load_post is not guaranteed to fire when
-    # the addon is enabled with a file already open.
-    rig_instance.ensure_main_thread_timer()
+    native_runtime.register()
 
     # add event handlers
     for handler_name, handler_function in app_handlers.items():
@@ -153,6 +153,8 @@ def unregister():
     """
     utilities.disable_duplicate_addons()
 
+    native_runtime.unregister()
+
     utilities.teardown_scene()
 
     editors = utilities.get_editors()
@@ -160,9 +162,6 @@ def unregister():
     # Stop the optional Pro editor runtime services (solver workers, toast overlay).
     if editors is not None:
         editors.unregister_runtime()
-
-    if not os.environ.get("CHARACTER_DNA_DEV"):
-        rig_instance.stop_listening()
 
     # remove event handlers
     for handler_name, handler_function in app_handlers.items():

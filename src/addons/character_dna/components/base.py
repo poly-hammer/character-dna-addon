@@ -114,6 +114,9 @@ class CharacterComponentBase(metaclass=ABCMeta):
             self.maps_folder = Path(self.dna_import_properties.alternate_maps_folder)
 
         file_path = dna_file_path or self.dna_file_path
+        # Only set when the DNA is actually on disk, so every reader access has to tolerate None.
+        self.dna_reader = None
+        self.dna_importer = None
         if file_path.is_file() and file_path.exists():
             self.dna_reader = get_dna_reader(file_path=dna_file_path or self.dna_file_path, file_format="binary")
             self.dna_importer = DNAImporter(
@@ -133,6 +136,10 @@ class CharacterComponentBase(metaclass=ABCMeta):
     def linear_modifier(self) -> float:
         from ..bindings import enums  # type: ignore[reportAttributeAccessIssue]
 
+        if not self.dna_reader:
+            logger.warning(f'No DNA file was read for "{self.name}", assuming meters.')
+            return 1
+
         unit = enums.TranslationUnit(self.dna_reader.getTranslationUnit())  # pyright: ignore[reportCallIssue]
         # is centimeter
         if unit.name.lower() == "cm":
@@ -145,6 +152,10 @@ class CharacterComponentBase(metaclass=ABCMeta):
     @property
     def angle_modifier(self) -> float:
         from ..bindings import enums  # type: ignore[reportAttributeAccessIssue]
+
+        if not self.dna_reader:
+            logger.warning(f'No DNA file was read for "{self.name}", assuming degrees.')
+            return 180 / math.pi
 
         unit = enums.RotationUnit(self.dna_reader.getRotationUnit())  # pyright: ignore[reportCallIssue]
         # is degree
@@ -322,10 +333,10 @@ class CharacterComponentBase(metaclass=ABCMeta):
         if self.head_rig_object:
             for mesh_object in self.head_rig_object.children:
                 if mesh_object.type == "MESH" and "lod0" not in mesh_object.name.lower():
-                    mesh_object.hide_set(True)
+                    utilities.set_hidden(mesh_object, True)
 
             utilities.hide_empties()
-            self.head_rig_object.hide_set(True)
+            utilities.set_hidden(self.head_rig_object, True)
             utilities.move_to_collection(
                 scene_objects=[self.head_rig_object], collection_name=self.name, exclusively=True
             )
@@ -333,16 +344,18 @@ class CharacterComponentBase(metaclass=ABCMeta):
         if self.body_rig_object:
             for mesh_object in self.body_rig_object.children:
                 if mesh_object.type == "MESH" and "lod0" not in mesh_object.name.lower():
-                    mesh_object.hide_set(True)
+                    utilities.set_hidden(mesh_object, True)
 
-            self.body_rig_object.hide_set(True)
+            utilities.set_hidden(self.body_rig_object, True)
             utilities.move_to_collection(
                 scene_objects=[self.body_rig_object], collection_name=self.name, exclusively=True
             )
 
         # move the lod collections under the main asset collection
         asset_collection = bpy.data.collections.get(self.name)
-        if asset_collection and bpy.context.scene:
+        # Unlinking the lods from the scene while the asset collection sits outside it would drop
+        # the whole character out of the view layer.
+        if asset_collection and bpy.context.scene and utilities.is_collection_in_scene(asset_collection):
             for lod_index in range(NUMBER_OF_HEAD_LODS):
                 lod_collection = bpy.data.collections.get(f"{self.name}_lod{lod_index}")
                 # move the lod collection to the asset collection

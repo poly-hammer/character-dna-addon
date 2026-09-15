@@ -12,6 +12,7 @@ from mathutils import Euler, Quaternion, Vector
 
 # local imports
 from ..constants import (
+    EXCLUDED_FACE_BOARD_CONTROLS,
     EYE_AIM_BONES,
     FACE_BOARD_SWITCHES,
     HAS_ACTION_SLOTS,
@@ -29,6 +30,7 @@ from ..fbx.writer import (
     write_face_board_animation,
     write_skeleton_animation,
 )
+from ..runtime.controller import with_authoring_output
 from ..typing import *  # noqa: F403
 from ..validators import ValidationReport, validate_face_board_animation, validate_skeleton_animation
 from .armature import get_pose_bone_local_transform
@@ -91,7 +93,9 @@ def set_keys_on_bone(
             keyframe_point.co[1] = value * scale_factor
 
 
-FACE_BOARD_EXCLUDED_CONTROLS = frozenset(EYE_AIM_BONES) | frozenset(FACE_BOARD_SWITCHES)
+FACE_BOARD_EXCLUDED_CONTROLS = (
+    frozenset(EYE_AIM_BONES) | frozenset(FACE_BOARD_SWITCHES) | frozenset(EXCLUDED_FACE_BOARD_CONTROLS)
+)
 
 
 def get_scene_frame_rate() -> float:
@@ -136,8 +140,7 @@ def validate_animation_clip(
     """
     bone_names = [bone.name for bone in armature.pose.bones] if armature.pose else []
     if is_face_board:
-        controls = [name for name in bone_names if name not in FACE_BOARD_EXCLUDED_CONTROLS]
-        return validate_face_board_animation(clip.node_names, controls)
+        return validate_face_board_animation(clip.node_names, bone_names, exclude_controls=FACE_BOARD_EXCLUDED_CONTROLS)
     return validate_skeleton_animation(clip.node_names, bone_names, component=component)
 
 
@@ -313,7 +316,12 @@ def bake_control_curve_values_for_frame(  # noqa: PLR0912
         return
 
     for fcurve in channel_bag.fcurves:  # pyright: ignore[reportAttributeAccessIssue]
-        control_curve_name, transform = fcurve.data_path.split('"].')
+        # The action can hold channels that are not pose bone transforms at all, so anything that
+        # is not a 'pose.bones["name"].transform' path is skipped rather than failing the bake.
+        parts = fcurve.data_path.split('"].', 1)
+        if len(parts) != 2:
+            continue
+        control_curve_name, transform = parts
         if transform == "location" and fcurve.array_index != 2:
             control_curve_name = control_curve_name.replace('pose.bones["', "")
             axis = index_lookup[fcurve.array_index]
@@ -643,6 +651,7 @@ def flush_texture_mask_keyframes_to_action(
     return action
 
 
+@with_authoring_output
 def bake_face_board_to_action(
     instance: "RigInstance",
     armature_object: bpy.types.Object,
@@ -790,6 +799,7 @@ def _snapshot_source_fcurves(
     return snapshot
 
 
+@with_authoring_output
 def bake_body_to_action(  # noqa: PLR0912, PLR0915
     instance: "RigInstance",
     armature_object: bpy.types.Object,

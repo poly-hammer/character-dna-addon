@@ -72,7 +72,6 @@ def edited_shape_key_export(addon, temp_folder):
     """Import Ada's head (LOD0) with every shape-key block created, edit one head
     channel's block by ``EDIT_OFFSET``, run the overwrite export, and yield the
     facts needed to verify the exported blend-shape target."""
-    from character_dna import rig_instance as rig_instance_module
     from character_dna.dna_io import DNAExporter
     from character_dna.utilities import get_active_head
 
@@ -84,7 +83,6 @@ def edited_shape_key_export(addon, temp_folder):
         include_body=True,
     )
     _create_head_shape_keys()
-    rig_instance_module.stop_listening()
 
     head = get_active_head()
     assert head is not None and head.rig_instance is not None
@@ -122,8 +120,6 @@ def edited_shape_key_export(addon, temp_folder):
         instance=head.rig_instance,
         linear_modifier=linear_modifier,
     ).run()
-
-    rig_instance_module.start_listening()
 
     # DNA is Y-up, Blender is Z-up: the exporter rotates deltas by -90° about X.
     rotation_matrix = Matrix.Rotation(math.radians(-90), 4, "X")

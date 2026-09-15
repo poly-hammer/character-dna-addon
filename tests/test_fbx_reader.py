@@ -1,7 +1,9 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
-from character_dna.fbx import load_fbx_animation
+from character_dna.fbx import load_fbx_animation, reader
 from character_dna.fbx.maths import quat_multiply, quat_to_euler, quat_to_matrix
 from constants import TEST_ANIMATION_FOLDER
 
@@ -87,6 +89,82 @@ def test_explicit_frame_rate_changes_sample_count():
 def test_missing_file_raises():
     with pytest.raises(FileNotFoundError):
         load_fbx_animation(TEST_ANIMATION_FOLDER / "does_not_exist.fbx")
+
+
+def test_oversized_clip_is_rejected_before_frame_allocation(monkeypatch):
+    node = SimpleNamespace(typed_id=1, parent=None, local_transform=np.eye(4), world_transform=np.eye(4))
+    scene = SimpleNamespace(settings=SimpleNamespace(frames_per_second=30.0))
+    baked = SimpleNamespace(playback_duration=2043224 / 30.0, key_time_max=2043224 / 30.0)
+    monkeypatch.setattr(reader, "_order_nodes", lambda _scene: [node] * 2914)
+    monkeypatch.setattr(reader, "_select_baked_anim", lambda _scene, _frame_rate: (baked, "Oversized take"))
+
+    def reject_allocation(*args, **kwargs):
+        pytest.fail("Oversized clip reached frame allocation")
+
+    monkeypatch.setattr(reader.np, "arange", reject_allocation)
+    monkeypatch.setattr(reader.np, "broadcast_to", reject_allocation)
+
+    with pytest.raises(ValueError, match=r"2,043,225 frames.*2,914 nodes.*GiB"):
+        reader._build_clip(scene, None)
+
+
+@pytest.mark.parametrize("budget", [255, 256])
+def test_clip_buffer_budget_counts_both_transforms_and_sample_times(monkeypatch, budget):
+    node = SimpleNamespace(
+        typed_id=1, name="root", parent=None, local_transform=np.eye(4), world_transform=np.eye(4)
+    )
+    scene = SimpleNamespace(
+        settings=SimpleNamespace(frames_per_second=30.0, unit_meters=0.01, axes=SimpleNamespace(up=4))
+    )
+    baked = SimpleNamespace(playback_duration=0.1, key_time_max=0.1, nodes=[])
+    monkeypatch.setattr(reader, "_order_nodes", lambda _scene: [node])
+    monkeypatch.setattr(reader, "_select_baked_anim", lambda _scene, _frame_rate: (baked, "Short take"))
+    monkeypatch.setattr(reader, "MAX_CLIP_BUFFER_BYTES", budget)
+
+    if budget < 256:
+        with pytest.raises(ValueError, match="4 frames across 1 nodes"):
+            reader._build_clip(scene, None)
+    else:
+        animation = reader._build_clip(scene, None)
+        assert animation.num_frames == 4
+        assert animation.rotations.nbytes + animation.translations.nbytes + 4 * 8 == budget
+        np.testing.assert_allclose(animation.rotations[:, 0], [[1.0, 0.0, 0.0, 0.0]] * 4)
+
+
+@pytest.mark.parametrize("from_buffer", [False, True])
+def test_rejected_clip_closes_scene(monkeypatch, tmp_path, from_buffer):
+    closed = []
+    scene = SimpleNamespace(close=lambda: closed.append(True))
+    bindings = SimpleNamespace(load_file=lambda *_args, **_kwargs: scene, load_memory=lambda *_args, **_kwargs: scene)
+    monkeypatch.setattr(reader, "_require_ufbx", lambda: bindings)
+
+    def reject_clip(scene, frame_rate):
+        raise ValueError("Clip exceeds animation buffer limit")
+
+    monkeypatch.setattr(reader, "_build_clip", reject_clip)
+    with pytest.raises(ValueError, match="buffer limit"):
+        if from_buffer:
+            reader.load_fbx_animation_buffer(b"")
+        else:
+            file_path = tmp_path / "oversized.fbx"
+            file_path.touch()
+            reader.load_fbx_animation(file_path)
+    assert closed == [True]
+
+
+def test_rejected_clip_is_reported_by_import_operator(monkeypatch, tmp_path):
+    from character_dna import utilities
+    from character_dna.operators import ImportAnimationBase
+
+    reports = []
+    operator = SimpleNamespace(match_frame_rate=True, report=lambda level, message: reports.append((level, message)))
+
+    def reject_clip(*args, **kwargs):
+        raise ValueError("Clip exceeds animation buffer limit")
+
+    monkeypatch.setattr(utilities, "load_animation_clip", reject_clip)
+    assert ImportAnimationBase.load_clip(operator, tmp_path / "oversized.fbx") is None
+    assert reports == [({"ERROR"}, "Clip exceeds animation buffer limit")]
 
 
 @pytest.mark.parametrize("order", ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"])
