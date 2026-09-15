@@ -13,6 +13,8 @@ import pytest
 
 from mathutils import Quaternion
 
+from character_dna.runtime import engine
+from character_dna.runtime.bindings import owned_curve
 from character_dna.utilities.mesh import get_bounding_box_center, get_bounding_box_left_x, get_bounding_box_right_x
 from constants import TEST_DNA_FOLDER
 
@@ -61,6 +63,14 @@ def animate_character(instance):
             pose_bone.location.y = value
             pose_bone.keyframe_insert(data_path="location", frame=1)
 
+    # Blender 4.5 stores native eye visibility drivers on the armature data.
+    # Exercise copied data animation on newer Blender versions as well.
+    data = instance.face_board.data
+    data["authored_signal"] = 0.5
+    data.keyframe_insert(data_path='["authored_signal"]', frame=1)
+    data["driven_signal"] = 0.0
+    data.driver_add('["driven_signal"]').driver.expression = "0.5"
+
     bpy.context.scene.frame_set(1)  # type: ignore[union-attr]
     bpy.ops.object.mode_set(mode="OBJECT")
     bpy.context.view_layer.update()  # type: ignore[union-attr]
@@ -96,7 +106,20 @@ def test_duplicated_face_board_does_not_inherit_the_source_animation(animated_sc
     source_instance, new_instance = animated_scene_with_a_second_character[:2]
 
     assert source_instance.face_board.animation_data.action is not None
-    assert new_instance.face_board.animation_data is None
+    assert source_instance.face_board.data.animation_data.action is not None
+    assert source_instance.face_board.data.animation_data.drivers.find('["driven_signal"]') is not None
+    own_carriers = engine.carriers(new_instance)
+    source_carriers = engine.carriers(source_instance)
+    assert own_carriers
+    for owner in (new_instance.face_board, new_instance.face_board.data):
+        animation = owner.animation_data
+        if animation is None:
+            continue
+        assert animation.action is None
+        assert not animation.nla_tracks
+        for curve in animation.drivers:
+            assert any(owned_curve(curve, carrier) for carrier in own_carriers)
+            assert not any(owned_curve(curve, carrier) for carrier in source_carriers)
 
     for control_name in ("CTRL_C_jaw", "CTRL_L_mouth_cornerPull", "CTRL_C_eye"):
         pose_bone = new_instance.face_board.pose.bones.get(control_name)

@@ -2,7 +2,8 @@ import bpy
 
 from mathutils import Euler, Vector
 
-from character_dna.utilities import apply_pose
+from character_dna.runtime.controller import authoring_operation
+from character_dna.utilities import apply_pose, get_addon_scene_properties
 
 
 def apply_bone_transform(
@@ -13,9 +14,20 @@ def apply_bone_transform(
     rotation: Euler,
 ):
     rig_object = bpy.data.objects[f"{prefix}_{component}_rig"]
-    rig_object.pose.bones[bone_name].location = location  # type: ignore
-    rig_object.pose.bones[bone_name].rotation_euler = rotation  # type: ignore
-    apply_pose(rig_object)
+    instance = next(
+        instance
+        for instance in get_addon_scene_properties().rig_instance_list
+        if getattr(instance, f"{component}_rig") == rig_object
+    )
+    armature = rig_object.data
+    assert isinstance(armature, bpy.types.Armature)
+    before = armature.bones[bone_name].matrix_local.copy()
+    with authoring_operation(instance):
+        rig_object.pose.bones[bone_name].location = location  # type: ignore
+        rig_object.pose.bones[bone_name].rotation_euler = rotation  # type: ignore
+        apply_pose(rig_object)
+        if location.length or any((rotation.x, rotation.y, rotation.z)):
+            assert armature.bones[bone_name].matrix_local != before, "The authored rest pose was not applied"
 
 
 def apply_vertex_transform(prefix: str, mesh_name: str, vertex_index: int, location: Vector):

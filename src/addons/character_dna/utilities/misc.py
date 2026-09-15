@@ -1001,6 +1001,8 @@ def duplicate_face_board(name: str) -> bpy.types.Object | None:
             # The copy carries the source character's animation and expression, which would
             # otherwise drive the new character's face and skew where the board is placed.
             face_board_duplicate.animation_data_clear()
+            # Bone visibility drivers live on the armature data in Blender 4.5.
+            face_board_duplicate.data.animation_data_clear()
             reset_face_board_controls(face_board_duplicate)
             if bpy.context.collection:
                 bpy.context.collection.objects.link(face_board_duplicate)

@@ -30,7 +30,7 @@ import shutil  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 # import this to ensure that mathutils is available
-import bpy  # pyright: ignore
+import bpy  # noqa: E402, F401  # pyright: ignore
 import pytest  # noqa: E402
 
 from mathutils import Euler, Vector  # noqa: E402
@@ -61,27 +61,9 @@ def pytest_unconfigure() -> None:
       avoiding both the access violation and the allocator's memory report.
     - Elsewhere, ``os._exit`` is sufficient.
     """
-    import faulthandler
+    from utilities.process import exit_blender
 
-    # Flush buffered output before the hard exit so nothing is lost.
-    sys.stdout.flush()
-    sys.stderr.flush()
-
-    # pytest installs faulthandler; disable it so the hard exit stays quiet.
-    faulthandler.disable()
-
-    if sys.platform == "win32":
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        # Use explicit 64-bit-safe signatures so the (HANDLE)-1 current-process
-        # pseudo handle isn't truncated by ctypes' default c_int marshalling.
-        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
-        kernel32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
-        kernel32.TerminateProcess.restype = ctypes.c_int
-        kernel32.TerminateProcess(kernel32.GetCurrentProcess(), _session_exit_code)
-
-    os._exit(_session_exit_code)
+    exit_blender(_session_exit_code)
 
 
 def pytest_configure():
@@ -165,7 +147,6 @@ def changed_head_bone_location() -> tuple[Vector, Vector]:
     # change bone location (blender value, dna value)
     return (
         Vector((0.0, 0.005, 0.02)),  # relative change blender value Z-up
-        # Vector((0.0671469, 0.319794, 9.78912)), # original dna value Y-up
         Vector((0.0671469, 0.643585, 11.8251)),  # new dna value Y-up
     )
 
@@ -275,7 +256,7 @@ def temp_folder():
     if temp_folder.exists():
         shutil.rmtree(temp_folder)
 
-    os.makedirs(temp_folder, exist_ok=True)
+    temp_folder.mkdir(parents=True, exist_ok=True)
 
     yield temp_folder
 

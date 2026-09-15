@@ -123,10 +123,13 @@ def test_runtime_adoption_clears_initialization_warning(monkeypatch):
     assert engine._warnings == {}
 
 
-@pytest.mark.parametrize("import_fixture", ["load_head_only_dna", "load_head_dna"])
-def test_import_uses_runtime_without_opt_in(request: pytest.FixtureRequest, import_fixture: str) -> None:
+@pytest.mark.parametrize("include_body", [False, True], ids=["head_only", "full_character"])
+def test_import_uses_runtime_without_opt_in(include_body: bool) -> None:
     """An ordinary import installs the only evaluator without a preferences toggle."""
-    request.getfixturevalue(import_fixture)
+    from constants import TEST_DNA_FOLDER
+    from fixtures.scene import load_dna
+
+    load_dna(TEST_DNA_FOLDER / "ada" / "head.dna", import_lods=["lod0"], include_body=include_body)
     instance = get_active_rig_instance()
     assert engine.active(instance), controller.status()
     assert "experimental_native_riglogic" not in get_addon_preferences().bl_rna.properties
@@ -135,7 +138,7 @@ def test_import_uses_runtime_without_opt_in(request: pytest.FixtureRequest, impo
     assert drivers in bpy.data.collections[instance.name].children.values()
     assert drivers not in bpy.context.scene.collection.children.values()
     expected_components = {"head", "switches"}
-    if import_fixture == "load_head_dna":
+    if include_body:
         expected_components.add("body")
     assert {carrier["component"] for carrier in engine.carriers(instance)} == expected_components
     for carrier in engine.carriers(instance):

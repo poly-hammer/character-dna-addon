@@ -306,7 +306,7 @@ def test_reference_readonly_face_preset(mode: str, previous_evaluation: bool, mo
         monkeypatch.setattr(utilities, "get_head", lambda *_args: pytest.fail("Must not reset protected head poses"))
         monkeypatch.setattr(utilities, "get_body", lambda *_args: pytest.fail("Must not reset protected body poses"))
         monkeypatch.setattr(utilities, "switch_to_pose_mode", lambda *owners: calls.append(tuple(owners)))
-        preview = next((POSES_FOLDER / "face").rglob("neutral/thumbnail-preview.png"))
+        preview = POSES_FOLDER / "face" / "scan_reference" / "Neutral" / "thumbnail-preview.png"
         properties = SimpleNamespace(face_pose_previews=str(preview))
         context = SimpleNamespace(selected_objects=[head, body])
         callbacks.update_face_pose(cast("Any", properties), cast("Any", context))
@@ -575,6 +575,8 @@ def test_reference_object_transport(tmp_path: Path, mode: str):  # noqa: PLR0915
 
     from character_dna.utilities import reference
 
+    # This subprocess tests transport independently of native rigs in prior fixtures.
+    bpy.ops.wm.read_homefile(app_template="")
     before = set(bpy.data.user_map())
     try:
         root = bpy.data.collections.new("Transport")
@@ -723,7 +725,11 @@ def test_reference_object_transport(tmp_path: Path, mode: str):  # noqa: PLR0915
             print("TRANSPORT_RELOAD_OK", flush=True)
             """)
         result = subprocess.run(  # noqa: S603
-            [sys.executable, "-c", script, str(saved), mode], capture_output=True, text=True, timeout=60, check=False
+            [sys.executable, str(Path(__file__).parent / "utilities" / "process.py"), script, str(saved), mode],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "TRANSPORT_RELOAD_OK" in result.stdout
