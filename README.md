@@ -42,9 +42,9 @@ The addon is compatible with MetaHuman `.dna` files that have been created with 
 | 4.5             | Windows  | x64          |
 | 4.5             | Linux    | x64          |
 | 4.5             | Mac OS   | arm64        |
-| 5.1             | Windows  | x64          |
-| 5.1             | Linux    | x64          |
-| 5.1             | Mac OS   | arm64        |
+| 5.2             | Windows  | x64          |
+| 5.2             | Linux    | x64          |
+| 5.2             | Mac OS   | arm64        |
 
 ## Get Notified on a New Release
 
