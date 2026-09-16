@@ -26,6 +26,7 @@ bl_info = {
         "lets you customize them, then send them back to MetaHuman Creator."
     ),
     "warning": "",
+    "tracker_url": "https://github.com/orgs/poly-hammer/discussions/categories/character-dna-addon",
     "wiki_url": "https://docs.polyhammer.com/character-dna-addon/",
     "category": "Poly Hammer",
 }
