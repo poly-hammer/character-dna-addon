@@ -290,12 +290,17 @@ class CharacterComponentHead(CharacterComponentBase):
         :meth:`frame_rig_to_target`."""
         if not (self.head_mesh_object and self.head_rig_object and self.face_board_object):
             return
-        utilities.position_face_board(
-            head_mesh_object=self.head_mesh_object,
-            head_rig_object=self.head_rig_object,
-            face_board_object=self.face_board_object,
-        )
-        self.face_board_object.location += delta
+        from ..runtime.controller import authoring_operation
+
+        # Blender 4.5 counts the native visibility targets as armature users.
+        # Release those references while editing, then rebind the same armature.
+        with authoring_operation(self.rig_instance):
+            utilities.position_face_board(
+                head_mesh_object=self.head_mesh_object,
+                head_rig_object=self.head_rig_object,
+                face_board_object=self.face_board_object,
+            )
+            self.face_board_object.location += delta
 
     def delete(self):
         for item in self.rig_instance.output.head_item_list:

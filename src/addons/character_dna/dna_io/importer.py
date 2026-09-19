@@ -478,6 +478,13 @@ class DNAImporter:
         # Rotate the mesh and apply to Z-up
         mesh_object.rotation_euler.x = math.radians(90)
         utilities.apply_transforms(mesh_object, rotation=True)
+        # Persist the DNA identity independently of editable object/collection names.
+        mesh_object["ca_dna_component"] = self._component_type
+        mesh_object["ca_dna_mesh_index"] = mesh_index
+        mesh_object["ca_dna_lod"] = lod_index
+        mesh_object["ca_dna_mesh_name"] = mesh_name
+        if self.rig_object is not None:
+            mesh_object["ca_dna_rig"] = self.rig_object
         return mesh_object
 
     def create_rig_object(self) -> bpy.types.Object | None:

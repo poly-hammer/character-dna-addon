@@ -44,7 +44,9 @@ def base_dna_folder(temp_folder: Path):
         shutil.rmtree(folder, ignore_errors=True)
 
 
-def test_convert_meshes_to_dna(load_mhc_conformed_topology_meshes, base_dna_folder, temp_folder: Path):
+def test_convert_meshes_to_dna(
+    load_mhc_conformed_topology_meshes, base_dna_folder, temp_folder: Path, monkeypatch: pytest.MonkeyPatch
+):
     name = "TestMetaHuman01"
     output_folder = temp_folder / "converted_dna"
     output_folder.mkdir(parents=True, exist_ok=True)
@@ -60,6 +62,22 @@ def test_convert_meshes_to_dna(load_mhc_conformed_topology_meshes, base_dna_fold
     properties.validate_uvs = False
     properties.constrain_head_to_body = True
 
+    # Interactive conversion yields to timers before finalization; background
+    # conversion does not. Reproduce the deferred native binding at that boundary.
+    from character_dna.editors.converter import utilities as converter_utilities
+    from character_dna.runtime import controller, engine
+
+    snap_components = converter_utilities.snap_components_to_wrap
+
+    def snap_with_native_bindings(prepared):
+        controller.reconcile()
+        instance = bpy.context.scene.character_dna.rig_instance_list.get(name)
+        assert engine.active(instance)
+        if bpy.app.version < (5, 0, 0):
+            assert instance.face_board.data.users > 1
+        snap_components(prepared)
+
+    monkeypatch.setattr(converter_utilities, "snap_components_to_wrap", snap_with_native_bindings)
     result = bpy.ops.character_dna.convert_to_dna()  # type: ignore[attr-defined]
     assert result == {"FINISHED"}, "Conversion operator should finish successfully"
 

@@ -24,7 +24,7 @@ keywords = ["blender", "metahuman", "dna", "riglogic", "animation", "3d"]
 name = "character-dna-addon"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
-version = "0.13.7"
+version = "0.13.8"
 
 [project.optional-dependencies]
 dev = [
