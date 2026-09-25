@@ -1,0 +1,20 @@
+{
+  "engine_version": "5.8.3-0+UE5",
+  "blueprint": "/Game/MetaHumans/Ada/BP_Ada",
+  "mesh": "/Game/MetaHumans/Ada/Body/SKM_Ada_BodyMesh.SKM_Ada_BodyMesh",
+  "post_process": "/Game/MetaHumans/Common/Body/ABP_Body_PostProcess.ABP_Body_PostProcess_C",
+  "input_animation": "/Game/CharacterDNATests/AdaRBF/AS_Ada_RBF_DriverPoses.AS_Ada_RBF_DriverPoses",
+  "baked_animation": "/Game/CharacterDNATests/AdaRBF/AS_Ada_RBF_UnrealBaked.AS_Ada_RBF_UnrealBaked",
+  "level_sequence": "/Game/CharacterDNATests/AdaRBF/LS_Ada_RBF_Snapshots.LS_Ada_RBF_Snapshots",
+  "lod": 0,
+  "maximum_baked_driver_error_degrees": 0.0034942617972860014,
+  "inputs_sha256": "2b2549c53a9bcf28e551e79d0438c76fd6ae62a4c56ae86e978f94aa72d9bf6e",
+  "fbx_sha256": "4c1397a22fa2551be9cf3078238040125ef81315770dc81ab23707e47be3c2bb",
+  "snapshot_space": "Blender world axes, meters; actor at origin; UFBX RrSs scale inheritance",
+  "frames": 215,
+  "joints_per_frame": 342,
+  "dna_sha256": "b32cd407349825c778fdbe4245599f0f0c0caae08c4f6b41f1e83e4455daaa48",
+  "maximum_fbx_audit_error_m": 1.1475366245831412e-06,
+  "fbx_file": "ada_unreal_rbf.fbx",
+  "extractor": "pyufbx 0.0.0: Node.evaluate_transform at exact frame / fps, including animated scale"
+}
