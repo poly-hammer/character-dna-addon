@@ -11,10 +11,11 @@ custom retargeter is part of the workflow.
 1. Install the matching add-on and rebuilt OpenRigLogic Blender module, then
    restart Blender. Both Windows Python 3.11 and 3.13 builds were verified.
    A Python-only reload cannot replace an already loaded native module.
-2. Import the source DNA into a **new rig** or convert the wrapped meshes again.
-   Existing `.blend` rigs retain Maya-local bone axes and must be reimported.
-   Preserve those files for their existing actions and constraints; changing
-   their root rotation or their coordinate-version tag does not migrate them.
+2. For existing scenes, use **Migrate Legacy Data → Migrate Now**. The operator
+   re-reads each rig's DNA, replaces its rest frames in place, and rebuilds its
+   runtime drivers. Meshes, materials and character object references remain.
+   Changing a root rotation or coordinate-version tag is not a migration.
+   To redo mesh conversion, convert the wrapped meshes again instead.
 3. In MetaHuman Creator, use **From DNA > Replace** with the converted DNA.
 4. Play the animation using the normal MetaHuman preview.
 
@@ -28,6 +29,48 @@ custom waist and hip pose. The artist's input mesh objects are not modified.
 Use a base DNA whose hand reference pose is compatible with the animation
 source. This does not replace weight/corrective sculpting for arbitrary custom
 anatomy. The separate elbow problem mentioned in the report was not reproduced.
+
+## Upgrading existing animation
+
+Migration lists Actions assigned to the DNA armatures and attached body control
+rig, including NLA clips, and asks whether to migrate them. Original Actions
+are retained; upgraded copies are assigned only to the upgraded character.
+Face-board animation keeps its existing Action because its UI axes have not
+changed. Declining animation migration detaches the active Action and mutes
+existing NLA clips on the upgraded rigs, retaining them for recovery.
+
+Quaternion animation under the usual basis exchange preserves its original
+keys, handles and interpolation. Euler animation and control-rig rebakes are
+sampled every frame over each Action's range, including fractional authored
+keyframes. NLA clip timing, repeats and blend settings are preserved.
+
+An attached control rig requires removal before migration unless **Character
+Assembly** and **Character Control Rig** are enabled and its builder settings
+are available. In that case the dialog offers an explicit rebuild confirmation:
+it saves a uniquely named `.pre-migration-….blend` backup beside the current
+file (or in Blender's temporary directory for an unsaved scene), stores the
+original Actions, rebuilds the controls and rebakes animation copies. The dialog
+warns that custom control-rig edits may be lost. Evaluated body-driver motion is
+checked before replacing the old controls; a failed check restores the original
+rigs and animation. The backup path is reported by the operator.
+
+Control-rig motion is checked separately for bone-endpoint displacement
+(0.1 mm), rotation (0.1 degrees), and scale (0.01%). Displacement accounts for
+the armature transform and scene units. Re-reading DNA can slightly alter short
+finger axes without meaningfully moving the surface; comparing individual matrix
+coefficients incorrectly rejected such rigs. Errors now identify the bone,
+frame, and measured differences. These checks compare control-driven motion;
+restoring previously inactive RigLogic correctives can separately change the
+deformed mesh.
+
+Leave NLA Tweak Mode before migrating. Animated influence/time warps and meta
+strips on control rigs must first be baked to Actions, as must custom drivers or
+constraints on DNA bones. These cases are rejected before replacing the rigs.
+
+The implementation lives in `utilities/migration.py`: legacy-data discovery,
+preflight checks, rig and Action upgrades, control-rig rebuilding, and rollback
+share one module. The operator calls this module directly; existing
+package-level migration utilities remain available to integrations.
 
 ## Why bone axes alone are insufficient
 

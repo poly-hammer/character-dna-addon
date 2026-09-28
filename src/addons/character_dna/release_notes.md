@@ -1,3 +1,7 @@
+## Major Changes
+
+* RigLogic now uses DNA with Z-up Transform Policy to make Blender's native cordinate system (Legacy Data Migration operator supported migrating existing rig to match this)
+
 ## Patch Changes
 
 * Fixed convergence control in eye aim gui [#349](https://github.com/poly-hammer/character-dna-addon/issues/349)

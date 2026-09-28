@@ -19,11 +19,11 @@ COORDINATE_VERSION = 1
 
 
 def validate_rig_basis(rig: "bpy.types.ID | None") -> None:
-    """Old rigs have Maya bone-local axes despite their Z-up appearance."""
+    """Old rigs have Y-up bone-local axes despite their Z-up appearance."""
     if rig is not None and rig.get("dna_coordinate_version", 0) != COORDINATE_VERSION:
         raise ValueError(
-            f"{rig.name} uses the legacy Maya joint basis. Reimport its DNA into a new rig "
-            "to use Blender-native coordinates; retain the old file for existing animation."
+            f"{rig.name} uses the legacy Y-up joint basis. Run Migrate Legacy Data "
+            "to re-import its DNA in place and upgrade its animation and drivers."
         )
 
 

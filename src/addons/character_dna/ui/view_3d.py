@@ -743,6 +743,7 @@ class CHARACTER_DNA_PT_migrate_legacy_data(bpy.types.Panel):
         row.label(text="You must migrate your .blend file then save it.")
         row = self.layout.row()
         row.scale_y = 1.5
+        row.operator_context = "INVOKE_DEFAULT"
         row.operator(f"{ToolInfo.NAME}.migrate_legacy_data", icon="FILE_NEW", text="Migrate Now")
 
 
