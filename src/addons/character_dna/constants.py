@@ -254,41 +254,41 @@ EXCLUDED_FACE_BOARD_CONTROLS = ["CTRL_rigLogic", "CTRL_expressions", "CTRL_faceG
 HEAD_TO_BODY_LOD_MAPPING = {0: 0, 1: 0, 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 7: 3}
 
 # Set to Ada's height, but locations will be scaled proportionally to match spine_04 location from DNA file.
-# Also in Y-up coordinate system like the metahuman creator DNA files
-FIRST_BONE_Y_LOCATION = 107.86403
+# DNA readers and these anatomical frames use Blender-native Z-up coordinates.
+FIRST_BONE_HEIGHT = 107.86403
 
 EXTRA_BONES = [
-    ("root", {"parent": None, "location": Vector((0, 0, 0)), "rotation": Euler((0, 0, 0), "XYZ")}),
+    ("root", {"parent": None, "location": Vector((0, 0, 0)), "rotation": Euler((0, 0, 0), "XZY")}),
     (
         "pelvis",
         {
             "parent": "root",
-            "location": Vector((0.0, 0.8707, 0.0209)),
-            "rotation": Euler((math.radians(-90.0), math.radians(-2.053), math.radians(90.0)), "XYZ"),
+            "location": Vector((0.0, -0.0209, 0.8707)),
+            "rotation": Euler((math.radians(-90.0), math.radians(-90.0), math.radians(-2.053)), "XZY"),
         },
     ),
     (
         "spine_01",
         {
             "parent": "pelvis",
-            "location": Vector((0.0, 0.8910, 0.0206)),
-            "rotation": Euler((math.radians(-90.0), math.radians(-13.003), math.radians(90.0)), "XYZ"),
+            "location": Vector((0.0, -0.0206, 0.8910)),
+            "rotation": Euler((math.radians(-90.0), math.radians(-90.0), math.radians(-13.003)), "XZY"),
         },
     ),
     (
         "spine_02",
         {
             "parent": "spine_01",
-            "location": Vector((0.0, 0.9326, 0.0302)),
-            "rotation": Euler((math.radians(-90.0), math.radians(-5.68216), math.radians(90.0)), "XYZ"),
+            "location": Vector((0.0, -0.0302, 0.9326)),
+            "rotation": Euler((math.radians(-90.0), math.radians(-90.0), math.radians(-5.68216)), "XZY"),
         },
     ),
     (
         "spine_03",
         {
             "parent": "spine_02",
-            "location": Vector((0.0, 0.9998, 0.0369)),
-            "rotation": Euler((math.radians(-90.0), math.radians(3.82404), math.radians(90.0)), "XYZ"),
+            "location": Vector((0.0, -0.0369, 0.9998)),
+            "rotation": Euler((math.radians(-90.0), math.radians(-90.0), math.radians(3.82404)), "XZY"),
         },
     ),
 ]

@@ -356,4 +356,5 @@ class CharacterComponentHead(CharacterComponentBase):
                     if pose_bone is not None:
                         rotation_euler = Euler([math.radians(i) for i in transform_data["rotation"]], "XYZ")
                         pose_bone.rotation_mode = "QUATERNION"
-                        pose_bone.rotation_quaternion = rotation_euler.to_quaternion()
+                        q = rotation_euler.to_quaternion()
+                        pose_bone.rotation_quaternion = (q.w, q.x, -q.z, q.y)

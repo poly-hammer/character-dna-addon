@@ -56,8 +56,9 @@ def test_unreal_snapshot_provenance():
     assert len(INPUTS["joints"]) == provenance["joints_per_frame"]
 
 
+@pytest.mark.parametrize("editing", [False, True], ids=["runtime", "editor"])
 @pytest.mark.parametrize("frame", INPUTS["frames"], ids=[frame["pose"] for frame in INPUTS["frames"]])
-def test_body_pose_unreal(unreal_body, frame):
+def test_body_pose_unreal(unreal_body, frame, editing):
     """Replay only the authored drivers, then compare all evaluated joint origins."""
     instance = unreal_body
     rig = instance.body_rig
@@ -66,9 +67,24 @@ def test_body_pose_unreal(unreal_body, frame):
     for name, (x, y, z, w) in frame["drivers"].items():
         bone = rig.pose.bones[name]
         bone.rotation_mode = "QUATERNION"
-        bone.rotation_quaternion = Quaternion((w, x, y, z))
+        # The capture manifest records Maya-local quaternions. Express them in
+        # the Blender-native joint basis without changing the reference data.
+        bone.rotation_quaternion = Quaternion((w, x, -z, y))
     bpy.context.view_layer.update()
-    instance.evaluate(component="body")
+    if editing and frame["solver"]:
+        from character_dna.editors.rbf_editor.utilities import update_pose
+        from character_dna.utilities import collection_to_list
+        from utilities.rbf_editor import set_body_pose
+
+        set_body_pose(frame["solver"], frame["pose"])
+        before = collection_to_list(instance.rbf_editor.rbf_solver_list)
+        # Applying an unchanged contextual preview must not bake its companions
+        # into this pose, including after a repeated Apply.
+        update_pose(instance, bpy.context)
+        update_pose(instance, bpy.context)
+        assert collection_to_list(instance.rbf_editor.rbf_solver_list) == before
+    else:
+        instance.evaluate(component="body")
     path = SNAPSHOTS / (frame["solver"] or "_neutral") / (frame["pose"] + ".json")
     expected = json.loads(path.read_text(encoding="utf-8"))
     assert set(expected) == {joint["name"] for joint in INPUTS["joints"]}

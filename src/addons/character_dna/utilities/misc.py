@@ -1471,6 +1471,13 @@ def _preflight_runtime_migration(instances: list[Any]) -> None:  # noqa: PLR0912
         ):
             issues.append(f"{name}: linked or protected data; open the source .blend, migrate there, and save it")
         for component in _runtime_migration_components(instance):
+            from ..dna_io.coordinates import validate_rig_basis
+
+            rig = _resolve_datablock(_field(instance, f"{component}_rig"), bpy.data.objects)
+            try:
+                validate_rig_basis(rig)
+            except ValueError as error:
+                issues.append(str(error))
             path = _field(instance, f"{component}_dna_file_path")
             if not path or not Path(bpy.path.abspath(path)).is_file():
                 issues.append(

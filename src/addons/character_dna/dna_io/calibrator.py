@@ -1,13 +1,12 @@
 # standard library imports
 import logging
-import math
 
 from collections.abc import Callable
 
 # third party imports
 import bpy
 
-from mathutils import Matrix, Vector
+from mathutils import Vector
 
 # local imports
 from .. import utilities
@@ -311,7 +310,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
 
     @staticmethod
     def _read_mesh_positions(reader: "BinaryStreamReader", mesh_name: str) -> list[Vector] | None:
-        """Read a reference mesh's vertex positions (DNA space, cm Y-up) by name,
+        """Read a reference mesh's vertex positions (DNA space, cm Z-up) by name,
         returning ``None`` when the mesh is absent from the reader."""
         for mesh_index in range(reader.getMeshCount()):
             if str(reader.getMeshName(mesh_index)) == mesh_name:
@@ -474,9 +473,6 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 vertex_indices, _ = self.get_mesh_vertex_positions(bmesh_object)
                 bmesh_object.free()
 
-                # DNA is Y-up, Blender is Z-up, so we need to rotate the deltas
-                rotation_matrix = Matrix.Rotation(math.radians(-90), 4, "X")  # type: ignore[arg-type]
-
                 for index in range(self._dna_reader.getBlendShapeTargetCount(mesh_index)):
                     channel_index = self._dna_reader.getBlendShapeChannelIndex(mesh_index, index)
                     shape_key_name = self._dna_reader.getBlendShapeChannelName(channel_index)
@@ -500,7 +496,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
                     for vertex_index in vertex_indices:
                         # get the positions of the points
                         # Get the delta between the current shape key and the basis (rest) shape key
-                        new_delta = rotation_matrix @ (
+                        new_delta = (
                             shape_key_block.data[vertex_index].co.copy() - shape_key_basis.data[vertex_index].co  # type: ignore[attr-defined]
                         )
 

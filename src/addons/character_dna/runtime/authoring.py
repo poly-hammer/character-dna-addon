@@ -139,6 +139,7 @@ def bone_transforms(instance: Any, component: str, collect: bool = False) -> lis
         scale = Vector(values[offset + 6 : offset + 9])
         if not bound:
             bone = rig.pose.bones[name]
+            bone.rotation_mode = "XYZ"
             bone.location, bone.rotation_euler, bone.scale = location, rotation, scale
         if collect:
             result.append((name, location, rotation, scale))

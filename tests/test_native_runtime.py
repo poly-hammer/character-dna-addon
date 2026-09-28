@@ -14,7 +14,7 @@ from character_dna.runtime import controller, engine
 from character_dna.utilities import get_active_rig_instance, get_addon_preferences
 
 
-@pytest.mark.parametrize("schema", [1, 2])
+@pytest.mark.parametrize("schema", [1, 2, engine.SCHEMA_VERSION])
 def test_missing_runtime_warns_once_without_changing_outputs(monkeypatch, caplog, schema):
     """Unmigrated or temporarily unbound drivers must not emit evaluation exceptions."""
     data = {"schema_version": schema, "epoch": 7.0, "outputs": array("d", [0.2, 0.8])}
@@ -34,7 +34,7 @@ def test_missing_runtime_warns_once_without_changing_outputs(monkeypatch, caplog
     assert len(caplog.records) == 1
     assert caplog.records[0].levelno == logging.WARNING
     assert caplog.records[0].exc_info is None
-    assert ("Migrate Legacy Data" if schema == 1 else "Rebuild Native Evaluation") in caplog.text
+    assert ("Migrate Legacy Data" if schema < engine.SCHEMA_VERSION else "Rebuild Native Evaluation") in caplog.text
 
 
 def test_runtime_still_rejects_original_output_storage(monkeypatch):
@@ -68,7 +68,7 @@ def test_removed_carrier_record_is_pruned(monkeypatch):
 @pytest.mark.parametrize("problem", ["legacy", "missing_dna", "corrupt_bindings", "native_failure"])
 def test_runtime_hydration_classifies_expected_states(monkeypatch, caplog, problem):
     """Migration and moved files warn; broken current bindings and native failures error."""
-    data = {"schema_version": 1 if problem == "legacy" else 2, "instance_id": "test-rig"}
+    data = {"schema_version": 1 if problem == "legacy" else engine.SCHEMA_VERSION, "instance_id": "test-rig"}
     carrier = SimpleNamespace(
         name="HydrationTest",
         get=data.get,

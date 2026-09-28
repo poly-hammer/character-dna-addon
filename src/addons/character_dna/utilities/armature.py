@@ -40,8 +40,8 @@ def get_bone_rest_transformations(
     # get respective transforms in parent space
     rest_location, rest_rotation, rest_scale = bone_matrix_parent_space.decompose()
 
-    if rotation_mode == "XYZ":
-        rest_rotation = rest_rotation.to_euler("XYZ")
+    if rotation_mode in ("XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"):
+        rest_rotation = rest_rotation.to_euler(rotation_mode)
 
     return rest_location, rest_rotation, rest_scale, rest_to_parent_matrix  # type: ignore[return-value]
 

@@ -27,6 +27,7 @@ from ..constants import (
 )
 from ..exceptions import InvalidComponentTypeError
 from ..typing import *  # noqa: F403  # noqa: F403
+from .coordinates import DNA_ROTATION_MODE
 from .misc import get_dna_reader, get_dna_writer
 
 
@@ -140,6 +141,9 @@ class DNAExporter:
             logger.exception("Progress callback failed; continuing export.")
 
     def initialize_scene_data(self):
+        from .coordinates import validate_rig_basis
+
+        validate_rig_basis(self._rig_object)
         # Idempotent: the collected lists (``_mesh_indices``, ``_images``, ...) are
         # appended to below, so re-running would duplicate their contents.
         if self._scene_initialized:
@@ -258,18 +262,20 @@ class DNAExporter:
         return (True, "Success", "All validations passed.", None)
 
     @staticmethod
-    def get_bmesh(mesh_object: bpy.types.Object, rotation: float = -90) -> bmesh.types.BMesh:
+    def get_bmesh(mesh_object: bpy.types.Object, rotation: float = 0) -> bmesh.types.BMesh:
         # create an empty BMesh and fill it in from the mesh data
         bmesh_object = bmesh.new()
         bmesh_object.from_mesh(mesh=mesh_object.data)  # type: ignore[arg-type]
 
-        # Rotate the mesh so that it's Y-up before reading the vertex data
-        bmesh.ops.rotate(
-            bmesh_object,
-            cent=Vector((0, 0, 0)),  # pyright: ignore[reportArgumentType]
-            matrix=Matrix.Rotation(math.radians(rotation), 4, "X"),  # type: ignore[arg-type]
-            verts=list(bmesh_object.verts),
-        )
+        # DNA readers and scene geometry share Blender's basis. Keep an optional
+        # explicit rotation for callers working with other mesh conventions.
+        if rotation:
+            bmesh.ops.rotate(
+                bmesh_object,
+                cent=(0.0, 0.0, 0.0),
+                matrix=Matrix.Rotation(math.radians(rotation), 4, "X"),
+                verts=list(bmesh_object.verts),
+            )
         bmesh_object.verts.index_update()
         bmesh_object.verts.ensure_lookup_table()
         return bmesh_object
@@ -293,17 +299,13 @@ class DNAExporter:
 
         hierarchy_lookup = {}
 
-        # Change the rotation of the bones since DNA expects Y-up
-        rotation_x = Matrix.Rotation(math.radians(-90), 4, "X")  # type: ignore[arg-type]
-        global_matrix = rotation_x.to_4x4()
-
         # Read the rest pose directly
         ignored_bone_names = [i for i, _ in extra_bones]
         bones = [i for i in armature_object.data.bones if i.name not in ignored_bone_names]  # type: ignore[attr-defined]
         for index, bone in enumerate(bones):
             if index == 0:
                 # get translation and rotation of the bone globally
-                translation, rotation, _ = (global_matrix @ bone.matrix_local).decompose()
+                translation, rotation, _ = bone.matrix_local.decompose()
             elif bone.parent:
                 # get translation and rotation relative to its parent
                 # Use inverted_safe() to handle singular matrices gracefully
@@ -329,7 +331,7 @@ class DNAExporter:
                 [translation.x * SCALE_FACTOR, translation.y * SCALE_FACTOR, translation.z * SCALE_FACTOR]
             )
             # Convert rotation from quaternion to euler
-            euler_rotation = rotation.to_euler("XYZ")
+            euler_rotation = rotation.to_euler(DNA_ROTATION_MODE)
             # Convert rotation from radians to degrees
             rotations.append(
                 [math.degrees(euler_rotation.x), math.degrees(euler_rotation.y), math.degrees(euler_rotation.z)]
@@ -370,13 +372,8 @@ class DNAExporter:
 
         flat = np.empty(len(mesh.loops) * 3, dtype=np.float32)
         mesh.corner_normals.foreach_get("vector", flat)
-        # A rotation needs no inverse transpose, so the normals take the same matrix the
-        # vertices do -- but never the linear unit, because a normal is a direction.
-        rotation = np.array(
-            Matrix.Rotation(math.radians(-90), 3, "X"),  # type: ignore[arg-type]
-            dtype=np.float32,
-        )
-        rotated = flat.reshape(-1, 3) @ rotation.T
+        # Directions already use the reader's basis and require no unit scaling.
+        vectors = flat.reshape(-1, 3)
 
         vertex_index = np.empty(len(mesh.loops), dtype=np.int32)
         mesh.loops.foreach_get("vertex_index", vertex_index)
@@ -384,7 +381,7 @@ class DNAExporter:
         normals: dict[tuple[int, int], Vector] = {}
         for polygon in mesh.polygons:
             for loop_index in polygon.loop_indices:
-                normals[(polygon.index, int(vertex_index[loop_index]))] = Vector(rotated[loop_index])
+                normals[(polygon.index, int(vertex_index[loop_index]))] = Vector(vectors[loop_index].tolist())
         return normals
 
     @staticmethod
@@ -784,9 +781,6 @@ class DNAExporter:
         vertex_indices, _ = self.get_mesh_vertex_positions(bmesh_object=bmesh_object)
         bmesh_object.free()
 
-        # DNA is Y-up, Blender is Z-up, so we need to rotate the deltas.
-        rotation_matrix = Matrix.Rotation(math.radians(-90), 4, "X")  # type: ignore[arg-type]
-
         for target_index in range(self._dna_reader.getBlendShapeTargetCount(source_mesh_index)):
             channel_index = self._dna_reader.getBlendShapeChannelIndex(source_mesh_index, target_index)
             channel_name = self._dna_reader.getBlendShapeChannelName(channel_index)
@@ -804,7 +798,7 @@ class DNAExporter:
 
             if shape_key_block:
                 for vertex_index in vertex_indices:
-                    new_delta = rotation_matrix @ (
+                    new_delta = (
                         shape_key_block.data[vertex_index].co.copy() - shape_key_basis.data[vertex_index].co  # type: ignore[union-attr]
                     )
                     # Only store vertices that actually moved to avoid floating point drift.
