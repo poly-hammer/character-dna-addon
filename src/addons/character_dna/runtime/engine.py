@@ -444,6 +444,7 @@ def _link_carrier(instance: Any, carrier: bpy.types.Object) -> None:
 
 def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
     """Bind initialized rig data; roll back the whole instance on failure."""
+    from .eyes import install as install_eye_convergence
     from .ui_refresh import invalidate_migration
 
     invalidate_migration()
@@ -505,6 +506,7 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
         all_targets.extend(targets)
         prepared.append((component, rig, info, plans, targets, initial))
     validate_targets(all_targets)
+    install_eye_convergence(instance.face_board)
     try:
         for component, rig, _info, plans, targets, initial in prepared:
             carrier = bpy.data.objects.new(f"{instance.name}_{component}_native", None)

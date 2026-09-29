@@ -9,7 +9,7 @@ import bpy
 
 from mathutils import Euler, Vector
 
-from . import engine, frame
+from . import engine, eyes, frame
 
 
 def _record(instance: Any, component: str) -> dict[str, Any]:
@@ -149,6 +149,7 @@ def bone_transforms(instance: Any, component: str, collect: bool = False) -> lis
 def evaluate_once(instance: Any, component: str) -> None:
     """Apply one native sample while automatic output drivers are disabled."""
     if component == "head" and instance.face_board:
+        eyes.install(instance.face_board)
         targets, switches, visibility_start, _values = engine.switch_targets(instance)
         for index, (target, switch) in enumerate(zip(targets, switches, strict=True)):
             value = instance.face_board.pose.bones[switch].location.y

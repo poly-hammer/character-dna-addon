@@ -36,6 +36,7 @@
     ],
     "words": [
         "bpy",
+        "lerps",
         "ufbx",
         "Rigify",
         ".npz",

@@ -1,6 +1,6 @@
 ## Major Changes
 
-* RigLogic now uses DNA with Z-up Transform Policy to make Blender's native cordinate system (Legacy Data Migration operator supported migrating existing rig to match this)
+* RigLogic now uses DNA with Z-up Transform Policy to match Blender's native cordinate system (Legacy Data Migration operator supports migrating existing rig to match this)
 
 ## Patch Changes
 
