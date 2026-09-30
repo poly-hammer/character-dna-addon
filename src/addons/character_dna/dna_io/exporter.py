@@ -53,6 +53,8 @@ class DNAExporter:
         seam_follower: ComponentType | None = "head",
         seam_reference_dna_path: "str | Path | None" = None,
         zero_shape_deltas: bool = False,
+        lod_families: dict[str, list[str]] | None = None,
+        mesh_objects_by_name: dict[str, bpy.types.Object] | None = None,
     ):
         self._instance = instance
         self._linear_modifier = linear_modifier
@@ -66,6 +68,9 @@ class DNAExporter:
         self._include_vertex_colors = vertex_colors
         self._include_normals = normals
         self._zero_shape_deltas = zero_shape_deltas
+        self._lod_families = lod_families
+        self._explicit_meshes = mesh_objects_by_name
+        self._explicit_names = {obj: name for name, obj in (mesh_objects_by_name or {}).items()}
         self._progress_callback = progress_callback
         # Seam alignment between the head and body neck edge loop. ``seam_follower``
         # names which component is snapped onto the other ("head" -> head conforms
@@ -174,6 +179,10 @@ class DNAExporter:
                 elif output_item.image_object:
                     self._images.append((output_item.image_object, output_item.name))
 
+        if self._explicit_meshes is not None:
+            self._initialize_explicit_meshes()
+            return
+
         # Sort the meshes by the order in the ORDER dictionary
         mesh_objects.sort(key=lambda x: utilities.remove_instance_prefix(x.name, self._prefix))
 
@@ -200,6 +209,18 @@ class DNAExporter:
         # mesh (index 0) in ``__init__`` and the secondary meshes (1..K) are added
         # above, so its length already equals the total mesh count.
         self._vertex_color_data = [{"indices": [], "values": []} for _ in range(len(self._mesh_indices))]
+
+    def _initialize_explicit_meshes(self) -> None:
+        """Resolve converter meshes by DNA identity without parsing their names."""
+        self._export_lods = {}
+        self._mesh_indices = []
+        for lod in range(self._dna_reader.getLODCount()):
+            for index in self._dna_reader.getMeshIndicesForLOD(lod):
+                obj = self._explicit_meshes.get(str(self._dna_reader.getMeshName(index)))
+                if obj is not None:
+                    self._export_lods.setdefault(lod, []).append((obj, int(index)))
+                    self._mesh_indices.append(int(index))
+        self._vertex_color_data = [{"indices": [], "values": []} for _ in range(self._dna_reader.getMeshCount())]
 
     def validate(self) -> tuple[bool, str, str, Callable | None]:
         if not self._rig_object:

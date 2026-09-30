@@ -117,8 +117,15 @@ def test_reload_addon_source_code_in_isolated_process():
         addon_utils.enable('character_dna', default_set=True)
         import character_dna
 
+        native = character_dna.bindings.load_native_runtime()
+        wrappers = (character_dna.bindings.dna, character_dna.bindings.riglogic)
+        native_capabilities = native.capabilities
+        from character_dna.dna_io import get_dna_reader, release_dna_handle
+        reader = get_dna_reader({str(Path(__file__).parent / "test_files" / "dna" / "ada" / "head.dna")!r})
+        joint_count = reader.getJointCount()
+        dll_handles = tuple(character_dna.bindings._dll_directories.values())
         character_dna.native_runtime.unregister()
-        for cycle in range(2):
+        for cycle in range(3):
             previous = character_dna.native_runtime
             old_operator = previous.CHARACTER_DNA_OT_sync_native_runtime
             old_handler = previous._after_import
@@ -140,14 +147,26 @@ def test_reload_addon_source_code_in_isolated_process():
             assert bpy.context.window_manager.character_dna is not None
             assert character_dna.properties.RigInstance.is_registered
             assert character_dna.operators.ImportCharacterDna.is_registered
+            assert character_dna.bindings.load_native_runtime() is native
+            assert native.capabilities is native_capabilities
+            assert native.capabilities()['api_version'] == 1
+            assert (character_dna.bindings.dna, character_dna.bindings.riglogic) == wrappers
+            assert tuple(character_dna.bindings._dll_directories.values()) == dll_handles
+            assert reader.getJointCount() == joint_count
+            manager = character_dna.bindings.riglogic.RigLogic(reader, wrappers[1].Configuration(), None)
+            instance = character_dna.bindings.riglogic.RigInstance(manager, None)
+            manager.calculate(instance)
+            release_dna_handle(instance)
+            release_dna_handle(manager)
 
+        release_dna_handle(reader)
         addon_utils.disable('character_dna', default_set=False)
         assert not hasattr(bpy.types.Scene, 'character_dna')
         assert not hasattr(bpy.types.WindowManager, 'character_dna')
         print('RELOAD_CHECK_PASSED', flush=True)
         """
     )
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603
         [sys.executable, "-"], input=script, text=True, capture_output=True, timeout=120, check=False
     )
     output = result.stdout + result.stderr

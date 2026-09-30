@@ -49,7 +49,9 @@ class DNACalibrator(DNAExporter, DNAImporter):
         mismatched = []
         for mesh_objects in self._export_lods.values():
             for mesh_object, _ in mesh_objects:
-                real_name = utilities.remove_instance_prefix(mesh_object.name, self._instance.name)
+                real_name = self._explicit_names.get(
+                    mesh_object, utilities.remove_instance_prefix(mesh_object.name, self._instance.name)
+                )
                 mesh_index = mesh_index_lookup.get(real_name)
                 if mesh_index is None:
                     continue
@@ -130,7 +132,9 @@ class DNACalibrator(DNAExporter, DNAImporter):
                     head_to_body_edge_loop_mapping=head_to_body_edge_loop_mapping,
                 )
 
-                real_name = utilities.remove_instance_prefix(mesh_object.name, self._instance.name)
+                real_name = self._explicit_names.get(
+                    mesh_object, utilities.remove_instance_prefix(mesh_object.name, self._instance.name)
+                )
                 logger.info(f'Calibrating "{real_name}" vertex positions...')
                 mesh_index = mesh_index_lookup.get(real_name)
 
@@ -202,7 +206,9 @@ class DNACalibrator(DNAExporter, DNAImporter):
         for lod_index, mesh_objects in self._export_lods.items():
             logger.info(f"Calibrating LOD {lod_index} normals...")
             for mesh_object, _ in mesh_objects:
-                real_name = utilities.remove_instance_prefix(mesh_object.name, self._instance.name)
+                real_name = self._explicit_names.get(
+                    mesh_object, utilities.remove_instance_prefix(mesh_object.name, self._instance.name)
+                )
                 mesh_index = mesh_index_lookup.get(real_name)
                 if mesh_index is None:
                     continue
@@ -276,6 +282,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
             lod0_mesh_writes,
             skip_mesh_indices=skip_mesh_indices,
             progress_callback=self._report,
+            lod_families=self._lod_families,
         )
 
     @staticmethod
