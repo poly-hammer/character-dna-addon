@@ -178,3 +178,70 @@ def test_shape_import_failure_restores_runtime(character, monkeypatch):
     assert engine.binding_issues(character) == []
     assert_current_scene()
     assert_faceboard_live(character)
+
+
+@pytest.mark.parametrize("failure_stage", ["enter", "tracking"])
+def test_raw_editor_failed_entry_restores_bone_locks(character, monkeypatch, failure_stage):
+    from character_dna.editors.raw_control_editor import utilities
+    from character_dna.editors.raw_control_editor.editor import RawControlEditor
+
+    editor = RawControlEditor.for_instance(character)
+    bone = character.head_rig.pose.bones["FACIAL_L_EyelidUpperB1"]
+    bone.lock_location = (True, False, False)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("failed after locking bones")
+
+    def enter(_context):
+        utilities.lock_bones_outside_joint_group(character, character.head_dna_reader, 9999)
+        assert tuple(bone.lock_location) == (True, True, True)
+        if failure_stage == "enter":
+            fail()
+
+    monkeypatch.setattr(editor, "_enter", enter)
+    if failure_stage == "tracking":
+        monkeypatch.setattr(editor.tracking, "initialize", fail)
+    with pytest.raises(RuntimeError, match="failed after locking bones"):
+        editor.enter(bpy.context)
+
+    assert tuple(bone.lock_location) == (True, False, False)
+    assert utilities._BONE_LOCK_SNAPSHOT not in character.head_rig
+    assert not editor.is_editing
+    assert not controller.is_suspended(character)
+
+
+@pytest.mark.parametrize("finish", ["commit", "revert"])
+def test_raw_editor_exit_restores_locks_after_cache_loss(character, finish):
+    from character_dna.editors.raw_control_editor import utilities
+    from character_dna.editors.raw_control_editor.editor import RawControlEditor
+
+    editor = RawControlEditor.for_instance(character)
+    editor.properties.raw_controls_active_index = editor.properties.raw_controls.find("CTRL_expressions.mouthLeft")
+    bone = character.head_rig.pose.bones["FACIAL_L_EyelidUpperB1"]
+    bone.lock_rotation = (False, True, False)
+    editor.enter(bpy.context)
+    assert tuple(bone.lock_location) == (True, True, True)
+    editor.cache.clear()
+
+    getattr(editor, finish)(bpy.context)
+
+    assert tuple(bone.lock_location) == (False, False, False)
+    assert tuple(bone.lock_rotation) == (False, True, False)
+    assert utilities._BONE_LOCK_SNAPSHOT not in character.head_rig
+
+
+def test_editor_shutdown_restores_bone_locks(character):
+    from character_dna import editors
+    from character_dna.editors.raw_control_editor import utilities
+
+    bone = character.head_rig.pose.bones["FACIAL_L_EyelidUpperB1"]
+    bone.lock_scale = (True, False, False)
+    utilities.lock_bones_outside_joint_group(character, character.head_dna_reader, 9999)
+    utilities.session_cache(character).clear()
+    try:
+        editors.unregister_runtime()
+        assert tuple(bone.lock_location) == (False, False, False)
+        assert tuple(bone.lock_scale) == (True, False, False)
+        assert utilities._BONE_LOCK_SNAPSHOT not in character.head_rig
+    finally:
+        editors.register_runtime()
