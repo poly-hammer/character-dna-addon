@@ -39,7 +39,8 @@ def extract(manifest_path: Path, capture_directory: Path, destination: Path, fbx
     capture = json.loads((capture_directory / "capture.json").read_text(encoding="utf-8"))
     audit = json.loads((capture_directory / "unreal_world_audit.json").read_text(encoding="utf-8"))
     fbx = capture_directory / "ada_unreal_rbf.fbx"
-    assert hashlib.sha256(manifest_path.read_bytes()).hexdigest() == capture["inputs_sha256"]
+    manifest_bytes = manifest_path.read_text(encoding="utf-8").encode("utf-8")
+    assert hashlib.sha256(manifest_bytes).hexdigest() == capture["inputs_sha256"]
     assert hashlib.sha256(fbx.read_bytes()).hexdigest() == capture["fbx_sha256"]
     assert len(audit) == len(manifest["frames"])
     scene = ufbx.load_file(str(fbx), ignore_geometry=True, ignore_embedded=True)

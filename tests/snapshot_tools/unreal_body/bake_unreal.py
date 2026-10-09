@@ -203,7 +203,7 @@ def bake(
             "level_sequence": sequence.get_path_name(),
             "lod": 0,
             "maximum_baked_driver_error_degrees": max_driver_angle,
-            "inputs_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+            "inputs_sha256": hashlib.sha256(manifest_path.read_text(encoding="utf-8").encode("utf-8")).hexdigest(),
             "fbx_sha256": hashlib.sha256(Path(task.filename).read_bytes()).hexdigest(),
         }
         (output / "capture.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")

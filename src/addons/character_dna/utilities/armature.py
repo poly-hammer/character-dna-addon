@@ -370,6 +370,8 @@ def copy_armature(armature_object: bpy.types.Object, new_armature_name: str) -> 
     armature_data.name = new_armature_name
     armature_object_copy = bpy.data.objects.get(new_armature_name)
     armature_object_copy = bpy.data.objects.new(name=new_armature_name, object_data=armature_data)
+    if "dna_coordinate_version" in armature_object:
+        armature_object_copy["dna_coordinate_version"] = armature_object["dna_coordinate_version"]
 
     # make sure the mesh is in the scene collection
     if bpy.context.scene and armature_object_copy not in bpy.context.scene.collection.objects.values():

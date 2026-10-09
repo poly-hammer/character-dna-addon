@@ -1,5 +1,6 @@
 # standard library imports
 import logging
+import re
 
 from pathlib import Path
 from typing import Any, Literal
@@ -34,6 +35,26 @@ DataLayer = Literal[
     "TwistSwingBehavior",
     "All",
 ]
+
+
+def _json_input_stream(file_path: Path, memory_resource: Any) -> Any:
+    """Flush subnormal JSON floats that the SDK's C++ reader rejects on macOS."""
+    from ..bindings import dna
+
+    minimum = 2.0**-126  # Smallest normal IEEE 754 single-precision value.
+
+    def normalize(match: re.Match[bytes]) -> bytes:
+        token = match.group()
+        # Match quoted strings first so names and opaque layer data stay intact.
+        if token.startswith(b'"'):
+            return token
+        return b"0.0" if 0 < abs(float(token)) < minimum else token
+
+    data = re.sub(rb'"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?[eE]-\d+', normalize, file_path.read_bytes())
+    stream = dna.MemoryStream(memory_resource)
+    stream.write(data.decode("utf-8"), len(data))
+    stream.seek(0)
+    return stream
 
 
 def release_dna_handle(handle: Any) -> None:
@@ -81,15 +102,9 @@ def get_dna_reader(
     if not file_path.exists():
         raise FileNotFoundError(f"File '{file_path}' does not exist.")
 
-    mode = dna.OpenMode_Binary
-    # if file_format.lower() == 'json':
-    #     mode = dna.OpenMode_Text  # noqa: ERA001
-
     # Construct via the class rather than `.create()`: the constructor returns the binding's
     # owning wrapper, which destroys the C++ object on release and keeps the stream alive for
     # exactly as long as the reader needs it. `.create()` returns a raw pointer that leaks.
-    stream = dna.FileStream(path=str(file_path), accessMode=dna.AccessMode_Read, openMode=mode, memRes=memory_resource)
-
     from .coordinates import configuration, transform_reader
 
     config = configuration(data_layer)
@@ -97,8 +112,10 @@ def get_dna_reader(
     if file_format.lower() == "json":
         # JSON has no Configuration overload. Transform it through a configured
         # binary reader below, respecting the JSON file's declared source basis.
+        stream = _json_input_stream(file_path, memory_resource)
         reader = dna.JSONStreamReader(stream, memory_resource)
     elif file_format.lower() == "binary":
+        stream = dna.FileStream(str(file_path), dna.AccessMode_Read, dna.OpenMode_Binary, memory_resource)
         reader = dna.BinaryStreamReader(stream, config, memory_resource)
     else:
         raise ValueError(f"Invalid file format '{file_format}'. Must be 'binary' or 'json'.")

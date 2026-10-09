@@ -13,7 +13,7 @@ import pytest
 
 from mathutils import Quaternion
 
-from character_dna.runtime import engine
+from character_dna.runtime import engine, eyes
 from character_dna.runtime.bindings import owned_curve
 from character_dna.utilities.mesh import get_bounding_box_center, get_bounding_box_left_x, get_bounding_box_right_x
 from constants import TEST_DNA_FOLDER
@@ -111,6 +111,12 @@ def test_duplicated_face_board_does_not_inherit_the_source_animation(animated_sc
     own_carriers = engine.carriers(new_instance)
     source_carriers = engine.carriers(source_instance)
     assert own_carriers
+    convergence_paths = {
+        new_instance.face_board.pose.bones[f"GRP_{side}_eyeAim"]
+        .constraints[eyes.CONSTRAINT_NAME]
+        .path_from_id("influence")
+        for side in ("L", "R")
+    }
     for owner in (new_instance.face_board, new_instance.face_board.data):
         animation = owner.animation_data
         if animation is None:
@@ -118,6 +124,16 @@ def test_duplicated_face_board_does_not_inherit_the_source_animation(animated_sc
         assert animation.action is None
         assert not animation.nla_tracks
         for curve in animation.drivers:
+            if owner == new_instance.face_board and curve.data_path in convergence_paths:
+                assert curve.driver.is_simple_expression
+                assert len(curve.driver.variables) == 1
+                variable = curve.driver.variables[0]
+                assert variable.name == "convergence"
+                assert variable.targets[0].id == new_instance.face_board
+                assert variable.targets[0].data_path == (
+                    new_instance.face_board.pose.bones[eyes.SWITCH_NAME].path_from_id("location") + "[0]"
+                )
+                continue
             assert any(owned_curve(curve, carrier) for carrier in own_carriers)
             assert not any(owned_curve(curve, carrier) for carrier in source_carriers)
 

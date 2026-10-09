@@ -457,8 +457,11 @@ def test_reference_readonly_panel_states(mode: str, monkeypatch: pytest.MonkeyPa
     "descriptor",
     [
         {"schema_version": 1},
-        {"schema_version": 2, "issues": ["Ada_head_native: obsolete runtime", "Ada_body_native: scene dependency"]},
-        {"schema_version": 2, "carriers": [{"schema_version": 1}]},
+        {
+            "schema_version": engine.SCHEMA_VERSION,
+            "issues": ["Ada_head_native: obsolete runtime", "Ada_body_native: scene dependency"],
+        },
+        {"schema_version": engine.SCHEMA_VERSION, "carriers": [{"schema_version": 1}]},
     ],
 )
 def test_reference_legacy_report_is_concise(
@@ -508,7 +511,7 @@ def test_reference_legacy_report_is_concise(
     ]
 
 
-def test_reference_saved_descriptor_rejects_legacy(setup_reference_blend_file: Path):
+def test_reference_saved_descriptor_accepts_current_runtime(setup_reference_blend_file: Path):
     from character_dna import utilities
     from character_dna.utilities import reference
 
@@ -523,11 +526,9 @@ def test_reference_saved_descriptor_rejects_legacy(setup_reference_blend_file: P
     assert len(descriptor["objects"]) == len({item["id"] for item in descriptor["objects"]})
     assert descriptor["collections"]["name"] == "ada"
     assert descriptor["carriers"]
-    if any(carrier["schema_version"] != reference.SCHEMA_VERSION for carrier in descriptor["carriers"]):
-        with pytest.raises(ValueError, match=reference.MIGRATION_MESSAGE):
-            reference.validate_descriptors(data, ["ada"])
-    else:
-        assert reference.validate_descriptors(data, ["ada"]) == [descriptor]
+    assert reference.SCHEMA_VERSION == engine.SCHEMA_VERSION
+    assert all(carrier["schema_version"] == reference.SCHEMA_VERSION for carrier in descriptor["carriers"])
+    assert reference.validate_descriptors(data, ["ada"]) == [descriptor]
     assert before == (setup_reference_blend_file.stat().st_mtime_ns, setup_reference_blend_file.stat().st_size)
 
 

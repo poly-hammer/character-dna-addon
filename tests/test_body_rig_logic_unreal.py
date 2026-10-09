@@ -43,7 +43,8 @@ def test_unreal_snapshot_provenance():
     """Reject stale inputs, missing poses, or an FBX from a different capture."""
     provenance = json.loads((SNAPSHOTS / "provenance.json").read_text(encoding="utf-8"))
     assert hashlib.sha256(DNA.read_bytes()).hexdigest() == INPUTS["dna_sha256"] == provenance["dna_sha256"]
-    assert hashlib.sha256((SNAPSHOTS / "inputs.json").read_bytes()).hexdigest() == provenance["inputs_sha256"]
+    manifest = (SNAPSHOTS / "inputs.json").read_text(encoding="utf-8").encode("utf-8")
+    assert hashlib.sha256(manifest).hexdigest() == provenance["inputs_sha256"]
     assert (
         hashlib.sha256((TEST_FBX_FOLDER / provenance["fbx_file"]).read_bytes()).hexdigest() == provenance["fbx_sha256"]
     )

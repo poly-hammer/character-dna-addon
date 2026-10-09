@@ -19,6 +19,29 @@ def source_reader(path):
     return reader
 
 
+def test_json_subnormal_weights_preserve_source_and_strings(tmp_path):
+    """SDK JSON with tiny skin weights must load on libc++ as well as Windows."""
+    original = source_reader(TEST_DNA_FOLDER / "ada" / "body.dna")
+    path = tmp_path / "subnormal.json"
+    name = "literal 1e-40 and -2.0e-45"
+    writer = dna.JSONStreamWriter(dna.FileStream(str(path), dna.AccessMode_Write, dna.OpenMode_Binary, None))
+    writer.setFrom(original, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
+    writer.setName(name)
+    writer.setSkinWeightsValues(0, 0, [1.0, 1e-40, 1e-37])
+    writer.setSkinWeightsJointIndices(0, 0, [0, 1, 2])
+    writer.write()
+    release_dna_handle(writer)
+    before = path.read_bytes()
+    reader = get_dna_reader(path, "json")
+    try:
+        assert reader.getName() == name
+        assert list(reader.getSkinWeightsValues(0, 0)) == pytest.approx([1.0, 0.0, 1e-37], rel=1e-5, abs=0.0)
+        assert path.read_bytes() == before
+    finally:
+        release_dna_handle(reader)
+        release_dna_handle(original)
+
+
 @pytest.mark.parametrize("component", ["head", "body"])
 @pytest.mark.parametrize("file_format", ["binary", "json"])
 def test_canonical_export_from_native_dna(tmp_path, component, file_format):

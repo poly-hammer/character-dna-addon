@@ -11,7 +11,7 @@ from uuid import uuid4
 import bpy
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MIGRATION_MESSAGE = (
     "Legacy data detected. Please open the source file, run Migrate Legacy Data, save then retry appending/linking"
 )

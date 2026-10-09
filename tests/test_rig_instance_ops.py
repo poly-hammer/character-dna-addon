@@ -15,6 +15,8 @@ import pytest
     ],
 )
 def test_duplicate_rig_instance(load_dna_for_rig_instance_ops, temp_folder: Path, metahuman_name: str):
+    from character_dna.dna_io.coordinates import COORDINATE_VERSION
+
     temp_folder.mkdir(parents=True, exist_ok=True)
 
     bpy.ops.character_dna.duplicate_rig_instance(  # type: ignore
@@ -33,6 +35,8 @@ def test_duplicate_rig_instance(load_dna_for_rig_instance_ops, temp_folder: Path
         assert instance.head_rig is not None, f"Head rig should be set for {instance.name}"
         assert instance.head_mesh is not None, f"Head mesh should be set for {instance.name}"
         assert instance.head_dna_file_path is not None, f"Head DNA file path should be set for {instance.name}"
+        assert instance.head_rig.get("dna_coordinate_version") == COORDINATE_VERSION
+        assert instance.body_rig.get("dna_coordinate_version") == COORDINATE_VERSION
 
 
 @pytest.mark.parametrize(
