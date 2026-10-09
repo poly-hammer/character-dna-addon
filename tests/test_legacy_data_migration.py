@@ -2,7 +2,7 @@ import bpy
 import pytest
 
 from character_dna.runtime import controller, engine
-from character_dna.utilities import detect_legacy_data, detect_runtime_migration, migrate_legacy_data, misc
+from character_dna.utilities import detect_legacy_data, detect_runtime_migration, migrate_legacy_data, migration
 
 
 @pytest.fixture
@@ -96,7 +96,7 @@ def test_detection_survives_group_without_rig_instance_list(empty_scene: bpy.typ
     AttributeError on every panel redraw. See issue #341's sibling report and
     CHARACTER-DNA-ADDON-MHQ.
     """
-    from character_dna.utilities.misc import _rig_instance_sources
+    from character_dna.utilities.migration import _rig_instance_sources
 
     class ForeignGroup:
         bl_rna = object()
@@ -111,6 +111,7 @@ def test_detection_survives_group_without_rig_instance_list(empty_scene: bpy.typ
 def _make_runtime_instance(scene: bpy.types.Scene, name: str = "Ada"):
     armature = bpy.data.armatures.new(f"{name}_head_rig")
     rig = bpy.data.objects.new(armature.name, armature)
+    rig["dna_coordinate_version"] = 1
     scene.collection.objects.link(rig)
     bpy.context.view_layer.objects.active = rig
     rig.select_set(True)
@@ -167,10 +168,12 @@ def test_editor_owned_rig_is_not_runtime_migration(empty_scene, monkeypatch, sav
 def test_migration_rejects_active_editor_before_mutation(empty_scene, monkeypatch):
     instance = _make_runtime_instance(empty_scene)
     instance["native_editor_resume"] = True
-    monkeypatch.setattr(misc, "migrate_legacy_data", lambda _context: pytest.fail("Must not migrate during editing"))
+    monkeypatch.setattr(
+        migration, "migrate_legacy_data", lambda _context: pytest.fail("Must not migrate during editing")
+    )
     monkeypatch.setattr(engine, "binding_issues", lambda _instance: pytest.fail("Editor outputs are incomplete"))
     with pytest.raises(ValueError, match=r"(?i)commit or revert"):
-        misc.migrate_runtime_data(bpy.context)
+        migration.migrate_runtime_data(bpy.context)
 
 
 @pytest.mark.parametrize("previous_flag", [False, True])
@@ -187,7 +190,7 @@ def test_metadata_preserves_evaluation_state(
         def fail_copy(*args):
             raise ValueError("metadata failure")
 
-        monkeypatch.setattr(misc, "_copy_rig_instance_fields", fail_copy)
+        monkeypatch.setattr(migration, "_copy_rig_instance_fields", fail_copy)
         with pytest.raises(ValueError, match="metadata failure"):
             migrate_legacy_data(bpy.context)
     else:
@@ -221,7 +224,7 @@ def test_missing_dna_preflights_entire_batch(empty_scene, migration_contract, tm
     first.head_dna_file_path = str(path)
     objects = {obj.as_pointer() for obj in bpy.data.objects}
     with pytest.raises(ValueError, match="Other: missing head DNA file path"):
-        misc.migrate_runtime_data(bpy.context)
+        migration.migrate_runtime_data(bpy.context)
     assert {obj.as_pointer() for obj in bpy.data.objects} == objects
     assert second.head_dna_file_path == ""
 
@@ -234,7 +237,7 @@ def test_missing_legacy_dna_does_not_consume_metadata(empty_scene, migration_con
         "rig_logic_instance_list": [{"instance_name": "Ada", "head_rig": rig, "head_dna_file_path": ""}]
     }
     with pytest.raises(ValueError, match="missing head DNA file path"):
-        misc.migrate_runtime_data(bpy.context)
+        migration.migrate_runtime_data(bpy.context)
     assert "meta_human_dna" in empty_scene
     assert len(empty_scene.character_dna.rig_instance_list) == 0
 
@@ -250,7 +253,7 @@ def test_future_schema_rejected_before_rebuild(
     carrier["schema_version"] = 3
     monkeypatch.setattr(engine, "carriers", lambda _instance: [carrier])
     with pytest.raises(ValueError, match="unsupported future runtime schema 3"):
-        misc.migrate_runtime_data(bpy.context)
+        migration.migrate_runtime_data(bpy.context)
     assert carrier["schema_version"] == 3
 
 
@@ -270,7 +273,7 @@ def test_linked_source_rejected_before_rebuild(
     linked = target.objects[0]
     monkeypatch.setattr(engine, "carriers", lambda _instance: [linked])
     with pytest.raises(ValueError, match=r"open the source \.blend"):
-        misc.migrate_runtime_data(bpy.context)
+        migration.migrate_runtime_data(bpy.context)
     assert linked.library is not None
     assert linked["schema_version"] == 1
 
@@ -296,7 +299,7 @@ def test_conflicting_saved_output_rejected_before_rebuild(
     carrier["targets"] = [{"owner": rig, "path": output_path, "index": 0, "channel": 0}]
     monkeypatch.setattr(engine, "carriers", lambda _instance: [carrier])
     with pytest.raises(ValueError, match=r"conflicting driver|keyframed native output"):
-        misc.migrate_runtime_data(bpy.context)
+        migration.migrate_runtime_data(bpy.context)
     assert carrier["schema_version"] == 1
     if writer == "driver":
         assert rig.animation_data.drivers.find(output_path, index=0).driver.expression == "0.25"
@@ -321,8 +324,8 @@ def test_rebuild_is_targeted_and_idempotent(
 
     monkeypatch.setattr(engine, "binding_issues", lambda target: ["Old drivers"] if target.name in pending else [])
     monkeypatch.setattr(controller, "rebuild", rebuild)
-    assert misc.migrate_runtime_data(bpy.context) == ("default", 1, 1)
-    assert misc.migrate_runtime_data(bpy.context) == ("default", 0, 2)
+    assert migration.migrate_runtime_data(bpy.context) == ("default", 1, 1)
+    assert migration.migrate_runtime_data(bpy.context) == ("default", 0, 2)
     assert calls == [instance.name]
     assert other.head_dna_file_path == ""
 
@@ -335,9 +338,9 @@ def test_migration_operator_supports_undo() -> None:
 
 @pytest.fixture
 def portable_head(request: pytest.FixtureRequest):
-    """Load the real head only once the parallel runtime API is available."""
-    if getattr(engine, "SCHEMA_VERSION", 0) != 2 or not hasattr(controller, "rebuild"):
-        pytest.skip("Requires the schema-v2 engine and targeted controller.rebuild implementation")
+    """Load the real head for native runtime migration coverage."""
+    if getattr(engine, "SCHEMA_VERSION", 0) < 2 or not hasattr(controller, "rebuild"):
+        pytest.skip("Requires the native engine and targeted controller.rebuild implementation")
     request.getfixturevalue("load_head_only_dna")
     return bpy.context.scene.character_dna.rig_instance_list[0]
 
@@ -405,7 +408,10 @@ def test_real_migration_preserves_animation_and_evaluation(portable_head, layout
     assert head.animation_data.drivers.find("location", index=0).as_pointer() == unrelated_pointer
     carriers = {carrier.as_pointer() for carrier in engine.carriers(instance)}
     objects = {obj.as_pointer() for obj in bpy.data.objects}
-    assert all(carrier["schema_version"] == 2 and "scene" not in carrier for carrier in engine.carriers(instance))
+    assert all(
+        carrier["schema_version"] == engine.SCHEMA_VERSION and "scene" not in carrier
+        for carrier in engine.carriers(instance)
+    )
     assert bpy.ops.character_dna.migrate_legacy_data() == {"FINISHED"}
     assert {carrier.as_pointer() for carrier in engine.carriers(instance)} == carriers
     assert {obj.as_pointer() for obj in bpy.data.objects} == objects
@@ -433,7 +439,7 @@ def test_current_rig_authoring_is_not_legacy(portable_head) -> None:
         ui_refresh._refresh_migration()
         assert not ui_refresh.migration_needed(scene)
         with pytest.raises(ValueError, match=r"Commit or revert"):
-            misc.migrate_runtime_data(bpy.context)
+            migration.migrate_runtime_data(bpy.context)
     assert not controller.is_suspended(instance)
     assert engine.binding_issues(instance) == []
     assert not detect_runtime_migration(scene)
@@ -447,7 +453,7 @@ def test_current_schema_without_session_is_not_legacy(portable_head) -> None:
     engine.release_records(instance)
     assert not engine.active(instance)
     assert not detect_runtime_migration(bpy.context.scene)
-    assert misc.migrate_runtime_data(bpy.context)[1] == 0
+    assert migration.migrate_runtime_data(bpy.context)[1] == 0
     assert instance["native_runtime_id"] == identity
     assert {carrier.as_pointer() for carrier in engine.carriers(instance)} == carriers
 

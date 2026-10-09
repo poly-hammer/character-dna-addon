@@ -23,7 +23,7 @@ from .fbx.reader import FbxAnimationClip
 from .properties import BlendFileCharacterCollection, CharacterImportProperties
 from .typing import *  # noqa: F403
 from .ui import callbacks, importer
-from .utilities import reference
+from .utilities import migration, reference
 from .validators import ValidationReport
 
 
@@ -1078,9 +1078,75 @@ class MigrateLegacyData(bpy.types.Operator):
     bl_label = "Migrate Legacy Data"
     bl_options = {"REGISTER", "UNDO"}
 
+    migrate_actions: bpy.props.BoolProperty(  # pyright: ignore[reportInvalidTypeForm]
+        name="Migrate listed actions",
+        default=True,
+        description="Create animation copies for the new rig axes; retain the original actions",
+    )
+    rebuild_controls: bpy.props.BoolProperty(  # pyright: ignore[reportInvalidTypeForm]
+        name="I understand: rebuild the control rig and re-bake animation",
+        default=False,
+        description="Save a backup, replace the control rig, and rebake action copies. Custom rig edits may be lost",
+        options={"SKIP_SAVE"},
+    )
+
+    def invoke(self, context: "Context", event: bpy.types.Event) -> set[str]:
+        self.rebuild_controls = False
+        sources = migration.runtime_migration_sources(context)
+        if migration.action_labels(sources) or any(
+            migration.needs_coordinates(source) and migration.field(source, "control_rig") for source in sources
+        ):
+            return context.window_manager.invoke_props_dialog(self, width=620)  # pyright: ignore[reportReturnType]
+        return self.execute(context)
+
+    def draw(self, context: "Context") -> None:
+        layout = self.layout
+        if layout is None:
+            return
+        sources = migration.runtime_migration_sources(context)
+        controls = [
+            source
+            for source in sources
+            if migration.needs_coordinates(source) and migration.field(source, "control_rig")
+        ]
+        if controls:
+            box = layout.box()
+            box.label(text="A body control rig is attached", icon="ERROR")
+            if all(migration.control_rebuild_available(context, source) for source in controls):
+                box.label(text="This will save a .blend backup and preserve the original actions,")
+                box.label(text="re-import the DNA rigs, rebuild the controls, then rebake action copies.")
+                box.label(text="Custom control-rig edits may be lost. This can be destructive.")
+                box.prop(self, "rebuild_controls")
+            else:
+                box.label(text="You must remove the control rig, then run legacy migration")
+                box.label(text="and rebuild the control rig.")
+                box.label(text="Automatic rebuilding requires Character Assembly and Character Control Rig.")
+        actions = migration.action_labels(sources)
+        if actions:
+            layout.label(text="Would you also like to migrate these assigned actions?")
+            box = layout.box()
+            for label in actions:
+                box.label(text=label, icon="ACTION")
+            layout.prop(self, "migrate_actions")
+            layout.label(text="Original actions are retained. Baked channels are sampled every frame.")
+            if not self.migrate_actions:
+                layout.label(text="Existing animation will be detached or muted on the upgraded rigs.", icon="INFO")
+
     def execute(self, context: "Context") -> set[str]:
         try:
-            migrate_type, upgraded, unchanged = utilities.migrate_runtime_data(context)
+            if self.rebuild_controls:
+                # Reject unavailable integrations/missing DNA before writing a backup.
+                migration.preflight_runtime_migration(
+                    migration.runtime_migration_sources(context),
+                    rebuild_controls=True,
+                )
+                backup = migration.save_migration_backup()
+                self.report({"INFO"}, f"Pre-migration backup saved: {backup}")
+            migrate_type, upgraded, unchanged = migration.migrate_runtime_data(
+                context,
+                migrate_actions=self.migrate_actions,
+                rebuild_controls=self.rebuild_controls,
+            )
         except (RuntimeError, ValueError, OSError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}

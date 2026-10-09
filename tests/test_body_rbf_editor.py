@@ -3,9 +3,9 @@ import pytest
 
 from mathutils import Quaternion, Vector
 
-from constants import EXCLUDE_FINGER_POSES
 from character_dna.ui.callbacks import get_active_rig_instance
 from character_dna.utilities import reset_pose
+from constants import EXCLUDE_FINGER_POSES
 from utilities.rbf_editor import assert_body_pose, get_all_body_pose_names, set_body_pose
 
 
@@ -125,7 +125,9 @@ def test_body_pose_update(
 
     # set the driver bone rotation to the pose to trigger the driven bones
     driver_bone = instance.body_rig.pose.bones[driver_bone_name]
-    driver_bone.rotation_quaternion = driver_bone_rotation
+    # These historical driver fixtures are authored in Maya-local axes.
+    w, x, y, z = driver_bone_rotation
+    driver_bone.rotation_quaternion = Quaternion((w, x, -z, y))
 
     # ensure we evaluate the rig to apply the driven bone transforms
     instance.evaluate(component="body")
@@ -198,7 +200,9 @@ def test_body_pose_duplicate(
 
     # set the driver bone rotation to the new value
     driver_bone = instance.body_rig.pose.bones[driver_bone_name]
-    driver_bone.rotation_quaternion = driver_bone_rotation
+    # These historical driver fixtures are authored in Maya-local axes.
+    w, x, y, z = driver_bone_rotation
+    driver_bone.rotation_quaternion = Quaternion((w, x, -z, y))
 
     for driven_name, change_location in zip(changed_driven_bone_names, changed_driven_bone_locations, strict=False):
         for driven_index, driven in enumerate(new_pose.driven):  # type: ignore
@@ -227,7 +231,9 @@ def test_body_pose_duplicate(
 
     # set the driver bone rotation to the pose to trigger the driven bones
     driver_bone = instance.body_rig.pose.bones[driver_bone_name]
-    driver_bone.rotation_quaternion = driver_bone_rotation
+    # These historical driver fixtures are authored in Maya-local axes.
+    w, x, y, z = driver_bone_rotation
+    driver_bone.rotation_quaternion = Quaternion((w, x, -z, y))
 
     # ensure we evaluate the rig to apply the driven bone transforms
     instance.evaluate(component="body")

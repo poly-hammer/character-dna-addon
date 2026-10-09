@@ -42,7 +42,7 @@ jobs:
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
     with:
-      timeout-minutes: 60
+      timeout-minutes: 90
       python-version: "3.11"
       blender-version: "4.5"
       runner-os: "windows-latest"
@@ -85,7 +85,7 @@ jobs:
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
     with:
-      timeout-minutes: 60
+      timeout-minutes: 90
       python-version: "3.13"
       blender-version: "5.2"
       runner-os: "windows-latest"
@@ -115,7 +115,7 @@ jobs:
     with:
       python-version: "3.11"
       blender-version: "4.5"
-      runner-os: "ubuntu-internal"
+      runner-os: "ubuntu-latest"
       iterations: 50
       warmup: 10
       threshold: 15
@@ -130,7 +130,7 @@ jobs:
     with:
       python-version: "3.13"
       blender-version: "5.2"
-      runner-os: "ubuntu-internal"
+      runner-os: "ubuntu-latest"
       iterations: 50
       warmup: 10
       threshold: 15

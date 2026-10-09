@@ -36,6 +36,7 @@
     ],
     "words": [
         "bpy",
+        "lerps",
         "ufbx",
         "Rigify",
         ".npz",
@@ -86,6 +87,7 @@
             "filename": "src/**",
             "description": "Source code - Blender API and addon technical terms",
             "words": [
+                "rebake",
                 "AVX",
                 "RAII-wrapped",
                 "nij",
@@ -237,7 +239,14 @@
                 "ZXY",
                 "ZYX",
                 "quats",
-                "interp"
+                "interp",
+                "bijective",
+                "ccr",
+                "kdtree",
+                "retargeter",
+                "rtol",
+                "rvk",
+                "unkeyed"
             ]
         },
         {
@@ -268,7 +277,7 @@
         },
         {
             "filename": "pyproject.toml",
-            "description": "Python tooling configuration - ruff rule codes and tool names",
+            "description": "Python tooling configuration - ruff rule codes, tool names, and dependencies",
             "words": [
                 "bmesh",
                 "cls",
@@ -276,6 +285,7 @@
                 "dotenv",
                 "DTZ",
                 "env",
+                "fbx",
                 "flynt",
                 "FURB",
                 "ICN",
@@ -283,13 +293,15 @@
                 "PLW",
                 "PTH",
                 "PYI",
+                "pyufbx",
                 "pyupgrade",
                 "rgx",
                 "RSE",
                 "RUF",
                 "SLF",
                 "TCH",
-                "TID"
+                "TID",
+                "whl"
             ]
         }
     ]

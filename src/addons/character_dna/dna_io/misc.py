@@ -1,6 +1,6 @@
 # standard library imports
 import logging
-import math
+import re
 
 from pathlib import Path
 from typing import Any, Literal
@@ -8,8 +8,6 @@ from typing import Any, Literal
 # third party imports
 import bpy
 import numpy as np
-
-from mathutils import Matrix
 
 # local imports
 from ..constants import SHAPE_KEY_BASIS_NAME, ComponentType
@@ -19,6 +17,7 @@ from ..utilities import (
     get_addon_window_manager_properties,
     switch_to_object_mode,
 )
+from .coordinates import CanonicalDNAWriter
 
 
 logger = logging.getLogger(__name__)
@@ -38,6 +37,26 @@ DataLayer = Literal[
 ]
 
 
+def _json_input_stream(file_path: Path, memory_resource: Any) -> Any:
+    """Flush subnormal JSON floats that the SDK's C++ reader rejects on macOS."""
+    from ..bindings import dna
+
+    minimum = 2.0**-126  # Smallest normal IEEE 754 single-precision value.
+
+    def normalize(match: re.Match[bytes]) -> bytes:
+        token = match.group()
+        # Match quoted strings first so names and opaque layer data stay intact.
+        if token.startswith(b'"'):
+            return token
+        return b"0.0" if 0 < abs(float(token)) < minimum else token
+
+    data = re.sub(rb'"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?[eE]-\d+', normalize, file_path.read_bytes())
+    stream = dna.MemoryStream(memory_resource)
+    stream.write(data.decode("utf-8"), len(data))
+    stream.seek(0)
+    return stream
+
+
 def release_dna_handle(handle: Any) -> None:
     """Destroy an OpenRigLogic handle now instead of waiting for garbage collection.
 
@@ -51,6 +70,9 @@ def release_dna_handle(handle: Any) -> None:
             any other RAII-wrapped binding object. ``None`` and raw SWIG proxies are ignored.
     """
     if handle is None:
+        return
+    if isinstance(handle, CanonicalDNAWriter):
+        handle.close()
         return
 
     instance = getattr(handle, "_instance", None)
@@ -80,40 +102,20 @@ def get_dna_reader(
     if not file_path.exists():
         raise FileNotFoundError(f"File '{file_path}' does not exist.")
 
-    mode = dna.OpenMode_Binary
-    # if file_format.lower() == 'json':
-    #     mode = dna.OpenMode_Text  # noqa: ERA001
-
     # Construct via the class rather than `.create()`: the constructor returns the binding's
     # owning wrapper, which destroys the C++ object on release and keeps the stream alive for
     # exactly as long as the reader needs it. `.create()` returns a raw pointer that leaks.
-    stream = dna.FileStream(path=str(file_path), accessMode=dna.AccessMode_Read, openMode=mode, memRes=memory_resource)
+    from .coordinates import configuration, transform_reader
 
-    # Explicitly enforce the coordinate frame our importer assumes (Maya Y-up:
-    # x=left, y=up, z=front) instead of trusting whatever system the incoming DNA
-    # was authored in. With the Transform policy the reader converts any source
-    # system to this frame at load time (a no-op when the data is already Maya
-    # Y-up), so the downstream manual +90deg X rotation and scale handling stay
-    # valid even for DNAs exported with a different coordinate system. Units are
-    # not touched here (the Configuration transform does not convert cm<->m or
-    # degrees<->radians); those are still adapted from getTranslationUnit /
-    # getRotationUnit by the importer.
-    coordinate_system = dna.CoordinateSystem()
-    coordinate_system.x = dna.Direction_left
-    coordinate_system.y = dna.Direction_up
-    coordinate_system.z = dna.Direction_front
-
-    config = dna.Configuration()
-    config.layer = getattr(dna, f"DataLayer_{data_layer}")
-    config.unknownLayerPolicy = dna.UnknownLayerPolicy_Preserve
-    config.coordinateSystemTransformPolicy = dna.CoordinateSystemTransformPolicy_Transform
-    config.coordinateSystem = coordinate_system
+    config = configuration(data_layer)
 
     if file_format.lower() == "json":
-        # The JSON reader has no Configuration overload, so it cannot enforce the
-        # coordinate system on load; JSON DNAs are expected to already be Maya Y-up.
+        # JSON has no Configuration overload. Transform it through a configured
+        # binary reader below, respecting the JSON file's declared source basis.
+        stream = _json_input_stream(file_path, memory_resource)
         reader = dna.JSONStreamReader(stream, memory_resource)
     elif file_format.lower() == "binary":
+        stream = dna.FileStream(str(file_path), dna.AccessMode_Read, dna.OpenMode_Binary, memory_resource)
         reader = dna.BinaryStreamReader(stream, config, memory_resource)
     else:
         raise ValueError(f"Invalid file format '{file_format}'. Must be 'binary' or 'json'.")
@@ -129,34 +131,20 @@ def get_dna_reader(
         status = dna.Status.get()
         release_dna_handle(reader)
         raise RuntimeError(f'Error loading DNA: {status.message} from "{file_path}"')
+    if file_format.lower() == "json":
+        transformed = transform_reader(reader, data_layer=data_layer)
+        release_dna_handle(reader)
+        return transformed
     return reader
 
 
-def get_dna_writer(file_path: Path, file_format: FileFormat = "binary") -> "dna.BinaryStreamWriter":
-    from ..bindings import dna  # type: ignore[reportAttributeAccessIssue]
-
+def get_dna_writer(file_path: Path, file_format: FileFormat = "binary") -> CanonicalDNAWriter:
     file_path = Path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    mode = dna.OpenMode_Binary
-    # if file_format.lower() == 'json':
-    #     mode = dna.OpenMode_Text  # noqa: ERA001
-
-    # See get_dna_reader: the constructor form owns the C++ object and, critically for the
-    # writer, keeps the stream alive until `write()` is called and the writer is released.
-    stream = dna.FileStream(
-        path=str(file_path),
-        accessMode=dna.AccessMode_Write,
-        openMode=mode,
-    )
-    if file_format.lower() == "json":
-        writer = dna.JSONStreamWriter(stream)
-    elif file_format.lower() == "binary":
-        writer = dna.BinaryStreamWriter(stream)
-    else:
-        raise ValueError(f"Invalid file format '{file_format}'. Must be 'binary' or 'json'.")
-
-    return writer
+    if file_format.lower() not in ("binary", "json"):
+        raise ValueError(f"Invalid file format: {file_format}")
+    return CanonicalDNAWriter(file_path, file_format.lower())
 
 
 def get_dna_component_type(file_path: Path) -> ComponentType | None:
@@ -260,8 +248,8 @@ def apply_blend_shape_deltas(
     """Apply a DNA blend shape target's deltas onto ``shape_key_block`` using
     vectorized numpy + ``foreach_get``/``foreach_set`` for speed.
 
-    Reads the basis (reference key) coordinates once, rotates the sparse deltas
-    from DNA's Y-up space into Blender's Z-up space, scatters them onto the
+    Reads the basis (reference key) coordinates once, scales the sparse deltas
+    from DNA units into Blender units, scatters them onto the
     affected vertices, and writes the whole shape key in a single bulk call.
     """
     vertex_indices = reader.getBlendShapeTargetVertexIndices(mesh_index, index)
@@ -284,9 +272,7 @@ def apply_blend_shape_deltas(
     deltas[:, 1] = reader.getBlendShapeTargetDeltaYs(mesh_index, index)
     deltas[:, 2] = reader.getBlendShapeTargetDeltaZs(mesh_index, index)
 
-    # DNA is Y-up, Blender is Z-up, so we need to rotate the deltas
-    rotation = np.array(Matrix.Rotation(math.radians(90), 4, "X").to_3x3(), dtype=np.float32)
-    rotated = (deltas * linear_modifier) @ rotation.T
+    scaled = deltas * linear_modifier
 
     # guard against vertex indices that no longer exist on the base mesh
     valid = vertex_indices < vertex_count
@@ -296,8 +282,8 @@ def apply_blend_shape_deltas(
             f'Were they deleted on the base mesh "{mesh_object.name}"?'
         )
         vertex_indices = vertex_indices[valid]
-        rotated = rotated[valid]
+        scaled = scaled[valid]
 
     # the new vertex layout is the original vertex layout with the deltas from the dna applied
-    new[vertex_indices] = base[vertex_indices] + rotated
+    new[vertex_indices] = base[vertex_indices] + scaled
     shape_key_block.data.foreach_set("co", new_flat)

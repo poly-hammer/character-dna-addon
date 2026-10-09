@@ -80,4 +80,6 @@ IGNORED_BONE_ROTATIONS_ON_EXPORT = ["FACIAL_C_FacialRoot", "FACIAL_C_Neck1Root",
 
 FINGER_NAMES = ["index", "middle", "ring", "pinky", "thumb"]
 
+# Legacy Maya snapshots predate Unreal's current DNA RBF implementation.
+# The separate Unreal snapshot suite always includes every finger pose.
 EXCLUDE_FINGER_POSES = True

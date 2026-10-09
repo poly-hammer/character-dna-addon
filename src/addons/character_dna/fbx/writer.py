@@ -4,9 +4,9 @@ Values are converted straight into Blender pose-bone basis space and written
 with ``foreach_set``, so an entire channel becomes a single bulk call instead of
 one ``keyframe_insert`` per frame.
 
-Because pose basis values are rest-relative, any constant change of basis
-between the FBX file and Blender cancels out of both the rotation and the
-translation, so no axis conversion is applied here.
+Rest-relative FBX values still use the source joint axes. For native DNA
+armatures they undergo the same Maya-to-Blender basis change as the DNA
+reader. Face-board controls retain their authored UI coordinate convention.
 """
 
 import logging
@@ -290,10 +290,18 @@ def write_skeleton_animation(
         rest_translation = clip.rest_translations[node_index]
         inverse_rest = quat_conjugate(rest_rotation)
 
-        _write_rotation(container, pose_bone, _basis_rotations(rest_rotation, clip.rotations[:, node_index]), frames)
+        rotations = _basis_rotations(rest_rotation, clip.rotations[:, node_index])
 
         offsets = clip.translations[:, node_index] - rest_translation
         basis_locations = quat_rotate_vector(inverse_rest, offsets) * clip.unit_meters
+        if armature.get("dna_coordinate_version", 0):
+            # Legacy FBX animation uses Maya joint-local axes. A true basis
+            # change affects local deltas as well as the root orientation.
+            rotations = rotations[:, [0, 1, 3, 2]].copy()
+            rotations[:, 2] *= -1
+            basis_locations = basis_locations[:, [0, 2, 1]].copy()
+            basis_locations[:, 1] *= -1
+        _write_rotation(container, pose_bone, rotations, frames)
         if not _is_effectively_zero(basis_locations):
             write_bulk_fcurves(
                 container,

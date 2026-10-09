@@ -1,6 +1,15 @@
+## Major Changes
+
+* RigLogic now uses DNA with Z-up Transform Policy to match Blender's native cordinate system (Legacy Data Migration operator supports migrating existing rig to match this)
+
+## Minor  Changes
+
+* New Convertor Implementation with more accurate eye and mouth component solves [#351](https://github.com/poly-hammer/character-dna-addon/issues/351)
+
 ## Patch Changes
 
-* Fix face board repositioning for Blender 4.5 compatibility [#54](https://github.com/orgs/poly-hammer/discussions/54)
+* Fixed convergence control in eye aim gui [#349](https://github.com/poly-hammer/character-dna-addon/issues/349)
+* Fixed finger orientation issue with convertor [#368](https://github.com/poly-hammer/character-dna-addon/issues/368)
 
 ## Tests Passing On
 

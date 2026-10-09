@@ -10,8 +10,9 @@ from character_dna import bindings
 def test_missing_native_runtime(monkeypatch, tmp_path):
     """Absence of the optional binary does not fall back to an installed wheel."""
     monkeypatch.delitem(sys.modules, f"{bindings.__name__}._riglogic_blender", raising=False)
+    monkeypatch.delitem(bindings._modules, "_riglogic_blender", raising=False)
     monkeypatch.setattr(bindings, "combo_folder", tmp_path)
-    with pytest.raises(ModuleNotFoundError, match="Native runtime is not installed"):
+    with pytest.raises(ModuleNotFoundError, match="Could not load bindings module '_riglogic_blender'"):
         bindings.load_native_runtime()
 
 

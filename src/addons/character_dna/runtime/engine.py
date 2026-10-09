@@ -29,7 +29,7 @@ from .bindings import (
 
 logger = logging.getLogger(__name__)
 NAMESPACE = "character_dna_native_solve_v1"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SETTINGS = (
     "auto_evaluate",
     "auto_evaluate_head",
@@ -63,6 +63,8 @@ def capability() -> tuple[bool, str]:
         info = _module.capabilities()
         if info["api_version"] != 1 or info["private_blender_api"]:
             return False, "Incompatible native runtime module"
+        if not info.get("blender_coordinates", False):
+            return False, "Update the native RigLogic bindings and restart Blender to use native coordinates"
         for name in ("evaluate_frame", "create_frame_plan", "load_model", "create_session", "control_snapshot"):
             if not callable(getattr(_module, name, None)):
                 return False, f"Native runtime is missing {name}"
@@ -77,7 +79,7 @@ def _model(path: str, body: bool) -> Any:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     key = (digest, body)
     if key not in _models:
-        _models[key] = _module.load_model(str(resolved), body, True)
+        _models[key] = _module.load_model(str(resolved), body, False, True)
     return _models[key]
 
 
@@ -334,7 +336,7 @@ def transform_plan(plans: list, component: str) -> array:
             for item in plans
             for value in (
                 item[0],
-                int(item[6]) if component == "head" else 0,
+                2 | (int(item[6]) if component == "head" else 0),
                 *item[2],
                 *item[3],
                 *item[4],
@@ -360,6 +362,9 @@ def make_record(carrier: Any, instance: Any = None) -> dict[str, Any]:
             "switches": list(carrier["switches"]),
             "visibility_start": carrier.get("visibility_start", len(carrier["switches"])),
         }
+    from ..dna_io.coordinates import validate_rig_basis
+
+    validate_rig_basis(carrier["rig"])
     model = _model(getattr(instance, f"{component}_dna_file_path"), component == "body")
     info = _module.describe(_module.create_session(model))
     record = {
@@ -439,6 +444,7 @@ def _link_carrier(instance: Any, carrier: bpy.types.Object) -> None:
 
 def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
     """Bind initialized rig data; roll back the whole instance on failure."""
+    from .eyes import install as install_eye_convergence
     from .ui_refresh import invalidate_migration
 
     invalidate_migration()
@@ -500,6 +506,7 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
         all_targets.extend(targets)
         prepared.append((component, rig, info, plans, targets, initial))
     validate_targets(all_targets)
+    install_eye_convergence(instance.face_board)
     try:
         for component, rig, _info, plans, targets, initial in prepared:
             carrier = bpy.data.objects.new(f"{instance.name}_{component}_native", None)

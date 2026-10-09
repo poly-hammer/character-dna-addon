@@ -12,7 +12,7 @@ from typing import Any
 import bpy
 
 from ..constants import ToolInfo
-from . import engine, ui_refresh
+from . import engine, eyes, ui_refresh
 
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,7 @@ def ensure_bindings(instance: Any) -> None:
     ):
         rebuild(instance)
     engine.adopt(instance)
+    eyes.install(instance.face_board)
 
 
 @contextmanager
@@ -199,6 +200,7 @@ def after_load() -> None:
     """Rebuild saved bindings once after the scene's data has been loaded."""
     ui_refresh.clear()
     engine.restore()
+    eyes.upgrade_loaded()
 
 
 def before_undo() -> None:
@@ -315,13 +317,15 @@ def register() -> None:
 
 @bpy.app.handlers.persistent
 def _after_import(_context: Any) -> None:
-    """Hydrate library-imported sessions without changing saved scene data."""
+    """Hydrate imported sessions and add convergence to writable appended boards."""
     if engine.capability()[0]:
         engine.hydrate()
+        eyes.upgrade_loaded()
 
 
 def _startup() -> None:
     engine.hydrate()
+    eyes.upgrade_loaded()
 
 
 def unregister() -> None:

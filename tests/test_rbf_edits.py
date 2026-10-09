@@ -4,8 +4,10 @@ import uuid
 import bpy
 import pytest
 
-from mathutils import Vector, Quaternion
+from mathutils import Quaternion, Vector
 
+from character_dna.ui.callbacks import get_active_rig_instance
+from character_dna.utilities import reset_pose
 from constants import (
     DNA_BEHAVIOR_VERSION,
     DNA_DEFINITION_VERSION,
@@ -13,14 +15,60 @@ from constants import (
     DNA_RBF_EXTENSION_VERSION,
     TEST_DNA_FOLDER,
 )
-from character_dna.ui.callbacks import get_active_rig_instance
-from character_dna.utilities import reset_pose
 from utilities.dna_data import get_dna_json_data
 from utilities.rbf_editor import set_body_pose
 
 
 TOLERANCE = 1e-5
 BODY_FILE_NAME = "body.dna"
+
+
+def test_finger_edit_keeps_companion_contributions_isolated(fresh_rbf_test_scene):
+    """A real edit survives commit, while other solver columns remain unchanged."""
+    import numpy as np
+
+    from character_dna.editors.rbf_editor.utilities import update_pose
+    from character_dna.utilities import collection_to_list
+
+    instance = get_active_rig_instance()
+    solver_name = "index_l_01_UERBFSolver"
+    pose_name = "index_l_01_curl_070"
+    pose, _, _ = set_body_pose(solver_name, pose_name)
+    assert pose is not None
+
+    def coefficients():
+        return {
+            (solver.name, item.name, driven.name): (
+                tuple(driven.location),
+                tuple(driven.euler_rotation),
+                tuple(driven.scale),
+            )
+            for solver in instance.rbf_editor.rbf_solver_list
+            for item in solver.poses
+            if item.name != "default"
+            for driven in item.driven
+            if driven.data_type == "BONE"
+        }
+
+    original = coefficients()
+    bone = instance.body_rig.pose.bones["index_01_mcp_l"]
+    bone.rotation_euler = (bone.matrix_basis.to_quaternion() @ Quaternion((1, 0, 0), 0.035)).to_euler("XYZ")
+    bone.location += Vector((0.002, -0.001, 0.003))
+    expected = bone.matrix_basis.copy()
+    update_pose(instance, bpy.context)
+    authored = collection_to_list(instance.rbf_editor.rbf_solver_list)
+    update_pose(instance, bpy.context)
+    assert collection_to_list(instance.rbf_editor.rbf_solver_list) == authored
+    assert bpy.ops.character_dna.commit_rbf_solver_changes() == {"FINISHED"}
+    instance.destroy()
+    instance.body_initialize()
+    set_body_pose(solver_name, pose_name)
+    np.testing.assert_allclose(
+        bone.matrix_basis, expected, atol=2e-5, err_msg=str(coefficients()[(solver_name, pose_name, bone.name)])
+    )
+    for key, values in coefficients().items():
+        if key != (solver_name, pose_name, bone.name):
+            np.testing.assert_allclose(values, original[key], atol=1e-6, err_msg=str(key))
 
 
 def get_rbf_pose_data_from_json(json_data: dict, pose_name: str) -> tuple[int, dict | None]:
@@ -1368,9 +1416,6 @@ def test_remove_and_add_rbf_driven_persists_after_commit(
     rbf_extension_data = added_json_data.get(DNA_RBF_EXTENSION_VERSION, {})
     extension_poses = rbf_extension_data.get("poses", [])
 
-    # The output indices for the bone (9 attributes per bone)
-    bone_output_indices = set(range(bone_joint_index * 9, bone_joint_index * 9 + 9))
-
     # Verify the bone is now in at least one joint group used by this solver's poses
     bone_found_in_joint_group = False
     for pose_idx in pose_indices:
@@ -1395,13 +1440,12 @@ def test_remove_and_add_rbf_driven_persists_after_commit(
                 if bone_joint_index in joint_indices:
                     bone_found_in_joint_group = True
 
-                    # Also verify the output indices for this bone are present
+                    # The coordinate-policy transform sparsifies all-zero rows.
+                    # Membership is explicit even when the re-added bone has no
+                    # corrective values yet; remaining rows must stay valid.
                     output_indices = jg.get("outputIndices", [])
-                    for out_idx in bone_output_indices:
-                        assert out_idx in output_indices, (
-                            f"Output index {out_idx} for bone '{bone_to_test}' should be in "
-                            f"outputIndices after adding back. Found: {output_indices}"
-                        )
+                    assert len(jg["values"]) == len(input_indices) * len(output_indices)
+                    assert all(out_idx // 9 in joint_indices for out_idx in output_indices)
                     break
             if bone_found_in_joint_group:
                 break
@@ -1412,6 +1456,10 @@ def test_remove_and_add_rbf_driven_persists_after_commit(
         f"Joint '{bone_to_test}' (index {bone_joint_index}) should be in "
         f"jointIndices after adding back. Checked joint groups for solver poses."
     )
+    instance.destroy()
+    instance.body_initialize()
+    pose, _, _ = set_body_pose(solver_name=solver_name, pose_name="calf_l_back_50")
+    assert bone_to_test in {driven.name for driven in pose.driven}
 
 
 def test_remove_rbf_driven_persists_after_commit(
@@ -2699,7 +2747,7 @@ def test_validate_mirror_pose_no_target_solver(fresh_rbf_test_scene):
     """
     Test that validate_mirror_pose returns an error when the target solver doesn't exist.
     """
-    from character_dna.editors.rbf_editor.utilities import validate_mirror_pose, add_rbf_solver
+    from character_dna.editors.rbf_editor.utilities import add_rbf_solver, validate_mirror_pose
 
     instance = get_active_rig_instance()
     assert instance is not None, "No active rig instance found"

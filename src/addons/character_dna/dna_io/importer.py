@@ -17,7 +17,7 @@ from ..bindings import enums  # type: ignore[reportAttributeAccessIssue]
 from ..constants import (
     CUSTOM_BONE_SHAPE_SCALE,
     EXTRA_BONES,
-    FIRST_BONE_Y_LOCATION,
+    FIRST_BONE_HEIGHT,
     MESH_VERTEX_COLORS_FILE_NAME,
     MESH_VERTEX_COLORS_FILE_PATH,
     NUMBER_OF_HEAD_LODS,
@@ -27,6 +27,7 @@ from ..constants import (
     ComponentType,
 )
 from ..typing import *  # noqa: F403
+from .coordinates import COORDINATE_VERSION, DNA_ROTATION_MODE
 from .misc import get_dna_reader
 
 
@@ -475,9 +476,7 @@ class DNAImporter:
             # Attach the mesh to the armature
             self.set_armature_modifier(mesh_object)
 
-        # Rotate the mesh and apply to Z-up
-        mesh_object.rotation_euler.x = math.radians(90)
-        utilities.apply_transforms(mesh_object, rotation=True)
+        # The DNA reader already transformed the geometry into Blender space.
         # Persist the DNA identity independently of editable object/collection names.
         mesh_object["ca_dna_component"] = self._component_type
         mesh_object["ca_dna_mesh_index"] = mesh_index
@@ -532,15 +531,12 @@ class DNAImporter:
                         math.radians(y_rotations[index]),
                         math.radians(z_rotations[index]),
                     ),
-                    "XYZ",
+                    DNA_ROTATION_MODE,
                 )
 
                 # The first bone is in object space
                 if index == 0:
-                    rotation_matrix = Matrix.Rotation(math.radians(90), 4, "X").to_4x4()  # type: ignore[arg-type]
-                    global_matrix = (
-                        rotation_matrix @ Matrix.Translation(location[:])
-                    ) @ euler_rotation.to_matrix().to_4x4()
+                    global_matrix = Matrix.Translation(location[:]) @ euler_rotation.to_matrix().to_4x4()
 
                 # Otherwise they are in parent space
                 elif self.rig_object and self.rig_object.data and isinstance(self.rig_object.data, bpy.types.Armature):
@@ -555,11 +551,11 @@ class DNAImporter:
         return None
 
     def get_height_scale_factor(self) -> float:
-        y_locations = self._dna_reader.getNeutralJointTranslationYs()
+        z_locations = self._dna_reader.getNeutralJointTranslationZs()
         # Determine the height scale factor based of how much the first bone's is moved
         height_scale_factor = 1.0
-        if len(y_locations) > 0:
-            height_scale_factor = y_locations[0] / FIRST_BONE_Y_LOCATION
+        if len(z_locations) > 0:
+            height_scale_factor = z_locations[0] / FIRST_BONE_HEIGHT
         return height_scale_factor
 
     def create_extra_bones(self) -> bpy.types.EditBone | None:
@@ -578,7 +574,7 @@ class DNAImporter:
                     continue
 
                 # Scale the location of the bones based on the height scale factor
-                location.y = location.y * round(height_scale_factor, 4)
+                location.z = location.z * round(height_scale_factor, 4)
 
                 extra_edit_bone = self.rig_object.data.edit_bones.new(bone_name)
                 extra_edit_bone.length = self._linear_modifier
@@ -625,7 +621,7 @@ class DNAImporter:
                     math.radians(y_rotations[index]),
                     math.radians(z_rotations[index]),
                 ),
-                "XYZ",
+                DNA_ROTATION_MODE,
             )
 
             # Create the new edit bone
@@ -656,9 +652,7 @@ class DNAImporter:
             self.set_custom_bone_shape(pose_bone)
         self.rig_object.data.relation_line_position = "HEAD"
 
-        # Rotate the armature and apply to Z-up
-        self.rig_object.rotation_euler.x = math.radians(90)
-        utilities.apply_transforms(self.rig_object, rotation=True)
+        self.rig_object["dna_coordinate_version"] = COORDINATE_VERSION
 
     def setup_swing_bones(self):
         if not self.rig_object or not self.rig_object.pose:

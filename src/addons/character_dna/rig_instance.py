@@ -663,7 +663,7 @@ class RigInstance(bpy.types.PropertyGroup):
                 if pose_bone.rotation_mode != mode:
                     pose_bone.rotation_mode = mode
                 # save the rest pose and their parent space matrix so we don't have to calculate it again
-                rest_pose[pose_bone.name] = utilities.get_bone_rest_transformations(pose_bone.bone)
+                rest_pose[pose_bone.name] = utilities.get_bone_rest_transformations(pose_bone.bone, rotation_mode="XZY")
 
         # save the rest pose so we don't have to calculate it again
         self.data[self.cache_key("head", "rest_pose")] = rest_pose
@@ -844,7 +844,7 @@ class RigInstance(bpy.types.PropertyGroup):
                     pose_bone.rotation_mode = mode
 
                 # save the rest pose and their parent space matrix so we don't have to calculate it again
-                rest_pose[pose_bone.name] = utilities.get_bone_rest_transformations(pose_bone.bone, rotation_mode="XYZ")
+                rest_pose[pose_bone.name] = utilities.get_bone_rest_transformations(pose_bone.bone, rotation_mode="XZY")
 
         # save the rest pose so we don't have to calculate it again
         self.data[self.cache_key("body", "rest_pose")] = rest_pose
@@ -1029,6 +1029,10 @@ class RigInstance(bpy.types.PropertyGroup):
         if not self.head_valid:
             return
 
+        from .dna_io.coordinates import validate_rig_basis
+
+        validate_rig_basis(self.head_rig)
+
         # Done before destroy_head so a context that rejects ID writes leaves the previous state
         # intact and this simply runs again on the next evaluation.
         if not apply_id_writes(f"head rotation modes for '{self.name}'", self._apply_head_rotation_modes):
@@ -1091,6 +1095,10 @@ class RigInstance(bpy.types.PropertyGroup):
 
         if not self.body_valid:
             return
+
+        from .dna_io.coordinates import validate_rig_basis
+
+        validate_rig_basis(self.body_rig)
 
         # Release any previous body state first: re-initializing without this leaks the old
         # RigLogic/reader and leaves the derived caches pointing at the previous DNA.
