@@ -107,7 +107,7 @@ def _build_reader() -> _FakeBehaviorReader:
 def _instance(reader: _FakeBehaviorReader | None, outputs: list[float]) -> SimpleNamespace:
     """A fake rig instance exposing only what ``build_dependency_items`` reads."""
     head_instance = SimpleNamespace(getBlendShapeOutputs=lambda: list(outputs))
-    return SimpleNamespace(head_dna_reader=reader, head_instance=head_instance)
+    return SimpleNamespace(edit_target=SimpleNamespace(dna_reader=reader, state=head_instance))
 
 
 def _editor(rows: list[SimpleNamespace]) -> SimpleNamespace:

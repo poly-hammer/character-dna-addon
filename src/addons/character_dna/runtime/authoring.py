@@ -21,16 +21,17 @@ def _record(instance: Any, component: str) -> dict[str, Any]:
     if not available:
         raise RuntimeError(reason)
     plans = getattr(instance, f"{component}_bone_transform_plan")
-    raw = instance.head_raw_quat_plan if component == "head" else instance.body_raw_plan
+    raw = instance.component(component).raw_quat_plan
     carrier = {
         "component": component,
         "rig": getattr(instance, f"{component}_rig"),
-        "face": instance.face_board if component == "head" else None,
+        "face": instance.face_board if instance.component(component).gui_control_plan else None,
         "plan": engine.transform_plan(plans, component),
         "raw": [{"index": index, "name": name, "axis": axis} for index, name, axis in raw],
-        "gui": [{"index": index, "name": name, "axis": axis} for index, name, axis in instance.head_gui_control_plan]
-        if component == "head"
-        else [],
+        "gui": [
+            {"index": index, "name": name, "axis": axis}
+            for index, name, axis in instance.component(component).gui_control_plan
+        ],
         "joint_count": len(plans),
         "joints": [{"name": item[1]} for item in plans],
     }
@@ -85,7 +86,7 @@ def sample(instance: Any, component: str, overrides: dict | None = None, graph: 
     for index, value in enumerate(controls["raw"]):
         target.setRawControl(index, value)
     target.setLOD(lod)
-    if component == "body" and overrides:
+    if overrides:
         for index, name, axis in record["raw"]:
             value = overrides.get(name, {}).get(axis)
             if value is not None:
@@ -97,15 +98,13 @@ def sample(instance: Any, component: str, overrides: dict | None = None, graph: 
 
 def raw_inputs(instance: Any, component: str, overrides: dict | None = None) -> None:
     """Update joint-driving controls through the native input-capture plan."""
-    if component == "body":
-        sample(instance, component, overrides)
-        return
-    target = instance.head_instance
-    reader = instance.head_dna_reader
+    binding = instance.component(component)
+    target = binding.state
+    reader = binding.dna_reader
     previous_raw = array("f", (target.getRawControl(index) for index in range(reader.getRawControlCount())))
     previous_gui = array("f", (target.getGUIControl(index) for index in range(reader.getGUIControlCount())))
     sample(instance, component)
-    for index, name, axis in instance.head_raw_quat_plan:
+    for index, name, axis in binding.raw_quat_plan:
         if overrides is None:
             previous_raw[index] = target.getRawControl(index)
         else:
@@ -114,7 +113,7 @@ def raw_inputs(instance: Any, component: str, overrides: dict | None = None) -> 
         target.setGUIControl(index, value)
     for index, value in enumerate(previous_raw):
         target.setRawControl(index, value)
-    instance.head_manager.calculate(target)
+    binding.manager.calculate(target)
 
 
 def bone_transforms(instance: Any, component: str, collect: bool = False) -> list:
@@ -160,10 +159,10 @@ def evaluate_once(instance: Any, component: str) -> None:
     sample(instance, component)
     if instance.evaluate_bones:
         bone_transforms(instance, component)
-    if component == "head":
-        if instance.evaluate_shape_keys:
-            instance.update_head_shape_keys()
-        if instance.evaluate_texture_masks:
-            instance.update_head_texture_masks()
+    target = instance.component(component)
+    if instance.evaluate_shape_keys:
+        target.update_shape_keys()
+    if instance.evaluate_texture_masks:
+        target.update_texture_masks()
     getattr(instance, f"{component}_rig").update_tag()
     bpy.context.view_layer.update()

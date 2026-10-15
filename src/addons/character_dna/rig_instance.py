@@ -7,13 +7,14 @@ from pathlib import Path
 
 # third party imports
 import bpy
+
 import numpy as np
 
 from mathutils import Euler, Matrix, Vector
 
 # local imports
 from . import utilities
-from .constants import SHAPE_KEY_NAME_MAX_LENGTH
+from .rig_component import RigComponent, get_editor_component, refresh_editor_component, set_editor_component
 from .ui import callbacks
 from .typing import *  # noqa: F403
 
@@ -72,6 +73,22 @@ def end_render() -> None:
 
 
 class RigInstance(bpy.types.PropertyGroup):
+    editor_component: bpy.props.EnumProperty(
+        name="Component",
+        description="DNA component targeted by the editors",
+        items=[("head", "Head", "Edit the head DNA"), ("body", "Body", "Edit the body DNA")],
+        get=lambda self: ("head", "body").index(get_editor_component(self)),
+        set=set_editor_component,
+        update=refresh_editor_component,
+    )
+
+    def component(self, kind: str) -> RigComponent:
+        return RigComponent(self, kind)
+
+    @property
+    def edit_target(self) -> RigComponent:
+        return self.component(self.editor_component)
+
     from .runtime.controller import auto_evaluation_changed
     from .runtime.engine import sync_settings
 
@@ -419,57 +436,15 @@ class RigInstance(bpy.types.PropertyGroup):
 
     @property
     def head_mesh_index_lookup(self) -> dict[int, bpy.types.Object]:
-        if not self.head_dna_reader:
-            return {}
-
-        mesh_index_lookup = self.data.get(self.cache_key("head", "mesh_index_lookup"), {})
-        if mesh_index_lookup:
-            return mesh_index_lookup
-
-        for mesh_index in range(self.head_dna_reader.getMeshCount()):
-            dna_mesh_name = self.head_dna_reader.getMeshName(mesh_index)
-            mesh_object = bpy.data.objects.get(f"{self.name}_{dna_mesh_name}")
-            if mesh_object:
-                mesh_index_lookup[mesh_index] = mesh_object
-
-        self.data[self.cache_key("head", "mesh_index_lookup")] = mesh_index_lookup
-        return self.data[self.cache_key("head", "mesh_index_lookup")]
+        return self.component("head").mesh_index_lookup
 
     @property
     def head_channel_name_to_index_lookup(self) -> dict[str, int]:
-        if not self.head_dna_reader:
-            return {}
-
-        channel_name_to_index_lookup = self.data.get(self.cache_key("head", "channel_name_to_index_lookup"), {})
-        if channel_name_to_index_lookup:
-            return channel_name_to_index_lookup
-
-        for mesh_index in self.head_dna_reader.getMeshIndicesForLOD(0):
-            mesh_name = self.head_dna_reader.getMeshName(mesh_index)
-            for index in range(self.head_dna_reader.getBlendShapeTargetCount(mesh_index)):
-                channel_index = self.head_dna_reader.getBlendShapeChannelIndex(mesh_index, index)
-                shape_key_name = self.head_dna_reader.getBlendShapeChannelName(channel_index)
-                channel_name_to_index_lookup[f"{mesh_name}__{shape_key_name}"] = channel_index
-
-        self.data[self.cache_key("head", "channel_name_to_index_lookup")] = channel_name_to_index_lookup
-        return self.data[self.cache_key("head", "channel_name_to_index_lookup")]
+        return self.component("head").channel_name_to_index_lookup
 
     @property
     def head_channel_index_to_mesh_index_lookup(self) -> dict[int, int]:
-        if not self.head_dna_reader:
-            return {}
-
-        mesh_shape_key_index_lookup = self.data.get(self.cache_key("head", "mesh_shape_key_index_lookup"), {})
-        if mesh_shape_key_index_lookup:
-            return mesh_shape_key_index_lookup
-
-        # build a lookup dictionary of shape key index to mesh index
-        for mesh_index in self.head_dna_reader.getMeshIndicesForLOD(0):
-            for index in range(self.head_dna_reader.getBlendShapeTargetCount(mesh_index)):
-                channel_index = self.head_dna_reader.getBlendShapeChannelIndex(mesh_index, index)
-                mesh_shape_key_index_lookup[channel_index] = mesh_index
-        self.data[self.cache_key("head", "mesh_shape_key_index_lookup")] = mesh_shape_key_index_lookup
-        return mesh_shape_key_index_lookup
+        return self.component("head").channel_index_to_mesh_index_lookup
 
     @property
     def head_manager(self) -> "riglogic.RigLogic":
@@ -501,129 +476,13 @@ class RigInstance(bpy.types.PropertyGroup):
 
     @property
     def head_shape_key_blocks(self) -> dict[int, list[bpy.types.ShapeKey]]:
-        if not self.head_dna_reader:
-            return {}
-
-        shape_key_blocks = self.data.get(self.cache_key("head", "shape_key_blocks"))
-        if shape_key_blocks is None:
-            mesh_index = 0  # this is the head lod 0 mesh index
-            shape_key_blocks = {}
-            # Ordered, namespaced block names backing the UI shape key list. Kept as plain
-            # strings (undo-safe) and written to the scene-side `shape_key_list` collection
-            # separately by `sync_shape_key_list`. This getter only writes to `self.data`
-            # (never ID data), so it is safe to call from a property getter / UI draw -- e.g.
-            # when undo clears the volatile block cache via `destroy_references`.
-            shape_key_block_names: list[str] = []
-
-            # Note: That lod 0 is the only lod that has shape keys
-            failed_to_cache_count = 0
-            for mesh_index in self.head_dna_reader.getMeshIndicesForLOD(0):
-                mesh_object = self.head_mesh_index_lookup.get(mesh_index)
-                if not mesh_object:
-                    logger.warning(f'The mesh object for mesh index "{mesh_index}" was not found')
-                    continue
-
-                for target_index in range(self.head_dna_reader.getBlendShapeTargetCount(mesh_index)):
-                    channel_index = self.head_dna_reader.getBlendShapeChannelIndex(mesh_index, target_index)
-                    name = self.head_dna_reader.getBlendShapeChannelName(channel_index)
-                    dna_mesh_name = utilities.remove_instance_prefix(mesh_object.name, self.name)
-                    shape_key_block_name = f"{dna_mesh_name}__{name}"
-                    shape_key_block = self.get_shape_key_block(mesh_index=mesh_index, name=shape_key_block_name)
-                    if shape_key_block:
-                        # remember the block name for the UI list (built in a write-safe context)
-                        shape_key_block_names.append(shape_key_block_name)
-
-                        # store the shape key block in a list on the dictionary
-                        key_block_list = shape_key_blocks.get(channel_index, [])
-                        key_block_list.append(shape_key_block)
-                        shape_key_blocks[channel_index] = key_block_list
-
-                    elif len(shape_key_block_name) <= SHAPE_KEY_NAME_MAX_LENGTH:
-                        failed_to_cache_count += 1
-
-            if failed_to_cache_count > 0:
-                logger.warning(
-                    f"Rig Instance {self.name} did not cache {failed_to_cache_count} shape key blocks, "
-                    "because they are not in the scene. However they are in the DNA file. Import all shape "
-                    "keys to cache them."
-                )
-
-            self.data[self.cache_key("head", "shape_key_block_names")] = shape_key_block_names
-            self.data[self.cache_key("head", "shape_key_blocks")] = shape_key_blocks
-
-        return self.data[self.cache_key("head", "shape_key_blocks")]
+        return self.component("head").shape_key_blocks
 
     @property
     def head_shape_key_apply_plan(
         self,
     ) -> list[tuple["bpy.types.bpy_prop_collection", np.ndarray, np.ndarray, list[bpy.types.ShapeKey], np.ndarray]]:
-        """Precomputed per-mesh scatter plan for bulk shape-key value writes.
-
-        Each entry is ``(key_blocks, positions, channels, blocks, buffer)`` for one LOD0
-        head mesh, where ``positions`` are the collection indices of the RigLogic-driven
-        blocks inside that mesh's ``key_blocks``, ``channels`` are the matching blend-shape
-        channel indices into ``getBlendShapeOutputs()``, ``blocks`` are the parallel block
-        references (only used when collecting values for baking), and ``buffer`` is a
-        preallocated ``float32`` scratch array sized to the whole collection.
-
-        This lets ``update_head_shape_keys`` replace hundreds of per-block ``.value =`` RNA
-        writes with one ``foreach_get`` / scatter / ``foreach_set`` per mesh. It holds live
-        ``bpy`` collection wrappers, so it is registered in ``destroy_references`` and rebuilt
-        lazily after an undo.
-        """
-        plan = self.data.get(self.cache_key("head", "shape_key_apply_plan"))
-        if plan is not None:
-            return plan
-
-        plan = []
-        if self.head_dna_reader:
-            for mesh_index in self.head_dna_reader.getMeshIndicesForLOD(0):
-                mesh_object = self.head_mesh_index_lookup.get(mesh_index)
-                if (
-                    not mesh_object
-                    or not isinstance(mesh_object.data, bpy.types.Mesh)
-                    or not mesh_object.data.shape_keys
-                ):
-                    continue
-
-                key_blocks = mesh_object.data.shape_keys.key_blocks
-                # Resolve each namespaced block name to its collection index once.
-                name_to_position = {block.name: position for position, block in enumerate(key_blocks)}
-                dna_mesh_name = utilities.remove_instance_prefix(mesh_object.name, self.name)
-
-                positions: list[int] = []
-                channels: list[int] = []
-                blocks: list[bpy.types.ShapeKey] = []
-                for target_index in range(self.head_dna_reader.getBlendShapeTargetCount(mesh_index)):
-                    channel_index = self.head_dna_reader.getBlendShapeChannelIndex(mesh_index, target_index)
-                    name = self.head_dna_reader.getBlendShapeChannelName(channel_index)
-                    position = name_to_position.get(f"{dna_mesh_name}__{name}")
-                    if position is None:
-                        continue
-                    positions.append(position)
-                    channels.append(channel_index)
-                    blocks.append(key_blocks[position])
-
-                if not positions:
-                    continue
-
-                plan.append(
-                    (
-                        key_blocks,
-                        np.asarray(positions, dtype=np.intp),
-                        np.asarray(channels, dtype=np.intp),
-                        blocks,
-                        np.empty(len(key_blocks), dtype=np.float32),
-                    )
-                )
-
-        # An empty plan means no mesh resolved yet (e.g. a renamed or merged head mesh).
-        # Caching it would shadow a later correction for the rest of the session.
-        if not plan:
-            return plan
-
-        self.data[self.cache_key("head", "shape_key_apply_plan")] = plan
-        return plan
+        return self.component("head").shape_key_apply_plan
 
     def sync_shape_key_list(self) -> None:
         """Rebuild the UI shape-key list -- a ``CollectionProperty`` on the scene-stored
@@ -638,12 +497,15 @@ class RigInstance(bpy.types.PropertyGroup):
             return
 
         # Ensure the block cache (and its ordered names) exist before mirroring them.
-        self.head_shape_key_blocks  # noqa: B018
-        shape_key_block_names = self.data.get(self.cache_key("head", "shape_key_block_names"), [])
+        shape_key_block_names = [
+            name
+            for mesh, _, name in self.edit_target.shape_targets()
+            if self.edit_target.get_shape_key_block(mesh, name) is not None
+        ]
 
         # The has-deltas map is derived from the live block coords; drop it so it
         # recomputes lazily against the freshly synced blocks.
-        self.data.pop(self.cache_key("head", "shape_key_has_deltas"), None)
+        self.data.pop(self.edit_target.cache_key("shape_key_has_deltas"), None)
 
         shape_key_editor.shape_key_list.clear()
         for shape_key_block_name in shape_key_block_names:
@@ -755,27 +617,7 @@ class RigInstance(bpy.types.PropertyGroup):
 
     @property
     def head_animated_map_plan(self) -> list[tuple[int, str]]:
-        """Precomputed ``(index, slider_name)`` for every head animated (texture) map.
-
-        The slider name string is derived purely from the DNA animated-map name, so we
-        build it once at initialization instead of rebuilding it for every map on every
-        evaluation.
-        """
-        plan = self.data.get(self.cache_key("head", "animated_map_plan"))
-        if plan is not None:
-            return plan
-
-        plan = []
-        if self.head_dna_reader:
-            for index in range(self.head_dna_reader.getAnimatedMapCount()):
-                name = self.head_dna_reader.getAnimatedMapName(index)
-                slider_name = (
-                    f"{name.split('.')[0].split('_')[1].lower().replace('cm', 'wm')}.{name.split('.')[-1]}_msk"
-                )
-                plan.append((index, slider_name))
-
-        self.data[self.cache_key("head", "animated_map_plan")] = plan
-        return plan
+        return self.component("head").animated_map_plan
 
     @property
     def head_bone_transform_plan(self) -> list[tuple[int, str, Vector, Euler, Vector, Matrix, bool]]:
@@ -1059,7 +901,7 @@ class RigInstance(bpy.types.PropertyGroup):
         self.data[self.cache_key("head", "instance")] = riglogic.RigInstance(rigLogic=self.head_manager, memRes=None)
 
         # populate the body rbf solver list
-        if update_raw_control_list:
+        if update_raw_control_list and self.editor_component == "head":
             self.update_head_raw_control_list()
 
         # calling theses properties will cache their values
@@ -1081,6 +923,8 @@ class RigInstance(bpy.types.PropertyGroup):
         self.head_bone_transform_plan  # noqa: B018
 
         self.data[self.cache_key("head", "initialized")] = True
+        if update_raw_control_list and self.editor_component == "head":
+            self.update_body_rbf_solver_list()
 
     def body_initialize(self, update_rbf_solver_list: bool = True):
         from .ui.callbacks import is_reference_readonly
@@ -1138,7 +982,7 @@ class RigInstance(bpy.types.PropertyGroup):
         self.data[self.cache_key("body", "instance")] = riglogic.RigInstance(rigLogic=self.body_manager, memRes=None)
 
         # populate the body rbf solver list
-        if update_rbf_solver_list:
+        if update_rbf_solver_list and self.editor_component == "body":
             self.update_body_rbf_solver_list()
 
         # calling theses properties will cache their values
@@ -1152,6 +996,9 @@ class RigInstance(bpy.types.PropertyGroup):
         self.body_bone_transform_plan  # noqa: B018
 
         self.data[self.cache_key("body", "initialized")] = True
+        if update_rbf_solver_list and self.editor_component == "body":
+            self.update_head_raw_control_list()
+            self.sync_shape_key_list()
 
     def initialize(self):
         self.head_initialize()
@@ -1212,6 +1059,10 @@ class RigInstance(bpy.types.PropertyGroup):
             ("head", "rig_evaluated"),
             ("head", "face_board_evaluated"),
             ("body", "rig_evaluated"),
+            ("body", "mesh_index_lookup"),
+            ("body", "shape_key_blocks"),
+            ("body", "shape_key_apply_plan"),
+            ("body", "shape_key_has_deltas"),
         )
         for component, descriptor in reference_descriptors:
             self.data.pop(self.cache_key(component, descriptor), None)

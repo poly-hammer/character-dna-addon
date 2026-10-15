@@ -15,6 +15,8 @@ Edit the blend shapes (shape keys) a DNA drives. With this editor, you will scul
 
 ## Importing Shape Keys
 
+Choose **Head** or **Body** with the shared **Component** selector. Import and editing use that component's DNA. The selector is locked during an import or edit session. A component with no blend-shape targets has no shape keys to import.
+
 If you just imported your MetaHuman, then you need to run the **Import Shape Keys** operator to actually load them from the DNA into the Blender scene. Enable **Generate Neutral** to auto-generate neutral shapes during import if you want to work with a clean slate.
 
 ## Choosing a Shape Key

@@ -110,7 +110,7 @@ class GenericProgressQueueOperator(bpy.types.Operator):
         if not self.validate(context):
             return {"CANCELLED"}
 
-        head = utilities.get_active_head()
+        head = self.get_component()
         if not head:
             return {"CANCELLED"}
         addon_window_manager_properties.progress = 0
@@ -139,6 +139,9 @@ class GenericProgressQueueOperator(bpy.types.Operator):
 
     def validate(self, context: "Context") -> bool:
         return True
+
+    def get_component(self) -> CharacterComponentHead | CharacterComponentBody | None:
+        return utilities.get_active_head()
 
     def set_commands_queue(
         self,

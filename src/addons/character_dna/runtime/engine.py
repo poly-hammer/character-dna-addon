@@ -617,21 +617,20 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
                     initial.append(getattr(bone, property_name)[axis])
         shapes_offset = len(initial)
         initial.extend([0.0] * sum(info["output_counts"][1:]))
-        if component == "head":
-            for blocks, positions, channels, _driven, _buffer in instance.head_shape_key_apply_plan:
-                for position, channel in zip(positions, channels, strict=True):
-                    block = blocks[int(position)]
-                    targets.append(Target(block.id_data, block.path_from_id("value"), -1, shapes_offset + int(channel)))
-                    initial[shapes_offset + int(channel)] = block.value
-            maps_offset = shapes_offset + info["output_counts"][1]
-            node = instance.head_texture_masks_node
-            for name, channel in {name: channel for channel, name in instance.head_animated_map_plan}.items():
-                socket = node.inputs.get(name) if node else None
-                if socket:
-                    targets.append(
-                        Target(socket.id_data, socket.path_from_id("default_value"), -1, maps_offset + channel)
-                    )
-                    initial[maps_offset + channel] = socket.default_value
+        for blocks, positions, channels, _driven, _buffer in instance.component(component).shape_key_apply_plan:
+            for position, channel in zip(positions, channels, strict=True):
+                block = blocks[int(position)]
+                targets.append(Target(block.id_data, block.path_from_id("value"), -1, shapes_offset + int(channel)))
+                initial[shapes_offset + int(channel)] = block.value
+        maps_offset = shapes_offset + info["output_counts"][1]
+        node = instance.component(component).texture_masks_node
+        for name, channel in {
+            name: channel for channel, name in instance.component(component).animated_map_plan
+        }.items():
+            socket = node.inputs.get(name) if node else None
+            if socket:
+                targets.append(Target(socket.id_data, socket.path_from_id("default_value"), -1, maps_offset + channel))
+                initial[maps_offset + channel] = socket.default_value
         all_targets.extend(targets)
         prepared.append((component, rig, info, plans, targets, initial))
     validate_targets(all_targets)
@@ -651,12 +650,13 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
             carrier["epoch"] = 0.0
             carrier["preview_revision"] = 0
             carrier["plan"] = transform_plan(plans, component)
-            raw_plan = instance.body_raw_plan if component == "body" else instance.head_raw_quat_plan
+            raw_plan = instance.component(component).raw_quat_plan
             carrier["raw"] = [{"index": index, "name": name, "axis": axis} for index, name, axis in raw_plan]
-            if component == "head" and instance.face_board:
+            if instance.component(component).gui_control_plan and instance.face_board:
                 carrier["face"] = instance.face_board
                 carrier["gui"] = [
-                    {"index": index, "name": name, "axis": axis} for index, name, axis in instance.head_gui_control_plan
+                    {"index": index, "name": name, "axis": axis}
+                    for index, name, axis in instance.component(component).gui_control_plan
                 ]
             _link_carrier(instance, carrier)
             carrier.hide_select = True
@@ -691,7 +691,7 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
                     add_variable(
                         driver, f"gui_{index}", face, bone.path_from_id("location") + f"[{'xyz'.index(item['axis'])}]"
                     )
-            if component == "head" and instance.face_board:
+            if instance.component(component).gui_control_plan and instance.face_board:
                 center = instance.face_board.pose.bones.get("CTRL_C_eye")
                 if center:
                     for axis in range(2):
@@ -797,9 +797,9 @@ def solve(owner: Any, graph: Any) -> float:
             published[:count] = memoryview(context["local"])
         shapes = info["output_counts"][1]
         offset = info["output_counts"][0]
-        if component == "head" and instance.evaluate_shape_keys:
+        if instance.evaluate_shape_keys:
             published[count : count + shapes] = memoryview(context["sdk"])[offset : offset + shapes]
-        if component == "head" and instance.evaluate_texture_masks:
+        if instance.evaluate_texture_masks:
             published[count + shapes :] = memoryview(context["sdk"])[offset + shapes :]
         _apply_preview(record, context, owner, graph, instance)
         memoryview(owner["outputs"])[:] = published
@@ -843,12 +843,12 @@ def errors() -> list[str]:
     return list(_errors.values())
 
 
-def _head_record(instance: Any) -> dict[str, Any] | None:
+def _component_record(instance: Any, component: str) -> dict[str, Any] | None:
     return next(
         (
             record
             for record in _live_records()
-            if _belongs_to(record["carrier"], instance) and record["component"] == "head"
+            if _belongs_to(record["carrier"], instance) and record["component"] == component
         ),
         None,
     )
@@ -903,9 +903,9 @@ def preview_controls(instance: Any, state: Any, component: str = "head") -> bool
     return True
 
 
-def preview_shape(instance: Any, channel: int, value: float) -> bool:
+def preview_shape(instance: Any, channel: int, value: float, component: str = "head") -> bool:
     """Override one shape channel without changing the currently previewed raw pose."""
-    record = _head_record(instance)
+    record = _component_record(instance, component)
     if record is None:
         return False
     graph = bpy.context.evaluated_depsgraph_get()
@@ -965,13 +965,13 @@ def _apply_preview(record: dict[str, Any], context: dict[str, Any], owner: Any, 
     context["preview_controls"] = preview
 
 
-def ui_raw_control_value(instance: Any, index: int, graph: Any) -> float | None:
+def ui_raw_control_value(instance: Any, index: int, graph: Any, component: str = "head") -> float | None:
     """Read the visible graph's native controls without solving or syncing the legacy SDK."""
     identity = instance_id(instance)
     if not identity:
         return None
     for record in _live_records():
-        if not _belongs_to(record["carrier"], instance) or record["component"] != "head":
+        if not _belongs_to(record["carrier"], instance) or record["component"] != component:
             continue
         carrier = record["carrier"].evaluated_get(graph)
         key = (_generation, graph.as_pointer(), carrier.as_pointer(), graph.mode)

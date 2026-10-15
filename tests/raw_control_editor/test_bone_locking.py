@@ -83,6 +83,10 @@ class _FakeInstance:
         self.head_rig = rig
         self.head_dna_reader = reader
 
+    @property
+    def edit_target(self):
+        return SimpleNamespace(rig=self.head_rig, dna_reader=self.head_dna_reader)
+
 
 @pytest.fixture
 def patched(monkeypatch: pytest.MonkeyPatch):
@@ -265,7 +269,7 @@ def test_snapshot_survives_blend_roundtrip(patched, tmp_path) -> None:
             bone.tail.y = 1.0
         bpy.ops.object.mode_set(mode="OBJECT")
         rig.pose.bones["mid"].lock_location = (True, False, False)
-        instance = SimpleNamespace(head_rig=rig)
+        instance = _FakeInstance(rig, None)
         utilities.lock_bones_outside_joint_group(instance, reader, 5)
         path = str(tmp_path / "locks.blend")
         bpy.data.libraries.write(path, {rig})
@@ -275,7 +279,7 @@ def test_snapshot_survives_blend_roundtrip(patched, tmp_path) -> None:
         loaded = target.objects[0]
         assert tuple(loaded.pose.bones["mid"].lock_location) == (True, True, True)
 
-        assert utilities.restore_locked_bones(SimpleNamespace(head_rig=loaded)) == 2
+        assert utilities.restore_locked_bones(_FakeInstance(loaded, None)) == 2
         assert tuple(loaded.pose.bones["mid"].lock_location) == (True, False, False)
         assert tuple(loaded.pose.bones["FACIAL_C_FacialRoot"].lock_location) == (False, False, False)
         assert utilities._BONE_LOCK_SNAPSHOT not in loaded
@@ -300,13 +304,14 @@ def test_snapshot_and_locks_follow_blender_undo_redo() -> None:
         fixtures = runpy.run_path({str(Path(__file__).resolve())!r})
         reader = fixtures['_FakeReader']()
         cache = fixtures['_FakeCache']()
+        _FakeInstance = fixtures['_FakeInstance']
         utilities.session_cache = lambda instance: cache
         bpy.context.preferences.edit.use_global_undo = True
         bpy.ops.object.armature_add()
         rig = bpy.context.active_object
         rig.data.bones[0].name = 'mid'
         rig.pose.bones['mid'].lock_location = (True, False, False)
-        instance = SimpleNamespace(head_rig=rig)
+        instance = _FakeInstance(rig, None)
         key = utilities._BONE_LOCK_SNAPSHOT
 
         bpy.ops.ed.undo_push(message='before entry')

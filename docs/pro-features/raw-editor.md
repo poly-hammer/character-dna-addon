@@ -5,13 +5,15 @@
 
 Edit the [Raw Controls](../terminology.md#raw-controls) — more specifically **where** bones are posed when a [Raw Control](../terminology.md#raw-controls) is activated to a value of 1.
 
+Choose **Head** or **Body** with the shared **Component** selector. The selector is locked during editing, and Commit writes to that component's DNA.
+
 <video autoplay loop muted playsinline class="rounded-image" style="width:100%" poster="../../images/raw-editor/raw_editor.png">
   <source src="../../images/raw-editor/raw_editor.webm" type="video/webm">
 </video>
 
 ## Choosing a Raw Control
 
-The list shows every raw control, plus a **Rest Pose** row at the top called `default` for editing the neutral shape. Filter the list by:
+The list shows scalar raw controls, plus a **Rest Pose** row at the top called `default` for editing the neutral shape. Quaternion driver inputs are handled by the RBF Editor. Filter the list by:
 
 - **Mesh** — scope controls to a specific LOD0 mesh.
 - **Name** — search a control by name.
@@ -27,7 +29,7 @@ Select a control and click **Edit** to open an editing session for that expressi
 
 ## Editing a Pose
 
-While editing, you have two options: work on **target meshes** (LOD0 sculpt targets) or re-pose the head's **pose bones** directly. The available tools depend on the mode you're in:
+While editing, you have two options: work on **target meshes** (LOD0 sculpt targets) or re-pose the selected component's **pose bones** directly. The available tools depend on the mode you're in:
 
 **Editing the Target Mesh** — Mirror, Flip, Reset to Neutral, Reset to DNA, Transfer shape from a selected mesh, and (Rest Pose only) Transfer to Head. A **Strength** slider blends the operation result.
 
