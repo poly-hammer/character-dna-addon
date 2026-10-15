@@ -239,7 +239,9 @@ def test_body_shape_channels_bind_and_preview(tmp_path):
     instance = get_active_rig_instance()
     try:
         assert instance.editor_component == "body"
+        assert bpy.ops.character_dna.import_shape_keys.poll()
         was_active = controller.suspend(instance)
+        assert not bpy.ops.character_dna.import_shape_keys.poll()
         commands = queue.Queue()
         build_shape_key_import_commands(get_active_body(), commands)
         while not commands.empty():
@@ -251,6 +253,7 @@ def test_body_shape_channels_bind_and_preview(tmp_path):
             _timer=None, _commands_queue=commands, _import_instance=instance, _native_was_active=was_active
         )
         ImportShapeKeys.finish(operator, bpy.context)
+        assert bpy.ops.character_dna.import_shape_keys.poll()
         assert len(instance.shape_key_editor.shape_key_list) == 1
         assert engine.binding_issues(instance) == []
         block = instance.edit_target.shape_key_blocks[0][0]
