@@ -741,8 +741,9 @@ def bake_face_board_to_action(
                     clean_curves=clean_curves,
                 )
 
-            # restore the original frame if the eye aim baking stepped the scene
-            if original_frame is not None and bpy.context.scene and bpy.context.scene.frame_current != original_frame:
+            # Hand output ownership to the baked action before native evaluation resumes.
+            instance.auto_evaluate_head = False
+            if original_frame is not None and bpy.context.scene:
                 bpy.context.scene.frame_set(original_frame)
 
             window_manager_properties.evaluate_dependency_graph = True
@@ -1015,7 +1016,7 @@ def bake_body_to_action(  # noqa: PLR0912, PLR0915
                 if not armature_object.animation_data:
                     armature_object.animation_data_create()
                 assign_action(armature_object, target_action)
+                instance.auto_evaluate_body = False
             finally:
-                if use_visual_transforms:
-                    bpy.context.scene.frame_set(original_frame)
+                bpy.context.scene.frame_set(original_frame)
                 window_manager_properties.evaluate_dependency_graph = True

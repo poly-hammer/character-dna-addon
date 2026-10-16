@@ -240,7 +240,10 @@ def resume(instance: Any, was_active: bool) -> None:
     """Rebind only after the owning operation has released its mutable SDK state."""
     if was_active:
         _suspended.discard(engine.instance_id(instance))
-        instance.evaluate()
+        for component in ("body", "head"):
+            if instance.auto_evaluate and getattr(instance, f"auto_evaluate_{component}"):
+                instance.evaluate(component=component)
+        bpy.context.view_layer.update()
 
 
 @contextmanager

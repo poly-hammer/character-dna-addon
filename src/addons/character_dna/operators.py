@@ -708,7 +708,6 @@ class BakeFaceBoardAnimation(BakeAnimationBase):
             )
             instance.head_rig.hide_set(False)
             utilities.switch_to_pose_mode(instance.head_rig)
-            instance.auto_evaluate_head = False
         return {"FINISHED"}
 
     @classmethod
@@ -801,7 +800,6 @@ class BakeComponentAnimation(BakeAnimationBase):
             )
             instance.body_rig.hide_set(False)
             utilities.switch_to_pose_mode(instance.body_rig)
-            instance.auto_evaluate_body = False
         return {"FINISHED"}
 
     @property
