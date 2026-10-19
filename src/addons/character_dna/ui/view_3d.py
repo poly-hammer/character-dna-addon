@@ -510,7 +510,10 @@ class CHARACTER_DNA_PT_rig_instance_head_sub_panel(bpy.types.Panel):
             bad_path = instance.head_dna_file_path and not Path(bpy.path.abspath(instance.head_dna_file_path)).exists()
             if not instance.head_dna_file_path or bad_path:
                 row.alert = True
-            row.prop(instance, "head_dna_file_path", icon="RNA")
+            if combined := instance.get("combined_dna_path"):
+                row.label(text=f"{Path(combined).name} / Head", icon="RNA")
+            else:
+                row.prop(instance, "head_dna_file_path", icon="RNA")
             if bad_path:
                 row = box.row()
                 row.alert = True
@@ -569,7 +572,10 @@ class CHARACTER_DNA_PT_rig_instance_body_sub_panel(bpy.types.Panel):
             bad_path = instance.body_dna_file_path and not Path(bpy.path.abspath(instance.body_dna_file_path)).exists()
             if not instance.body_dna_file_path or bad_path:
                 row.alert = True
-            row.prop(instance, "body_dna_file_path", icon="RNA")
+            if combined := instance.get("combined_dna_path"):
+                row.label(text=f"{Path(combined).name} / Body", icon="RNA")
+            else:
+                row.prop(instance, "body_dna_file_path", icon="RNA")
             if bad_path:
                 row = box.row()
                 row.alert = True

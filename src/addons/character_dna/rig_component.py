@@ -24,6 +24,15 @@ class RigComponent:
         return self.instance.cache_key(self.kind, descriptor)
 
     @property
+    def document_path(self) -> str:
+        """The authoritative document, independent of its disposable SDK partition."""
+        return self.instance.get("combined_dna_path") or self.dna_file_path
+
+    @property
+    def partition_id(self) -> str:
+        return self.kind
+
+    @property
     def rig(self) -> bpy.types.Object | None:
         return getattr(self.instance, f"{self.kind}_rig")
 
@@ -144,7 +153,13 @@ class RigComponent:
         cached = self.instance.data.get(key)
         if cached:
             return cached
-        reader = self.dna_reader
+        result = self.meshes_for_reader(self.dna_reader)
+        if result:
+            self.instance.data[key] = result
+        return result
+
+    def meshes_for_reader(self, reader: Any) -> dict[int, bpy.types.Object]:
+        """Resolve stable scene IDs even while writeback has released cached readers."""
         if reader is None:
             return {}
         # Imported metadata survives user renames. Names support older blends.
@@ -158,7 +173,6 @@ class RigComponent:
             obj = tagged.get(index) or bpy.data.objects.get(f"{self.instance.name}_{reader.getMeshName(index)}")
             if obj is not None:
                 result[index] = obj
-        self.instance.data[key] = result
         return result
 
     def shape_targets(self, lod: int | None = 0):

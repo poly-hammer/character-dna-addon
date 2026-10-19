@@ -639,6 +639,10 @@ def set_active_lod(self: "CharacterViewOptionsProperties", value: int):
     body_lod_object = bpy.data.objects.get(f"{instance.name}_body_lod{body_lod_index}_mesh")
     if body_lod_object and not is_readonly_id(body_lod_object):
         set_hidden(body_lod_object, False)
+    if instance.get("dna_merge_proxy"):
+        from ..editors.converter.scene_merge import sync_visibility
+
+        sync_visibility(instance)
 
 
 def set_show_head_bones(self: "CharacterViewOptionsProperties", value: bool):

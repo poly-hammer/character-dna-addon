@@ -372,6 +372,12 @@ def setup_scene(*_: Any) -> None:
 
     # Other addons' setup callbacks may evaluate the graph immediately. Prepare
     # our sessions first so those evaluations have both the callback and its data.
+    from ..dna_io.document import restore_scene_documents
+
+    try:
+        restore_scene_documents()
+    except (ValueError, RuntimeError, OSError):
+        logger.exception("Could not restore a combined DNA document")
     controller.after_load()
     scene_properties = getattr(bpy.context.scene, ToolInfo.NAME, object)
 

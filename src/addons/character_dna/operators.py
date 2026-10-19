@@ -868,15 +868,33 @@ class ImportCharacterDna(bpy.types.Operator, importer.ImportAsset, CharacterImpo
             self.report({"ERROR"}, "The scene unit scale must be set to 1.0")
             return {"CANCELLED"}
 
+        from .dna_io.document import is_document, materialize
+
+        combined_path = file_path if is_document(file_path) else None
+        document_name = None
+        if combined_path:
+            try:
+                manifest, partitions = materialize(combined_path)
+                file_path = partitions["head"]
+                document_name = manifest["name"]
+            except (ValueError, RuntimeError, OSError) as error:
+                self.report({"ERROR"}, str(error))
+                return {"CANCELLED"}
+
         # we don't want to evaluate the dependency graph while importing the DNA
         window_manager_properties.evaluate_dependency_graph = False
         component = get_meta_human_component(
             file_path=file_path,
             properties=self.properties,  # type: ignore[arg-type]
+            name=document_name,
         )
         # if the component is a head, we import the body first if the user has selected the option
         body_file = file_path.parent / "body.dna"
-        if self.properties.include_body and component.component_type == "head" and body_file.exists():
+        if (
+            (self.properties.include_body or combined_path)
+            and component.component_type == "head"
+            and body_file.exists()
+        ):
             body_component = get_meta_human_component(
                 file_path=body_file,
                 properties=self.properties,  # type: ignore[arg-type]
@@ -898,6 +916,14 @@ class ImportCharacterDna(bpy.types.Operator, importer.ImportAsset, CharacterImpo
         self.report({"INFO"}, message)
 
         # populate the output items based on what was imported
+        from .dna_io.document import finish_import
+
+        finish_import(
+            component.rig_instance,
+            combined_path,
+            manifest if combined_path else None,
+            import_mesh=self.properties.import_mesh,
+        )
         callbacks.update_head_output_items(None, bpy.context)  # type: ignore[arg-type]
         # now we can evaluate the dependency graph again
         window_manager_properties.evaluate_dependency_graph = True

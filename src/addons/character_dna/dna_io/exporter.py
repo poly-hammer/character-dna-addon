@@ -277,6 +277,10 @@ class DNAExporter:
         This lets a caller run every component's validations up-front (before any
         file is written), so a validation failure and its fix dialog surface before
         the exporter has already exported another component."""
+        if self._instance.get("dna_merge_proxy"):
+            from ..editors.converter.scene_merge import prepare_export
+
+            prepare_export(self._instance, apply=False)
         self.initialize_scene_data()
         if self._instance.output.run_validations:
             return self.validate()
@@ -920,7 +924,35 @@ class DNAExporter:
                 blendShapeChannelIndex=channel_index,
             )
 
+    def _prepare_merged_export(self) -> None:
+        if self._instance.get("dna_merge_proxy"):
+            from ..editors.converter.scene_merge import prepare_export
+
+            prepare_export(self._instance, apply=True)
+
+    def _export_component_extensions(self) -> None:
+        if not self._instance.get("dna_merge_proxy"):
+            return
+        from . import document, metadata
+
+        bridges = [
+            bridge
+            for bridge in document.collect_scene_bridges(self._instance)
+            if bridge["source"]["kind"] == self._component_type
+        ]
+        if bridges or any(
+            self._dna_reader.getMetaDataKey(index) == document.EXTENSION_PREFIX
+            for index in range(self._dna_reader.getMetaDataCount())
+        ):
+            metadata.write(
+                self._dna_writer,
+                self._dna_reader,
+                {"version": 1, "owner": self._component_type, "scene_bridges": bridges},
+                prefix=document.EXTENSION_PREFIX,
+            )
+
     def run(self) -> tuple[bool, str, str, Callable | None]:
+        self._prepare_merged_export()
         self.initialize_scene_data()
         if self._instance.output.run_validations:
             valid, title, message, fix = self.validate()
@@ -941,6 +973,7 @@ class DNAExporter:
             self._report("Exporting shape keys...")
             self.export_shape_keys()
 
+        self._export_component_extensions()
         self._dna_writer.write()
         if not dna.Status.isOk():
             status = dna.Status.get()

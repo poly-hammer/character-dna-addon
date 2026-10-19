@@ -82,7 +82,11 @@ class CanonicalDNAWriter:
     def write(self) -> None:
         from ..bindings import dna
         from ..runtime.engine import invalidate_model_file
+        from .document import partition_backup, publish_partition, validate_write
         from .misc import release_dna_handle
+
+        validate_write(self.file_path)
+        previous_partition = partition_backup(self.file_path)
 
         self.writer.write()
         if not dna.Status.isOk():
@@ -97,14 +101,20 @@ class CanonicalDNAWriter:
         writer_class = dna.JSONStreamWriter if self.file_format == "json" else dna.BinaryStreamWriter
         output = writer_class(stream)
         try:
-            output.setFrom(reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
-            output.write()
-            if not dna.Status.isOk():
-                raise RuntimeError(dna.Status.get().message)
-        finally:
-            release_dna_handle(output)
-            release_dna_handle(stream)
-            release_dna_handle(reader)
+            try:
+                output.setFrom(reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
+                output.write()
+                if not dna.Status.isOk():
+                    raise RuntimeError(dna.Status.get().message)
+            finally:
+                release_dna_handle(output)
+                release_dna_handle(stream)
+                release_dna_handle(reader)
+            publish_partition(self.file_path)
+        except Exception:
+            if previous_partition is not None:
+                self.file_path.write_bytes(previous_partition)
+            raise
 
     def close(self) -> None:
         from .misc import release_dna_handle

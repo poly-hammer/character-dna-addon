@@ -690,6 +690,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
         )
 
     def run(self) -> tuple[bool, str, str, Callable | None]:
+        self._prepare_merged_export()
         self.initialize_scene_data()
         if self._instance.output.run_validations:
             valid, title, message, fix = self.validate()
@@ -715,6 +716,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
             self.calibrate_bone_transforms()
 
         logger.info(f'Saving DNA to: "{self._target_dna_file}"...')
+        self._export_component_extensions()
         self._dna_writer.write()
 
         if not dna.Status.isOk():
