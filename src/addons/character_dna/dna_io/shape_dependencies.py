@@ -1,8 +1,9 @@
-"""Partition cross-neck shapes with the raw/PSD inputs needed to evaluate them."""
+"""Partition cross-neck shapes with their raw, PSD, and RBF evaluation dependencies."""
 
 # This is the dependency-partitioning half of the native graph codec.
 # ruff: noqa: SLF001
 
+from copy import deepcopy
 from typing import Any
 
 import numpy as np
@@ -13,8 +14,8 @@ from . import merged_graph as graph
 def split_extensions(parts: dict[str, bytes], bridges: list[dict]) -> dict[str, bytes]:
     """Materialize representable dependencies in ordinary recipient DNA files.
 
-    RBF and ML outputs require their driver/network closure, so those are rejected
-    before either split file is published. The combined document remains intact.
+    RBF driver/pose closure is copied without importing unrelated joint outputs.
+    ML network dependencies are rejected before either split file is published.
     """
     originals = {kind: graph.from_bytes(content) for kind, content in parts.items()}
     result = dict(parts)
@@ -90,18 +91,41 @@ def _extend(originals: dict, kind: str, source_kind: str, bridges: list[dict]) -
     psd_count = source["bhvr1.1"]["controls"]["psdCount"]
     psds = source["bhvr1.1"]["controls"]["psds"]
     required = set()
+    rbf_base = raw_count + psd_count + len(source["mlbh1.0"]["mlControlNames"])
+    solvers = set()
+    source_poses = source["rbfe1.0"]["poses"]
+    source_solvers = source["rbfb1.0"]["solvers"]
 
     def include(index: int, pending: set[int]) -> None:
         if index in pending:
             raise ValueError("Cyclic PSD dependency in corrective.")
         if index in required:
             return
-        if index >= raw_count + psd_count:
+        if raw_count + psd_count <= index < rbf_base:
             raise ValueError(
-                "This corrective requires an RBF or ML dependency that cannot yet be represented "
+                "This corrective requires an ML dependency that cannot yet be represented "
                 "in independent split DNA. The merged document is unchanged."
             )
         required.add(index)
+        if index >= rbf_base:
+            producers = [
+                s
+                for s, solver in enumerate(source_solvers)
+                if any(index in source_poses[p]["outputControlIndices"] for p in solver["poseIndices"])
+            ]
+            if not producers:
+                raise ValueError("Corrective references an RBF control without a producing solver.")
+            for solver_index in producers:
+                if solver_index in solvers:
+                    continue
+                solvers.add(solver_index)
+                solver = source_solvers[solver_index]
+                for dependency in solver["rawControlIndices"]:
+                    include(dependency, pending | {index})
+                for pose in solver["poseIndices"]:
+                    for dependency in source_poses[pose]["inputControlIndices"]:
+                        include(dependency, pending | {index})
+            return
         for row, column in zip(psds["rows"], psds["columns"], strict=True):
             if row == index:
                 include(column, pending | {index})
@@ -109,7 +133,15 @@ def _extend(originals: dict, kind: str, source_kind: str, bridges: list[dict]) -
     for row in rows:
         include(table["inputIndices"][row], set())
     raw = sorted(index for index in required if index < raw_count)
-    psd = sorted(required - set(raw))
+    existing_raw = {name: index for index, name in enumerate(recipient["defn1.1"]["rawControlNames"])}
+    reused_raw = {
+        index: existing_raw[src_definition["rawControlNames"][index]]
+        for index in raw
+        if src_definition["rawControlNames"][index] in existing_raw
+    }
+    raw = [index for index in raw if index not in reused_raw]
+    psd = sorted(index for index in required if raw_count <= index < raw_count + psd_count)
+    rbf = sorted(index for index in required if index >= rbf_base)
     counts = graph._counts(recipient)
     maps = {domain: list(range(count)) for domain, count in counts.items()}
     maps["attribute"] = list(range(counts["joint"] * 9))
@@ -125,11 +157,45 @@ def _extend(originals: dict, kind: str, source_kind: str, bridges: list[dict]) -
     definition = destination["defn1.1"]
     controls = destination["bhvr1.1"]["controls"]
     mapping = {old: counts["raw"] + index for index, old in enumerate(raw)}
+    mapping.update(reused_raw)
     mapping.update({old: counts["raw"] + len(raw) + counts["psd"] + index for index, old in enumerate(psd)})
+    new_rbf_base = counts["raw"] + len(raw) + counts["psd"] + len(psd) + counts["ml"] + counts["rbf"]
+    mapping.update({old: new_rbf_base + index for index, old in enumerate(rbf)})
     for index in raw:
         name = src_definition["rawControlNames"][index]
         definition["rawControlNames"].append(
             f"DNA_{source_kind}::{name}" if name in definition["rawControlNames"] else name
+        )
+    for control in rbf:
+        name = source["rbfe1.0"]["poseControlNames"][control - rbf_base]
+        destination["rbfe1.0"]["poseControlNames"].append(f"DNA_{source_kind}::{name}")
+    needed_poses = sorted({pose for solver in solvers for pose in source_solvers[solver]["poseIndices"]})
+    pose_map = {old: counts["pose"] + i for i, old in enumerate(needed_poses)}
+    for old in needed_poses:
+        destination["rbfb1.0"]["poses"].append(deepcopy(source["rbfb1.0"]["poses"][old]))
+        pose = deepcopy(source_poses[old])
+        keep = [i for i, control in enumerate(pose["outputControlIndices"]) if control in rbf]
+        pose["inputControlIndices"] = [mapping[index] for index in pose["inputControlIndices"]]
+        pose["outputControlWeights"] = [pose["outputControlWeights"][i] for i in keep]
+        pose["outputControlIndices"] = [mapping[pose["outputControlIndices"][i]] for i in keep]
+        destination["rbfe1.0"]["poses"].append(pose)
+    solver_map = {old: counts["solver"] + i for i, old in enumerate(sorted(solvers))}
+    for old in sorted(solvers):
+        solver = deepcopy(source_solvers[old])
+        solver["name"] = f"DNA_{source_kind}::{solver['name']}"
+        solver["rawControlIndices"] = [mapping[index] for index in solver["rawControlIndices"]]
+        solver["poseIndices"] = [pose_map[index] for index in solver["poseIndices"]]
+        destination["rbfb1.0"]["solvers"].append(solver)
+    if solvers:
+        lod_count = destination["desc1.1"]["lodCount"]
+        source_lods = graph._lod_rows(source["rbfb1.0"]["lodSolverMapping"], list(range(source["desc1.1"]["lodCount"])))
+        recipient_lods = graph._lod_rows(destination["rbfb1.0"]["lodSolverMapping"], list(range(lod_count)))
+        destination["rbfb1.0"]["lodSolverMapping"] = graph._lod_map(
+            [
+                row
+                + [solver_map[index] for index in source_lods[min(lod, len(source_lods) - 1)] if index in solver_map]
+                for lod, row in enumerate(recipient_lods)
+            ]
         )
     controls["psdCount"] += len(psd)
     for index, row in enumerate(psds["rows"]):

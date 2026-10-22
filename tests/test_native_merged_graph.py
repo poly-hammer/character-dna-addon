@@ -237,3 +237,62 @@ def test_split_corrective_dependency_evaluates_without_the_other_component(graph
         for handles in (instances, managers, readers):
             for handle in handles:
                 release_dna_handle(handle)
+
+
+def test_split_rbf_corrective_copies_solver_closure(graphs, tmp_path):
+    from copy import deepcopy
+
+    from character_dna.bindings import riglogic
+    from character_dna.dna_io import get_dna_reader, release_dna_handle, shape_dependencies
+
+    originals = deepcopy(graphs)
+    source = originals["head"]
+    solver = source["rbfb1.0"]["solvers"][0]
+    pose = source["rbfe1.0"]["poses"][solver["poseIndices"][1]]
+    channel = len(source["defn1.1"]["blendShapeChannelNames"])
+    source["defn1.1"]["blendShapeChannelNames"].append("test_rbf_bridge")
+    lods = merged_graph._lod_rows(source["defn1.1"]["lodBlendShapeMapping"], list(range(source["desc1.1"]["lodCount"])))
+    source["defn1.1"]["lodBlendShapeMapping"] = merged_graph._lod_map([[*row, channel] for row in lods])
+    table = source["bhvr1.1"]["blendShapeChannels"]
+    table["inputIndices"].insert(0, pose["outputControlIndices"][0])
+    table["outputIndices"].insert(0, channel)
+    table["lods"] = [count + 1 for count in table["lods"]]
+    count = len(graphs["body"]["geom1.1"]["meshes"][0]["positions"]["xs"])
+    delta = np.zeros((count, 3), dtype="<f4")
+    delta[0, 0] = 0.01
+    bridge = {
+        "kind": "body",
+        "mesh": 0,
+        "source": {"kind": "head", "name": "head_lod0_mesh__test_rbf_bridge"},
+        "deltas": base64.b64encode(delta.tobytes()).decode(),
+        "coordinates": "",
+    }
+    recipient = shape_dependencies._extend(originals, "body", "head", [bridge])
+    readers, managers, states = [], [], []
+    try:
+        for kind, value in (("source", source), ("recipient", recipient)):
+            path = tmp_path / f"{kind}.dna"
+            path.write_bytes(merged_graph.to_bytes(value))
+            reader = get_dna_reader(path)
+            readers.append(reader)
+            manager = riglogic.RigLogic(reader, riglogic.Configuration(), None)
+            managers.append(manager)
+            states.append(riglogic.RigInstance(manager, None))
+        inputs = list(readers[0].getRBFSolverRawControlIndices(0))
+        values = list(readers[0].getRBFSolverRawControlValues(0))[len(inputs) : 2 * len(inputs)]
+        values_by_name = {
+            readers[0].getRawControlName(index): value for index, value in zip(inputs, values, strict=True)
+        }
+        for reader, manager, state in zip(readers, managers, states, strict=True):
+            for index in range(reader.getRawControlCount()):
+                name = reader.getRawControlName(index)
+                state.setRawControl(index, values_by_name.get(name, 1.0 if name.endswith(".qw") else 0.0))
+            manager.calculate(state)
+        expected = states[0].getBlendShapeOutputs()[channel]
+        assert expected > 0.1
+        assert states[1].getBlendShapeOutputs()[0] == pytest.approx(expected, abs=1e-6)
+        assert readers[1].getRBFSolverCount() > len(graphs["body"]["rbfb1.0"]["solvers"])
+    finally:
+        for handles in (states, managers, readers):
+            for handle in handles:
+                release_dna_handle(handle)
