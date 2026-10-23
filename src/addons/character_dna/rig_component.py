@@ -330,37 +330,46 @@ class RigComponent:
 
 
 def get_editor_component(instance: Any) -> str:
-    value = instance.get("editor_component", "head" if instance.head_rig else "body")
-    return value if value in {"head", "body"} else "head"
+    value = instance.get("editor_component")
+    if value in {"head", "body"}:
+        return value
+    # Old files may only have the Output enum's stored integer selection.
+    output = getattr(instance, "output", None)
+    legacy_value = output.get("component") if output is not None else None
+    if legacy_value in (0, 1):
+        value = ("head", "body")[legacy_value]
+        if getattr(instance, f"{value}_rig", None):
+            return value
+    return "head" if instance.head_rig else "body"
+
+
+def component_selection_locked(instance: Any) -> bool:
+    """Keep every panel on the same component throughout an editing operation."""
+    from .runtime.controller import is_suspended
+
+    return any(
+        getattr(getattr(instance, name, None), "is_editing", False)
+        for name in ("raw_control_editor", "shape_key_editor", "rbf_editor")
+    ) or is_suspended(instance)
 
 
 def set_editor_component(instance: Any, value: int) -> None:
     # Protect the write destination even when scripts bypass the disabled UI.
-    if any(
-        getattr(getattr(instance, name, None), "is_editing", False)
-        for name in ("raw_control_editor", "shape_key_editor", "rbf_editor")
-    ):
-        return
-    from .runtime.controller import is_suspended
-
-    if is_suspended(instance):
+    if component_selection_locked(instance):
         return
     instance["editor_component"] = ("head", "body")[value]
 
 
-def refresh_editor_component(instance: Any, _context: Any = None) -> None:
-    if any(
-        getattr(getattr(instance, name, None), "is_editing", False)
-        for name in ("raw_control_editor", "shape_key_editor", "rbf_editor")
-    ):
-        return
-    from .runtime.controller import is_suspended
-
-    if is_suspended(instance):
+def refresh_editor_component(instance: Any, context: Any = None) -> None:
+    if component_selection_locked(instance):
         return
     target = RigComponent(instance, get_editor_component(instance))
     if target.rig and target.dna_file_path and not target.initialized:
         target.initialize()
+    from .ui.callbacks import update_body_output_items, update_head_output_items
+
+    update_head_output_items(instance, context or bpy.context)
+    update_body_output_items(instance, context or bpy.context)
     if not instance.is_pro:
         return
     from .editors.raw_control_editor.callbacks import update_head_raw_control_list

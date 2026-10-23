@@ -1178,11 +1178,6 @@ def update_head_output_items(self: "RigInstance | None", context: "Context"):  #
                     instance.output.head_item_list.remove(index)
 
 
-def update_output_component(self: "RigInstance", context: "Context"):
-    update_head_output_items(self, context)
-    update_body_output_items(self, context)
-
-
 # Cache of LOD enum items keyed by rig-instance name. The value is the tuple of
 # currently-available LOD indices (the cache key) paired with the built item list.
 # Returning the same list object across redraws keeps Python references alive (a

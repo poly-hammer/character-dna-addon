@@ -1319,9 +1319,9 @@ class ExportSelectedComponent(bpy.types.Operator):
 
         current_context = utilities.get_current_context()
         component = None
-        if instance.output.component == "head":
+        if instance.editor_component == "head":
             component = utilities.get_active_head()
-        elif instance.output.component == "body":
+        elif instance.editor_component == "body":
             component = utilities.get_active_body()
 
         if component:

@@ -26,6 +26,15 @@ def dependencies_are_valid() -> bool:
     return _dependencies_are_valid()
 
 
+def draw_component_selector(layout: bpy.types.UILayout, instance: "RigInstance") -> None:
+    """Draw the shared component tabs for editors and output in either edition."""
+    from ..rig_component import component_selection_locked
+
+    row = layout.row(align=True)
+    row.enabled = not component_selection_locked(instance)
+    row.prop(instance, "editor_component", expand=True)
+
+
 def valid_rig_instance_exists(_: "Context", ignore_face_board: bool = False) -> str:  # noqa: PLR0911
     instance = get_active_rig_instance()
     if instance:
@@ -636,19 +645,14 @@ class CHARACTER_DNA_PT_output_panel(RigInstanceDependentPanel):
             active_index = properties.rig_instance_list_active_index
             instance = properties.rig_instance_list[active_index]
             self.layout.enabled = not is_reference_readonly(instance)
-            grid = self.layout.grid_flow(row_major=True, columns=2, even_columns=True, even_rows=True, align=True)
-            col = grid.column()
-            col.label(text="Component:")
-            row = col.row()
-            row.prop(instance.output, "component", text="")
-            col = grid.column()
-            col.label(text="Method:")
-            row = col.row()
+            draw_component_selector(self.layout, instance)
+            self.layout.label(text="Method:")
+            row = self.layout.row()
             row.prop(instance.output, "method", text="")
 
             row = self.layout.row()
             column = None
-            if instance.output.component == "head":
+            if instance.editor_component == "head":
                 column = draw_ui_list(
                     row,
                     context,  # type: ignore[arg-type]
@@ -659,7 +663,7 @@ class CHARACTER_DNA_PT_output_panel(RigInstanceDependentPanel):
                     move_operators=False,  # type: ignore[arg-type]
                     insertion_operators=False,
                 )
-            elif instance.output.component == "body":
+            elif instance.editor_component == "body":
                 column = draw_ui_list(
                     row,
                     context,  # type: ignore[arg-type]

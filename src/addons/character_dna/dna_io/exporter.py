@@ -81,7 +81,7 @@ class DNAExporter:
         # cached reader would be stale (the converter's just-written head.dna).
         self._seam_follower = seam_follower
         self._seam_reference_dna_path = Path(seam_reference_dna_path) if seam_reference_dna_path is not None else None
-        self._component_type = component_type or instance.output.component
+        self._component_type = component_type or instance.editor_component
 
         self._output_folder = Path(bpy.path.abspath(instance.output.folder_path))
 
