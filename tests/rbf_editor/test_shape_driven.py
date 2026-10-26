@@ -145,16 +145,18 @@ def enter(instance, kind="body"):
 
 
 def test_create_delete_and_revert_keys(character):
+    from character_dna.shape_names import stored_name
+
     instance = character
     editor, solver = enter(instance)
     reader = instance.edit_target.dna_reader
     obj = instance.edit_target.mesh_index_lookup[0]
     original_keys = list(shapes.blocks(obj))
-    name = "test_calf_corrective"
+    name = "test_calf_corrective__" + "long_name_" * 8
     assert bpy.ops.character_dna.add_rbf_driven(
         data_type="SHAPE_KEY", shape_source="NEW", mesh_name=reader.getMeshName(0), new_name=name
     ) == {"FINISHED"}
-    full_name = f"{reader.getMeshName(0)}__{name}"
+    full_name = stored_name(obj.data.shape_keys, f"{reader.getMeshName(0)}__{name}")
     assert full_name in shapes.blocks(obj)
     assert shapes.blocks(obj)[full_name].value == pytest.approx(1.0, abs=1e-5)
     assert [p.driven[-1].scalar_value for p in solver.poses] == [0, 1] + [0] * (len(solver.poses) - 2)
@@ -235,6 +237,7 @@ def test_available_keys_rollback_and_pose_copy(character, monkeypatch):
 
 
 def test_add_shape_blender_undo(character):
+    from character_dna.shape_names import stored_name
     from character_dna.utilities import get_active_rig_instance, switch_to_object_mode
 
     instance = character
@@ -243,18 +246,20 @@ def test_add_shape_blender_undo(character):
     switch_to_object_mode()
     bpy.context.preferences.edit.use_global_undo = True
     bpy.ops.ed.undo_push(message="Before RBF shape")
+    name = "undo_corrective_" * 7
     assert bpy.ops.character_dna.add_rbf_driven(
-        data_type="SHAPE_KEY", shape_source="NEW", mesh_name=mesh_name, new_name="undo_corrective"
+        data_type="SHAPE_KEY", shape_source="NEW", mesh_name=mesh_name, new_name=name
     ) == {"FINISHED"}
+    stored = stored_name(instance.edit_target.mesh_index_lookup[0].data.shape_keys, f"{mesh_name}__{name}")
     bpy.ops.ed.undo_push(message="After RBF shape")
     if not bpy.ops.ed.undo.poll():
         pytest.skip("Blender build has no headless undo context")
     assert bpy.ops.ed.undo() == {"FINISHED"}
     instance = get_active_rig_instance()
     instance.edit_target.initialize(update_rbf_solver_list=False)
-    assert f"{mesh_name}__undo_corrective" not in shapes.blocks(instance.edit_target.mesh_index_lookup[0])
+    assert stored not in shapes.blocks(instance.edit_target.mesh_index_lookup[0])
     assert not any(
-        item.name == "undo_corrective"
+        item.name == name
         for solver in instance.rbf_editor.rbf_solver_list
         for pose in solver.poses
         for item in pose.driven
@@ -306,6 +311,7 @@ def test_apply_shape_value_and_mirror_membership(character):
 def test_merged_shape_commit_and_split(character, mode, tmp_path):
     from character_dna.dna_io import document, get_dna_reader
     from character_dna.editors.converter import scene_merge
+    from character_dna.shape_names import stored_name
 
     instance = character
     if mode == "DNA":
@@ -315,10 +321,11 @@ def test_merged_shape_commit_and_split(character, mode, tmp_path):
     identities = {lod: (obj.as_pointer(), obj.data.as_pointer()) for lod, obj in registry.items()}
     editor, _ = enter(instance)
     mesh_name = instance.edit_target.dna_reader.getMeshName(0)
+    name = "merged_corrective__" + "long_expression_" * 5
     assert bpy.ops.character_dna.add_rbf_driven(
-        data_type="SHAPE_KEY", shape_source="NEW", mesh_name=mesh_name, new_name="merged_corrective"
+        data_type="SHAPE_KEY", shape_source="NEW", mesh_name=mesh_name, new_name=name
     ) == {"FINISHED"}
-    key_name = f"{mesh_name}__merged_corrective"
+    key_name = stored_name(instance.edit_target.mesh_index_lookup[0].data.shape_keys, f"{mesh_name}__{name}")
     for proxy in registry.values():
         if proxy["dna_merge_body"] == instance.edit_target.mesh_index_lookup[0]:
             assert key_name in shapes.blocks(proxy)
@@ -334,11 +341,9 @@ def test_merged_shape_commit_and_split(character, mode, tmp_path):
         outputs = document.split_files(path, tmp_path / "rbf_split")
         reader = get_dna_reader(outputs["body"])
         try:
-            assert "merged_corrective" in [
-                reader.getBlendShapeChannelName(i) for i in range(reader.getBlendShapeChannelCount())
-            ]
+            assert name in [reader.getBlendShapeChannelName(i) for i in range(reader.getBlendShapeChannelCount())]
             assert any(
-                item.data_type == "SHAPE_KEY" and item.name == "merged_corrective"
+                item.data_type == "SHAPE_KEY" and item.name == name
                 for solver in core.get_rbf_solver_data(reader)
                 for pose in solver.poses
                 for item in pose.driven

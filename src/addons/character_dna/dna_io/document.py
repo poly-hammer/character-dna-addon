@@ -15,6 +15,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from ..shape_names import ensure_name, find_key, logical_name
+
 
 MAGIC = b"CHARACTER-DNA\x00\x01\r\n"
 PARTITIONS = ("head", "body")
@@ -486,6 +488,7 @@ def collect_scene_bridges(instance: Any, manifest: dict | None = None) -> list[d
                 block = keys.key_blocks.get(name) if keys else None
                 if block is None:
                     continue
+                full_name = logical_name(keys, name)
                 if owner["name"] not in {
                     key for _, _, key in instance.component(owner["kind"]).shape_targets(lod=None)
                 }:
@@ -498,13 +501,13 @@ def collect_scene_bridges(instance: Any, manifest: dict | None = None) -> list[d
                 keys.reference_key.data.foreach_get("co", baseline)
                 # A previously retained relationship may now have a live recipient.
                 bridges = [
-                    item for item in bridges if (item["kind"], item["mesh"], item["name"]) != (kind, index, name)
+                    item for item in bridges if (item["kind"], item["mesh"], item["name"]) != (kind, index, full_name)
                 ]
                 bridges.append(
                     {
                         "kind": kind,
                         "mesh": index,
-                        "name": name,
+                        "name": full_name,
                         "source": owner,
                         "coordinates": base64.b64encode(values.tobytes()).decode("ascii"),
                         "deltas": base64.b64encode((values - baseline).tobytes()).decode("ascii"),
@@ -586,7 +589,7 @@ def restore_scene_bridges(instance: Any, manifest: dict) -> None:
         for mesh_index, obj in instance.component(kind).mesh_index_lookup.items():
             owners = json.loads(obj.get("dna_shape_bridges", "{}"))
             wanted = {item["name"] for item in bridges if item["kind"] == kind and item["mesh"] == mesh_index}
-            for name in set(owners) - wanted:
+            for name in [name for name in owners if logical_name(obj.data.shape_keys, name) not in wanted]:
                 block = obj.data.shape_keys.key_blocks.get(name) if obj.data.shape_keys else None
                 if block is not None:
                     block.driver_remove("value")
@@ -636,8 +639,8 @@ def restore_scene_bridges(instance: Any, manifest: dict) -> None:
             )
         if obj.data.shape_keys is None:
             obj.shape_key_add(name="Basis", from_mix=False)
-        block = obj.data.shape_keys.key_blocks.get(bridge["name"]) or obj.shape_key_add(
-            name=bridge["name"], from_mix=False
+        block = find_key(obj.data.shape_keys, bridge["name"]) or obj.shape_key_add(
+            name=ensure_name(obj.data.shape_keys, bridge["name"]), from_mix=False
         )
         block.data.foreach_set("co", values)
         block.slider_min, block.slider_max = bridge["min"], bridge["max"]

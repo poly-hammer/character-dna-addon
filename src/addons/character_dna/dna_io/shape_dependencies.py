@@ -49,12 +49,14 @@ def rebind_scene(instance: Any, bridges: list[dict]) -> None:
     """Replace extension drivers with the split recipient's native shape channel."""
     import json
 
+    from ..shape_names import find_key, rename_key
+
     for bridge in bridges:
         component = instance.component(bridge["kind"])
         obj = component.mesh_index_lookup.get(bridge["mesh"])
         if obj is None or obj.data.shape_keys is None:
             continue
-        key = obj.data.shape_keys.key_blocks.get(bridge["name"])
+        key = find_key(obj.data.shape_keys, bridge["name"])
         if key is None:
             continue
         name = bridge["source"]["name"].split("__", 1)[-1]
@@ -69,9 +71,10 @@ def rebind_scene(instance: Any, bridges: list[dict]) -> None:
         if name not in channels:
             raise ValueError(f"Split corrective channel is missing: {name}")
         key.driver_remove("value")
-        key.name = reader.getMeshName(bridge["mesh"]) + "__" + name
+        old_name = key.name
+        rename_key(obj.data.shape_keys, key, reader.getMeshName(bridge["mesh"]) + "__" + name)
         owners = json.loads(obj.get("dna_shape_bridges", "{}"))
-        owners.pop(bridge["name"], None)
+        owners.pop(old_name, None)
         if owners:
             obj["dna_shape_bridges"] = json.dumps(owners)
         else:

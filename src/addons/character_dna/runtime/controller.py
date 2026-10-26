@@ -60,7 +60,7 @@ def rebuild(instance: Any) -> None:
 
 def ensure_bindings(instance: Any) -> None:
     """Bind newly enabled local components before validating the saved runtime."""
-    if engine.missing_components(instance) and not any(
+    if (engine.missing_components(instance) or instance.get("dna_shape_name_version", 0) < 1) and not any(
         carrier.library or carrier.override_library for carrier in engine.carriers(instance)
     ):
         rebuild(instance)

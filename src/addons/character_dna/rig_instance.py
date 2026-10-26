@@ -1053,6 +1053,8 @@ class RigInstance(bpy.types.PropertyGroup):
             ("head", "mesh_index_lookup"),
             ("head", "shape_key"),
             ("head", "shape_key_blocks"),
+            ("head", "shape_key_blocks_by_name"),
+            ("head", "rbf_preview_shape_plan"),
             ("head", "shape_key_apply_plan"),
             ("head", "shape_key_has_deltas"),
             ("head", "body_constraints"),
@@ -1061,6 +1063,8 @@ class RigInstance(bpy.types.PropertyGroup):
             ("body", "rig_evaluated"),
             ("body", "mesh_index_lookup"),
             ("body", "shape_key_blocks"),
+            ("body", "shape_key_blocks_by_name"),
+            ("body", "rbf_preview_shape_plan"),
             ("body", "shape_key_apply_plan"),
             ("body", "shape_key_has_deltas"),
         )

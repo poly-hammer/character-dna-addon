@@ -9,6 +9,7 @@ import bpy
 import numpy as np
 import pytest
 
+from character_dna import shape_names
 from character_dna.constants import HEAD_TO_BODY_EDGE_LOOP_FILE_PATH
 from character_dna.dna_io import document, get_dna_reader, get_dna_writer, release_dna_handle
 from character_dna.editors.converter import scene_merge
@@ -360,7 +361,7 @@ def test_scene_split_rejects_shape_ownership_collision_without_mutation(characte
     head_before = instance.head_mesh.data.shape_keys.key_blocks["custom"].data[head_index].co.copy()
     with controller.authoring_operation(instance):
         proxy = scene_merge.merge(instance)
-        metadata = json.loads(proxy["dna_merge_metadata"])
+        metadata = scene_merge.read_metadata(proxy)
         name = next(name for name, owner in metadata["keys"].items() if owner == {"kind": "head", "name": "custom"})
         # A collision must fail before modifying either original mesh.
         proxy.data.shape_keys.key_blocks[name].data[body_index].co.x += 0.02
@@ -388,14 +389,14 @@ def test_scene_split_preserves_seam_edit_and_source_indices_after_reordering(cha
     bpy.ops.mesh.sort_elements(type="REVERSE", elements={"VERT"})
     bpy.ops.object.mode_set(mode="OBJECT")
     ids = [item.value for item in proxy.data.attributes["DNA_head_vertex"].data]
-    proxy.data.shape_keys.key_blocks["custom"].data[ids.index(head_index)].co.x += 0.02
+    proxy.data.shape_keys.key_blocks["head_lod0_mesh__custom"].data[ids.index(head_index)].co.x += 0.02
     assert bpy.ops.character_dna.split_components() == {"FINISHED"}
     np.testing.assert_allclose(
         instance.head_mesh.data.shape_keys.key_blocks["custom"].data[head_index].co,
         np.asarray(before) + np.array([0.02, 0, 0]),
         atol=1e-6,
     )
-    counterpart = instance.body_mesh.data.shape_keys.key_blocks["custom"]
+    counterpart = instance.body_mesh.data.shape_keys.key_blocks["body_lod0_mesh__custom"]
     np.testing.assert_allclose(
         counterpart.data[body_index].co, np.asarray(body_before) + np.array([0.025, 0, 0]), atol=1e-6
     )
@@ -643,7 +644,7 @@ def test_scene_split_rolls_back_failed_bridge_publication(character, monkeypatch
     assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
     proxy = scene_merge.proxy_for(instance)
     body_index = next(iter(json.loads(HEAD_TO_BODY_EDGE_LOOP_FILE_PATH.read_text())["0"].values()))
-    proxy.data.shape_keys.key_blocks["custom"].data[body_index].co.x += 0.02
+    proxy.data.shape_keys.key_blocks["head_lod0_mesh__custom"].data[body_index].co.x += 0.02
 
     def fail_publish(_instance):
         raise OSError("Simulated document write failure")
@@ -713,10 +714,15 @@ def test_combined_neckline_shape_is_portable_and_backup_restores_document(  # no
     instance = character
     reader = instance.head_dna_reader
     mesh = next(index for index, obj in instance.head_mesh_index_lookup.items() if obj == instance.head_mesh)
-    channel = reader.getBlendShapeChannelIndex(mesh, 0)
+    target = next(
+        i
+        for i in range(reader.getBlendShapeTargetCount(mesh))
+        if len("head_lod0_mesh__" + reader.getBlendShapeChannelName(reader.getBlendShapeChannelIndex(mesh, i))) > 63
+    )
+    channel = reader.getBlendShapeChannelIndex(mesh, target)
     with controller.authoring_operation(instance):
         key = create_shape_key(
-            0,
+            target,
             mesh,
             instance.head_mesh,
             reader,
@@ -726,7 +732,8 @@ def test_combined_neckline_shape_is_portable_and_backup_restores_document(  # no
         )
         instance.destroy_references()
         instance.sync_shape_key_list()
-    name = key.name
+    name = shape_names.logical_name(key.id_data, key.name)
+    body_name = "body_lod0_mesh__" + name.split("__", 1)[1]
     instance.shape_key_editor.shape_key_list_active_index = instance.shape_key_editor.shape_key_list.find(name)
     instance.converter_merge_mode = "DNA"
     instance.converter_dna_directory = str(tmp_path / "combined")
@@ -743,7 +750,7 @@ def test_combined_neckline_shape_is_portable_and_backup_restores_document(  # no
     body_index = next(iter(json.loads(HEAD_TO_BODY_EDGE_LOOP_FILE_PATH.read_text())["0"].values()))
     proxy.active_shape_key.data[body_index].co.x += 0.012
     editor.commit(bpy.context)
-    expected = coordinates(instance.body_mesh.data.shape_keys.key_blocks[name].data).copy()
+    expected = coordinates(shape_names.find_key(instance.body_mesh.data.shape_keys, body_name).data).copy()
     assert document.read_document(merged)[0]["scene_bridges"]
     portable = tmp_path / "portable.dna"
     shutil.copyfile(merged, portable)
@@ -757,7 +764,7 @@ def test_combined_neckline_shape_is_portable_and_backup_restores_document(  # no
     assert backups.restore_backup(instance, backup_id)
     assert merged.read_bytes() == original_document
     assert not instance.body_mesh.get("dna_shape_bridges")
-    assert not instance.body_mesh.data.shape_keys or name not in instance.body_mesh.data.shape_keys.key_blocks
+    assert shape_names.find_key(instance.body_mesh.data.shape_keys, body_name) is None
     assert engine.binding_issues(instance) == []
     bpy.ops.wm.read_homefile(use_empty=True)
     assert bpy.ops.character_dna.import_dna(
@@ -771,7 +778,7 @@ def test_combined_neckline_shape_is_portable_and_backup_restores_document(  # no
         **{f"import_lod{index}": index == 0 for index in range(8)},
     ) == {"FINISHED"}
     restored = get_active_rig_instance()
-    body_key = restored.body_mesh.data.shape_keys.key_blocks[name]
+    body_key = shape_names.find_key(restored.body_mesh.data.shape_keys, body_name)
     np.testing.assert_array_equal(coordinates(body_key.data), expected)
     driver = body_key.id_data.animation_data.drivers.find(body_key.path_from_id("value")).driver
     assert driver.variables[0].targets[0].id == restored.head_mesh.data.shape_keys
@@ -784,7 +791,7 @@ def test_combined_neckline_shape_is_portable_and_backup_restores_document(  # no
     assert ImportShapeKeys.finish(operation, bpy.context) == {"FINISHED"}
     driver = body_key.id_data.animation_data.drivers.find(body_key.path_from_id("value")).driver
     assert driver.variables[0].targets[0].id == restored.head_mesh.data.shape_keys
-    assert name in restored.head_mesh.data.shape_keys.key_blocks
+    assert shape_names.find_key(restored.head_mesh.data.shape_keys, name) is not None
     assert engine.binding_issues(restored) == []
     # Missing mesh outputs cannot be interpreted as intentional relationship deletion.
     bpy.ops.wm.read_homefile(use_empty=True)
@@ -830,6 +837,7 @@ def test_scene_corrective_metadata_belongs_to_author_and_survives_import(charact
         instance.destroy_references()
         instance.sync_shape_key_list()
     name = key.name
+    body_name = "body_lod0_mesh__" + name.split("__", 1)[1]
     instance.shape_key_editor.shape_key_list_active_index = instance.shape_key_editor.shape_key_list.find(name)
     original_body = (tmp_path / "body.dna").read_bytes()
     assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
@@ -842,7 +850,7 @@ def test_scene_corrective_metadata_belongs_to_author_and_survives_import(charact
     assert scene_merge.proxy_for(instance) == proxy
     assert (tmp_path / "body.dna").read_bytes() == original_body
     assert document.scene_extensions(instance)["scene_bridges"]
-    expected = coordinates(instance.body_mesh.data.shape_keys.key_blocks[name].data).copy()
+    expected = coordinates(instance.body_mesh.data.shape_keys.key_blocks[body_name].data).copy()
     bpy.ops.wm.read_homefile(use_empty=True)
     assert bpy.ops.character_dna.import_dna(
         filepath=str(tmp_path / "head.dna"),
@@ -855,7 +863,7 @@ def test_scene_corrective_metadata_belongs_to_author_and_survives_import(charact
         **{f"import_lod{index}": index == 0 for index in range(8)},
     ) == {"FINISHED"}
     restored = get_active_rig_instance()
-    np.testing.assert_array_equal(coordinates(restored.body_mesh.data.shape_keys.key_blocks[name].data), expected)
+    np.testing.assert_array_equal(coordinates(restored.body_mesh.data.shape_keys.key_blocks[body_name].data), expected)
     # The DNA metadata must carry the same relationship when no scene is available.
     bpy.ops.wm.read_homefile(use_empty=True)
     combined = tmp_path / "offline.dna"

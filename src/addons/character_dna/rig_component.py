@@ -10,6 +10,8 @@ from typing import Any
 import bpy
 import numpy as np
 
+from . import shape_names
+
 
 @dataclass(frozen=True)
 class RigComponent:
@@ -203,7 +205,19 @@ class RigComponent:
     def get_shape_key_block(self, mesh_index: int, name: str) -> bpy.types.ShapeKey | None:
         obj = self.mesh_index_lookup.get(mesh_index)
         keys = obj.data.shape_keys if obj and isinstance(obj.data, bpy.types.Mesh) else None
-        return keys.key_blocks.get(name) if keys else None
+        return shape_names.find_key(keys, name)
+
+    @property
+    def shape_key_blocks_by_name(self) -> dict[str, bpy.types.ShapeKey]:
+        """Resolve logical UI identities once, outside value/preview callbacks."""
+        key = self.cache_key("shape_key_blocks_by_name")
+        if key not in self.instance.data:
+            self.instance.data[key] = {
+                name: block
+                for mesh, _channel, name in self.shape_targets()
+                if (block := self.get_shape_key_block(mesh, name)) is not None
+            }
+        return self.instance.data[key]
 
     @property
     def shape_key_blocks(self) -> dict[int, list[bpy.types.ShapeKey]]:
@@ -222,18 +236,27 @@ class RigComponent:
     @property
     def shape_key_apply_plan(self) -> list:
         key = self.cache_key("shape_key_apply_plan")
-        if key in self.instance.data:
-            return self.instance.data[key]
+        if key not in self.instance.data:
+            self.instance.data[key] = self.build_shape_key_apply_plan(self.dna_reader)
+        return self.instance.data[key]
+
+    def build_shape_key_apply_plan(self, reader: Any) -> list:
+        """Bind real or provisional DNA outputs to numeric Blender key slots."""
+        if reader is None:
+            return []
         targets = {}
-        for mesh, channel, name in self.shape_targets(lod=None):
-            targets.setdefault(mesh, []).append((channel, name))
+        for mesh in range(reader.getMeshCount()):
+            for target in range(reader.getBlendShapeTargetCount(mesh)):
+                channel = int(reader.getBlendShapeChannelIndex(mesh, target))
+                name = f"{reader.getMeshName(mesh)}__{reader.getBlendShapeChannelName(channel)}"
+                targets.setdefault(mesh, []).append((channel, name))
         plan = []
         for mesh, channels_and_names in targets.items():
             obj = self.mesh_index_lookup.get(mesh)
             if obj is None or not obj.data.shape_keys:
                 continue
             blocks = obj.data.shape_keys.key_blocks
-            indices = {block.name: i for i, block in enumerate(blocks)}
+            indices = {shape_names.logical_name(obj.data.shape_keys, block.name): i for i, block in enumerate(blocks)}
             pairs = [(indices[name], channel) for channel, name in channels_and_names if name in indices]
             if pairs:
                 positions, channels = (np.asarray(values, dtype=np.intp) for values in zip(*pairs, strict=True))
@@ -246,8 +269,6 @@ class RigComponent:
                         np.empty(len(blocks), dtype=np.float32),
                     )
                 )
-        if plan:
-            self.instance.data[key] = plan
         return plan
 
     def update_shape_keys(self, collect_values: bool = False, *, state: Any = None) -> list:

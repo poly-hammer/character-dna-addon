@@ -203,7 +203,9 @@ def create_shape_key(
     window_manager_properties.progress_mesh_name = mesh_object.name
     # create the new key block on the shape key
     logger.debug(f"Creating shape key {name}")
-    shape_key_name = f"{prefix}{name}"
+    from ..shape_names import ensure_name
+
+    shape_key_name = ensure_name(mesh_object.data.shape_keys, f"{prefix}{name}", mesh=prefix.removesuffix("__") or None)
 
     switch_to_object_mode()
 

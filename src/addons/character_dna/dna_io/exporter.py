@@ -21,7 +21,6 @@ from ..constants import (
     SCALE_FACTOR,
     SHAPE_KEY_BASIS_NAME,
     SHAPE_KEY_DELTA_THRESHOLD,
-    SHAPE_KEY_NAME_MAX_LENGTH,
     VERTEX_COLOR_ATTRIBUTE_NAME,
     ComponentType,
 )
@@ -814,12 +813,11 @@ class DNAExporter:
             dna_delta_vertex_indices: list[int] = []
             dna_delta_values: list[list[float]] = []
 
-            # Blender caps shape key names at 63 characters, so channels whose block
-            # name would exceed that limit are never imported into the scene; write
-            # an empty target for them (they keep their channel wiring but no deltas).
-            shape_key_block = None
-            if len(block_name) <= SHAPE_KEY_NAME_MAX_LENGTH:
-                shape_key_block = mesh_object.data.shape_keys.key_blocks.get(block_name)  # type: ignore[union-attr]
+            from ..shape_names import find_key
+
+            shape_key_block = find_key(mesh_object.data.shape_keys, block_name)
+            if shape_key_block is None and len(block_name.encode("utf-8")) > 63:
+                raise ValueError(f"Recover or import the missing DNA shape before exporting: {block_name}")
 
             if shape_key_block:
                 for vertex_index in vertex_indices:
@@ -925,6 +923,9 @@ class DNAExporter:
             )
 
     def _prepare_merged_export(self) -> None:
+        from .shape_migration import migrate_instance
+
+        migrate_instance(self._instance)
         if self._instance.get("dna_merge_proxy"):
             from ..editors.converter.scene_merge import prepare_export
 

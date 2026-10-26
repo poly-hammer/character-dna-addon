@@ -584,6 +584,9 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
         raise RuntimeError("Rig already has native bindings; remove them before rebuilding")
     if not instance.auto_evaluate:
         return
+    from ..dna_io.shape_migration import migrate_instance
+
+    migrate_instance(instance)
     identity = instance_id(instance) or uuid.uuid4().hex
     instance["native_runtime_id"] = identity
     prepared = []
