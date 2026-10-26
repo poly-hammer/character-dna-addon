@@ -954,9 +954,12 @@ def update_face_pose(self: "CharacterFaceBoardProperties", context: "Context"):
 def update_head_to_body_constraint_influence(self: "RigInstance", context: "Context"):  # noqa: ARG001
     if is_reference_readonly(self) or is_readonly_id(self.head_rig):
         return
-    head = get_active_head()
-    if head:
-        head.set_head_to_body_constraint_influence(self.head_to_body_constraint_influence)
+    from ..components.head import CharacterComponentHead
+
+    if self.components_merged:
+        self["head_to_body_constraint_influence"] = 1.0
+    head = CharacterComponentHead(rig_instance=self)
+    head.set_head_to_body_constraint_influence(self.head_to_body_constraint_influence)
 
 
 def get_head_mesh_output_items(instance: "RigInstance") -> list[bpy.types.Object]:

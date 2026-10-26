@@ -34,6 +34,7 @@ def character(tmp_path, request):
         **{f"import_lod{index}": index == 0 or getattr(request, "param", None) == "all_lods" for index in range(8)},
     )
     instance = get_active_rig_instance()
+    instance.output.folder_path = str(tmp_path / "output")
     try:
         yield instance
     finally:
@@ -57,6 +58,27 @@ def evaluated_coordinates(obj):
         evaluated.to_mesh_clear()
 
 
+def import_shape_keys(instance):
+    """Run the shape importer's queued commands and completion without UI timers."""
+    import queue
+
+    from types import SimpleNamespace
+
+    from character_dna.editors.shape_key_editor.operators import ImportShapeKeys
+
+    operation = SimpleNamespace(_timer=None, _import_instance=None, _native_was_active=False)
+    commands = queue.Queue()
+    component = ImportShapeKeys.get_component(operation)
+    assert component.rig_instance == instance
+    ImportShapeKeys.set_commands_queue(operation, bpy.context, component, commands)
+    try:
+        while not commands.empty():
+            index, mesh_index, _description, kwargs, callback = commands.get()
+            callback(**kwargs(index, mesh_index))
+    finally:
+        assert ImportShapeKeys.finish(operation, bpy.context) == {"FINISHED"}
+
+
 def add_keys(instance):
     for kind in ("head", "body"):
         obj = instance.component(kind).mesh
@@ -73,6 +95,7 @@ def add_keys(instance):
 @pytest.mark.parametrize("character", ["all_lods"], indirect=True)
 def test_merge_all_scene_lods_and_switch_without_splitting(character):
     instance = character
+    instance.head_to_body_constraint_influence = 0.25
     sources = scene_merge.surface_pairs(instance)
     assert len(sources) == 8
     original = {
@@ -82,6 +105,15 @@ def test_merge_all_scene_lods_and_switch_without_splitting(character):
     }
     instance.view_options.active_lod = "lod3"
     assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
+    assert instance.components_merged
+    assert instance.head_to_body_constraint_influence == 1.0
+    instance.head_to_body_constraint_influence = 0.0
+    assert instance.head_to_body_constraint_influence == 1.0
+    from character_dna.utilities import get_head
+
+    constraints = get_head(instance.name)._get_head_to_body_constraints()
+    assert constraints
+    assert all(constraint.influence == 1.0 for constraint in constraints)
     registry = scene_merge.surfaces(instance)
     assert set(registry) == set(range(8))
     for lod, proxy in registry.items():
@@ -93,6 +125,9 @@ def test_merge_all_scene_lods_and_switch_without_splitting(character):
     assert not registry[6].hide_get()
     assert registry[3].hide_get()
     assert bpy.ops.character_dna.split_components() == {"FINISHED"}
+    assert not instance.components_merged
+    instance.head_to_body_constraint_influence = 0.25
+    assert all(constraint.influence == 0.25 for constraint in constraints)
     for obj, (identity, coords) in original.items():
         assert obj.data.as_pointer() == identity
         np.testing.assert_array_equal(coordinates(obj.data.vertices), coords)
@@ -549,11 +584,29 @@ def test_shape_editor_uses_welded_surface_and_restores_canonical_order(character
     assert engine.binding_issues(instance) == []
 
 
+def test_document_merge_requires_shared_output_folder(character):
+    from types import SimpleNamespace
+
+    from character_dna.editors.converter.merge_split import MergeComponents
+
+    instance = character
+    instance.converter_merge_mode = "DNA"
+    instance.output.folder_path = ""
+    messages = []
+    operation = SimpleNamespace(report=lambda _level, message: messages.append(message))
+    assert MergeComponents.execute(operation, bpy.context) == {"CANCELLED"}
+    assert messages == ["Set an output folder in the Output panel before merging or splitting DNA."]
+    assert not instance.components_merged
+
+
 def test_merged_surface_and_document_recover_after_blend_reload(character, tmp_path):
     instance = character
     instance.converter_merge_mode = "DNA"
-    instance.converter_dna_directory = str(tmp_path / "combined")
+    instance.output.folder_path = str(tmp_path / "combined")
     assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
+    assert Path(instance.combined_dna_file_path) == tmp_path / "combined" / f"{instance.name}.dna"
+    assert instance.components_merged
+    assert instance.head_to_body_constraint_influence == 1.0
     original_head = Path(instance.head_dna_file_path)
     instance_name = instance.name
     blend = tmp_path / "merged.blend"
@@ -565,15 +618,20 @@ def test_merged_surface_and_document_recover_after_blend_reload(character, tmp_p
     assert restored.name == instance_name
     assert Path(restored.head_dna_file_path).exists()
     assert scene_merge.proxy_for(restored) is not None
-    restored.converter_dna_directory = str(tmp_path / "split")
+    assert restored.head_to_body_constraint_influence == 1.0
+    restored.output.folder_path = str(tmp_path / "split")
     assert bpy.ops.character_dna.split_components() == {"FINISHED"}
+    assert Path(restored.head_dna_file_path) == tmp_path / "split" / "head.dna"
+    assert Path(restored.body_dna_file_path) == tmp_path / "split" / "body.dna"
+    assert not restored.components_merged
+    assert restored.combined_dna_file_path == ""
     assert engine.binding_issues(restored) == []
 
 
 def test_combined_document_import_and_partition_edit(character, tmp_path):
     instance = character
     instance.converter_merge_mode = "DNA"
-    instance.converter_dna_directory = str(tmp_path / "combined")
+    instance.output.folder_path = str(tmp_path / "combined")
     assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
     merged = Path(instance["combined_dna_path"])
     from character_dna.editors.raw_control_editor.editor import RawControlEditor
@@ -630,7 +688,7 @@ def test_combined_document_import_and_partition_edit(character, tmp_path):
     assert restored.head_rig and restored.body_rig
     assert restored.head_dna_reader.getName() == "edited_head"
     assert engine.binding_issues(restored) == []
-    restored.converter_dna_directory = str(tmp_path / "restored")
+    restored.output.folder_path = str(tmp_path / "restored")
     assert bpy.ops.character_dna.split_components() == {"FINISHED"}
     assert not restored.get("combined_dna_path")
     assert Path(restored.body_dna_file_path).read_bytes() == original_body
@@ -670,7 +728,7 @@ def test_failed_split_rebinding_keeps_merged_scene_and_file_ownership(character,
     proxy = scene_merge.proxy_for(instance)
     sources = {kind: Path(instance.component(kind).dna_file_path) for kind in ("head", "body")}
     instance.converter_merge_mode = "DNA"
-    instance.converter_dna_directory = str(tmp_path / "split")
+    instance.output.folder_path = str(tmp_path / "split")
     instance["combined_dna_path"] = str(tmp_path / "combined.dna")
     instance["combined_dna_id"] = "test-document"
     outputs = {kind: tmp_path / "split" / f"{kind}.dna" for kind in sources}
@@ -736,7 +794,7 @@ def test_combined_neckline_shape_is_portable_and_backup_restores_document(  # no
     body_name = "body_lod0_mesh__" + name.split("__", 1)[1]
     instance.shape_key_editor.shape_key_list_active_index = instance.shape_key_editor.shape_key_list.find(name)
     instance.converter_merge_mode = "DNA"
-    instance.converter_dna_directory = str(tmp_path / "combined")
+    instance.output.folder_path = str(tmp_path / "combined")
     assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
     merged = Path(instance["combined_dna_path"])
     original_document = merged.read_bytes()
@@ -778,6 +836,19 @@ def test_combined_neckline_shape_is_portable_and_backup_restores_document(  # no
         **{f"import_lod{index}": index == 0 for index in range(8)},
     ) == {"FINISHED"}
     restored = get_active_rig_instance()
+    assert not restored.shape_key_editor.shape_key_list
+    assert restored.head_mesh.data.shape_keys is None
+    assert restored.body_mesh.data.shape_keys is None
+    before = portable.read_bytes()
+    document.publish_scene_bridges(restored)
+    assert portable.read_bytes() == before
+    # Opening a saved scene/rebinding the document must also leave keys deferred.
+    with controller.authoring_operation(restored):
+        document.bind_instance(restored, portable)
+    assert not restored.shape_key_editor.shape_key_list
+    assert restored.head_mesh.data.shape_keys is None
+    assert restored.body_mesh.data.shape_keys is None
+    import_shape_keys(restored)
     body_key = shape_names.find_key(restored.body_mesh.data.shape_keys, body_name)
     np.testing.assert_array_equal(coordinates(body_key.data), expected)
     driver = body_key.id_data.animation_data.drivers.find(body_key.path_from_id("value")).driver
@@ -808,6 +879,25 @@ def test_combined_neckline_shape_is_portable_and_backup_restores_document(  # no
     document.publish_scene_bridges(bones_only)
     assert portable.read_bytes() == before
     assert document.split_files(portable, tmp_path / "bones_only_split")["body"].exists()
+    # Splitting a mesh import with unloaded keys must keep all DNA relationships.
+    bpy.ops.wm.read_homefile(use_empty=True)
+    assert bpy.ops.character_dna.import_dna(
+        filepath=str(portable),
+        import_face_board=False,
+        import_mesh=True,
+        import_bones=True,
+        import_shape_keys=False,
+        import_materials=False,
+        **{f"import_lod{index}": index == 0 for index in range(8)},
+    ) == {"FINISHED"}
+    deferred = get_active_rig_instance()
+    deferred.output.folder_path = str(tmp_path / "deferred_split")
+    assert bpy.ops.character_dna.split_components() == {"FINISHED"}
+    assert portable.read_bytes() == before
+    assert deferred.body_dna_reader.getBlendShapeTargetCount(0) == 1
+    assert deferred.head_mesh.data.shape_keys is None
+    assert deferred.body_mesh.data.shape_keys is None
+    assert not deferred.shape_key_editor.shape_key_list
 
 
 def test_document_rejects_corruption_before_materializing(tmp_path):
@@ -863,6 +953,11 @@ def test_scene_corrective_metadata_belongs_to_author_and_survives_import(charact
         **{f"import_lod{index}": index == 0 for index in range(8)},
     ) == {"FINISHED"}
     restored = get_active_rig_instance()
+    assert restored.head_mesh.data.shape_keys is None
+    assert restored.body_mesh.data.shape_keys is None
+    assert not restored.shape_key_editor.shape_key_list
+    assert document.collect_scene_bridges(restored) == document.scene_extensions(restored)["scene_bridges"]
+    import_shape_keys(restored)
     np.testing.assert_array_equal(coordinates(restored.body_mesh.data.shape_keys.key_blocks[body_name].data), expected)
     # The DNA metadata must carry the same relationship when no scene is available.
     bpy.ops.wm.read_homefile(use_empty=True)

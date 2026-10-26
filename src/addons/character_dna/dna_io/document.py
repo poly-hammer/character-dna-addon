@@ -467,12 +467,12 @@ def collect_scene_bridges(instance: Any, manifest: dict | None = None) -> list[d
         kind: {
             name
             for mesh, _, name in instance.component(kind).shape_targets(lod=None)
-            if mesh in instance.component(kind).mesh_index_lookup
+            if instance.component(kind).get_shape_key_block(mesh, name) is not None
         }
         for kind in PARTITIONS
     }
-    # A bones-only or partial-LOD import cannot author deletions for meshes it
-    # does not contain. Retain their embedded relationships verbatim.
+    # Missing meshes or deferred source keys cannot author relationship deletions.
+    # Retain their embedded relationships until their shapes are loaded.
     bridges = [
         item
         for item in manifest.get("scene_bridges", [])
@@ -577,7 +577,7 @@ def _publish_scene_extensions(instance: Any, manifest: dict) -> None:
 
 
 def restore_scene_bridges(instance: Any, manifest: dict) -> None:
-    """Restore addon-only cross-partition correctives and their source-key drivers."""
+    """Restore cross-partition correctives only for shapes already loaded in the scene."""
     import numpy as np
 
     from .misc import create_shape_key
@@ -612,11 +612,16 @@ def restore_scene_bridges(instance: Any, manifest: dict) -> None:
         obj = instance.component(bridge["kind"]).mesh_index_lookup.get(bridge["mesh"])
         if source_obj is None or obj is None:
             continue  # A bones-only import has no shape outputs to bind.
+        source_key = source.get_shape_key_block(mesh, name)
+        block = find_key(obj.data.shape_keys, bridge["name"])
+        if source_key is None and block is None:
+            continue  # DNA relationships do not opt the user into loading shape keys.
         values = np.frombuffer(base64.b64decode(bridge["coordinates"], validate=True), dtype="<f4")
         if values.size != len(obj.data.vertices) * 3 or not np.isfinite(values).all():
             raise ValueError("Invalid combined shape bridge geometry.")
-        source_key = source.get_shape_key_block(mesh, name)
         if source_key is None:
+            # An existing recipient still needs its driver after the source Key
+            # datablock was replaced (including an interrupted shape reimport).
             reader = source.dna_reader
             target = next(
                 i
@@ -639,9 +644,7 @@ def restore_scene_bridges(instance: Any, manifest: dict) -> None:
             )
         if obj.data.shape_keys is None:
             obj.shape_key_add(name="Basis", from_mix=False)
-        block = find_key(obj.data.shape_keys, bridge["name"]) or obj.shape_key_add(
-            name=ensure_name(obj.data.shape_keys, bridge["name"]), from_mix=False
-        )
+        block = block or obj.shape_key_add(name=ensure_name(obj.data.shape_keys, bridge["name"]), from_mix=False)
         block.data.foreach_set("co", values)
         block.slider_min, block.slider_max = bridge["min"], bridge["max"]
         if block.id_data.animation_data and block.id_data.animation_data.drivers.find(block.path_from_id("value")):

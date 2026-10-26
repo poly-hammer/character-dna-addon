@@ -372,7 +372,8 @@ def test_reference_readonly_panel_states(mode: str, monkeypatch: pytest.MonkeyPa
     owner = SimpleNamespace(library=None, override_library=None, hide_get=lambda: False)
     view_options = SimpleNamespace(show_head_bones=True)
     instance = SimpleNamespace(
-        get=lambda _key, _default=None: mode,
+        get=lambda key, default=None: mode if key == "reference_mode" else default,
+        components_merged=False,
         head_rig=owner,
         body_rig=owner,
         face_board=owner,

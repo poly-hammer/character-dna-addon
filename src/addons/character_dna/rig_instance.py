@@ -164,6 +164,12 @@ class RigInstance(bpy.types.PropertyGroup):
         subtype="FILE_PATH",
         options={"PATH_SUPPORTS_BLEND_RELATIVE"},
     )  # pyright: ignore[reportInvalidTypeForm]
+    combined_dna_file_path: bpy.props.StringProperty(
+        name="DNA File",
+        description="The combined DNA document; split its components before changing their DNA files",
+        subtype="FILE_PATH",
+        get=lambda self: self.get("combined_dna_path", ""),
+    )  # pyright: ignore[reportInvalidTypeForm]
     head_mesh: bpy.props.PointerProperty(
         type=bpy.types.Object,
         name="Head Mesh",
@@ -421,6 +427,26 @@ class RigInstance(bpy.types.PropertyGroup):
     @property
     def body_initialized(self) -> bool:
         return bool(self.data.get(self.cache_key("body", "initialized")))
+
+    @property
+    def components_merged(self) -> bool:
+        """Whether scene surfaces or DNA components are currently merged."""
+        return bool(
+            self.get("combined_dna_path")
+            or any(self.get("dna_merged_surfaces", {}).values())
+            or self.get("dna_merge_proxy")
+        )
+
+    def enforce_merged_constraints(self) -> None:
+        """Keep merged head/body rigs attached, including after loading a saved scene."""
+        if (
+            self.components_merged
+            and self.head_rig
+            and self.body_rig
+            and not callbacks.is_reference_readonly(self)
+            and not callbacks.is_readonly_id(self.head_rig)
+        ):
+            utilities.constrain_head_to_body(self)
 
     @property
     def head_constrained_to_body(self) -> bool:
@@ -1003,6 +1029,7 @@ class RigInstance(bpy.types.PropertyGroup):
     def initialize(self):
         self.head_initialize()
         self.body_initialize()
+        self.enforce_merged_constraints()
         if self.is_pro:
             from .editors.backup_manager.core import sync_backup_list_with_disk as _sync_backup_list_with_disk
 

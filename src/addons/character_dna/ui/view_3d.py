@@ -516,13 +516,13 @@ class CHARACTER_DNA_PT_rig_instance_head_sub_panel(bpy.types.Panel):
             box.enabled = not is_reference_readonly(instance)
             row = box.row()
             row.alert = False
-            bad_path = instance.head_dna_file_path and not Path(bpy.path.abspath(instance.head_dna_file_path)).exists()
-            if not instance.head_dna_file_path or bad_path:
+            combined = instance.get("combined_dna_path")
+            dna_path = combined or instance.head_dna_file_path
+            bad_path = dna_path and not Path(bpy.path.abspath(dna_path)).exists()
+            if not dna_path or bad_path:
                 row.alert = True
-            if combined := instance.get("combined_dna_path"):
-                row.label(text=f"{Path(combined).name} / Head", icon="RNA")
-            else:
-                row.prop(instance, "head_dna_file_path", icon="RNA")
+            row.enabled = not combined
+            row.prop(instance, "combined_dna_file_path" if combined else "head_dna_file_path", icon="RNA")
             if bad_path:
                 row = box.row()
                 row.alert = True
@@ -578,13 +578,13 @@ class CHARACTER_DNA_PT_rig_instance_body_sub_panel(bpy.types.Panel):
             box.enabled = not is_reference_readonly(instance)
             row = box.row()
             row.alert = False
-            bad_path = instance.body_dna_file_path and not Path(bpy.path.abspath(instance.body_dna_file_path)).exists()
-            if not instance.body_dna_file_path or bad_path:
+            combined = instance.get("combined_dna_path")
+            dna_path = combined or instance.body_dna_file_path
+            bad_path = dna_path and not Path(bpy.path.abspath(dna_path)).exists()
+            if not dna_path or bad_path:
                 row.alert = True
-            if combined := instance.get("combined_dna_path"):
-                row.label(text=f"{Path(combined).name} / Body", icon="RNA")
-            else:
-                row.prop(instance, "body_dna_file_path", icon="RNA")
+            row.enabled = not combined
+            row.prop(instance, "combined_dna_file_path" if combined else "body_dna_file_path", icon="RNA")
             if bad_path:
                 row = box.row()
                 row.alert = True
@@ -615,10 +615,11 @@ class CHARACTER_DNA_PT_rig_instance_footer_sub_panel(RigInstanceDependentPanel):
         if not instance:
             return
 
-        row = self.layout.row()
-        row.enabled = not is_reference_readonly(instance)
-        row.prop(instance, "head_to_body_constraint_influence", text="Head to Body Constraint Influence")
-        self.layout.separator()
+        if not instance.components_merged:
+            row = self.layout.row()
+            row.enabled = not is_reference_readonly(instance)
+            row.prop(instance, "head_to_body_constraint_influence", text="Head to Body Constraint Influence")
+            self.layout.separator()
         row = self.layout.row()
         row.scale_y = 1.5
         row.operator(f"{ToolInfo.NAME}.force_evaluate", icon="FILE_REFRESH")
