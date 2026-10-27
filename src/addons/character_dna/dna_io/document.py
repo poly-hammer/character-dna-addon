@@ -9,6 +9,7 @@ import tempfile
 import uuid
 
 from collections import OrderedDict
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -105,6 +106,34 @@ def _atomic_write(path: Path, data: bytes) -> None:
         temporary.unlink(missing_ok=True)
 
 
+@contextmanager
+def file_transaction(paths: Iterable[Path]) -> Iterator[None]:
+    """Restore overwritten files and remove new outputs if publication fails."""
+    before = {path.resolve(): path.read_bytes() if path.exists() else None for path in paths}
+    try:
+        yield
+    except Exception:
+        for path, content in before.items():
+            if content is None:
+                path.unlink(missing_ok=True)
+            elif not path.exists() or path.read_bytes() != content:
+                _atomic_write(path, content)
+        raise
+
+
+def restore_files(contents: dict[Path, bytes | None]) -> None:
+    """Apply a complete file snapshot, rolling back partial restores on failure."""
+    from ..runtime.engine import invalidate_model_file
+
+    with file_transaction(contents):
+        for path, content in contents.items():
+            invalidate_model_file(path)
+            if content is None:
+                path.unlink(missing_ok=True)
+            else:
+                _atomic_write(path, content)
+
+
 def write_document(
     path: Path, manifest: dict, parts: dict[str, bytes], *, expected_revision: str | None = None
 ) -> None:
@@ -137,12 +166,10 @@ def _check_revision(path: Path, expected_revision: str | None) -> None:
 
 
 def merge_files(paths: dict[str, Path], destination: Path, name: str) -> None:
-    """Create a new document; source files are never rewritten."""
+    """Read both components completely before publishing the combined document."""
     from ..rig_definition import get_rig_definition
     from .misc import get_dna_component_type, get_dna_reader, release_dna_handle
 
-    if destination.exists():
-        raise ValueError(f"Destination already exists: {destination}")
     if destination.stem.lower() in PARTITIONS or not name.strip():
         raise ValueError("Use a rig instance name other than head or body for the combined DNA.")
     manifest: dict[str, Any] = {
@@ -313,9 +340,6 @@ def split_files(path: Path, directory: Path) -> dict[str, Path]:
 
         parts = split_extensions(parts, manifest["scene_bridges"])
     outputs = {kind: directory / f"{kind}.dna" for kind in PARTITIONS}
-    for target in outputs.values():
-        if target.exists():
-            raise ValueError(f"Split destination already exists: {target}")
     with tempfile.TemporaryDirectory(prefix="character-dna-validate-") as temporary:
         for kind, content in parts.items():
             candidate = Path(temporary) / f"{kind}.dna"
@@ -329,15 +353,9 @@ def split_files(path: Path, directory: Path) -> dict[str, Path]:
                 get_rig_definition(kind, reader.getDBName())
             finally:
                 release_dna_handle(reader)
-    created = []
-    try:
+    with file_transaction(outputs.values()):
         for kind, target in outputs.items():
             _atomic_write(target, parts[kind])
-            created.append(target)
-    except Exception:
-        for target in created:
-            target.unlink()
-        raise
     return outputs
 
 
@@ -365,7 +383,7 @@ def finish_import(instance: Any, path: Path | None, manifest: dict | None, *, im
             instance.converter_merge_mode = "DNA"
     if not editors_available():
         return
-    from ..editors.converter import scene_merge
+    from ..editors.converter import scene_merge, source_views
     from ..runtime import controller
 
     with controller.authoring_operation(instance):
@@ -377,6 +395,8 @@ def finish_import(instance: Any, path: Path | None, manifest: dict | None, *, im
             scene_merge.adopt_imported_lods(instance)
         elif path and import_mesh:
             scene_merge.merge(instance)
+        if path and scene_merge.surfaces(instance):
+            source_views.archive(instance)
 
 
 def publish_scene_bridges(instance: Any) -> None:
@@ -613,6 +633,7 @@ def restore_scene_documents() -> None:
     import bpy
 
     from ..constants import ToolInfo
+    from ..utilities import editors_available
 
     for scene in bpy.data.scenes:
         properties = getattr(scene, ToolInfo.NAME, None)
@@ -621,6 +642,10 @@ def restore_scene_documents() -> None:
                 from ..runtime import engine
 
                 try:
+                    if editors_available():
+                        from ..editors.converter import source_views
+
+                        source_views.refresh_transforms(instance)
                     bind_instance(instance, Path(bpy.path.abspath(path)))
                     if not engine.carriers(instance) and instance.auto_evaluate:
                         engine.install(instance)

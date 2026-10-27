@@ -399,6 +399,12 @@ def _remap_id(owner: Any, mapping: dict) -> set[str]:  # noqa: PLR0912
     return changed
 
 
+def remap_id_users(source: Any, destination: Any) -> None:
+    """Re-target writable references while preserving readonly data ownership links."""
+    for owner in bpy.data.user_map(subset={source}).get(source, set()):
+        _remap_id(owner, {source: destination})
+
+
 def _persist_override(owner: Any, paths: Iterable[str]) -> None:
     """Keep scoped remaps when Blender rebuilds a protected ID from its reference."""
     override = owner.override_library

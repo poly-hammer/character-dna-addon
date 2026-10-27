@@ -116,7 +116,11 @@ def to_bytes(graph: dict, payload: dict | None = None) -> bytes:
             **behavior,
             "joints": {
                 **behavior["joints"],
-                "jointGroups": [{**group, "values": []} for group in behavior["joints"]["jointGroups"]],
+                # Keep the temporary matrix dimensions valid for SDK readers that
+                # validate rows * columns before the native values are restored.
+                "jointGroups": [
+                    {**group, "inputIndices": [], "values": []} for group in behavior["joints"]["jointGroups"]
+                ],
             },
         }
         # The SDK JSON reader consumes layers in archive order, not arbitrary map order.
@@ -138,6 +142,8 @@ def to_bytes(graph: dict, payload: dict | None = None) -> bytes:
             reader.read()
             _status()
             writer.setFrom(reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
+            for index, group in enumerate(behavior["joints"]["jointGroups"]):
+                writer.setJointGroupInputIndices(index, group["inputIndices"])
             _float_fields(graph, writer=writer)
             native_geometry.write(writer, graph["geom1.1"])
             for key, value in graph["desc1.1"]["metadata"]:

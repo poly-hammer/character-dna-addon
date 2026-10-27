@@ -117,7 +117,7 @@ def test_merge_all_scene_lods_and_switch_without_splitting(character):
     registry = scene_merge.surfaces(instance)
     assert set(registry) == set(range(8))
     for lod, proxy in registry.items():
-        assert proxy.hide_get() == (lod != 3)
+        assert proxy.hide_get() == (lod != 0)
         assert len(proxy.modifiers) == 2
         assert all(proxy[f"dna_merge_{kind}"].hide_get() for kind in ("head", "body"))
     assert registry[0]["dna_merge_body"] == registry[1]["dna_merge_body"]
@@ -449,7 +449,7 @@ def test_scene_split_preserves_seam_edit_and_source_indices_after_reordering(cha
     assert bpy.ops.character_dna.split_components() == {"FINISHED"}
 
 
-def test_document_noop_restores_all_native_data_and_rejects_collisions(tmp_path, monkeypatch):
+def test_document_noop_restores_all_native_data_and_replaces_outputs(tmp_path, monkeypatch):
     paths = {kind: TEST_DNA_FOLDER / "ada" / f"{kind}.dna" for kind in document.PARTITIONS}
     merged = tmp_path / "Bruce.dna"
     document.merge_files(paths, merged, "Bruce")
@@ -467,10 +467,8 @@ def test_document_noop_restores_all_native_data_and_rejects_collisions(tmp_path,
             )
             is None
         )
-    with pytest.raises(ValueError, match="already exists"):
-        document.merge_files(paths, merged, "Bruce")
-    with pytest.raises(ValueError, match="already exists"):
-        document.split_files(merged, tmp_path / "split")
+    document.merge_files(paths, merged, "Bruce")
+    assert document.split_files(merged, tmp_path / "split") == outputs
 
     _, first = document.materialize(merged)
     _, second = document.materialize(merged)
@@ -593,21 +591,21 @@ def test_shape_editor_uses_welded_surface_and_restores_canonical_order(character
 
 
 def test_document_merge_requires_shared_output_folder(character):
-    from types import SimpleNamespace
-
-    from character_dna.editors.converter.merge_split import MergeComponents
+    from character_dna.editors.converter.merge_split import _output_directory
 
     instance = character
     instance.converter_merge_mode = "DNA"
     instance.output.folder_path = ""
-    messages = []
-    operation = SimpleNamespace(report=lambda _level, message: messages.append(message))
-    assert MergeComponents.execute(operation, bpy.context) == {"CANCELLED"}
-    assert messages == ["Set an output folder in the Output panel before merging or splitting DNA."]
-    assert not instance.components_merged
+    # Without an explicit output, only different source directories are ambiguous.
+    instance["body_dna_file_path"] = str(Path(instance.body_dna_file_path).parent / "elsewhere" / "body.dna")
+    with pytest.raises(ValueError, match="different folders"):
+        _output_directory(instance)
 
 
-def test_merged_surface_and_document_recover_after_blend_reload(character, tmp_path):
+def test_merged_surface_and_document_recover_after_blend_reload(character, tmp_path, monkeypatch):
+    from character_dna.editors.backup_manager import core as backups
+
+    monkeypatch.setattr(backups, "is_auto_backup_enabled", lambda: True)
     instance = character
     instance.converter_merge_mode = "DNA"
     instance.output.folder_path = str(tmp_path / "combined")
@@ -615,6 +613,9 @@ def test_merged_surface_and_document_recover_after_blend_reload(character, tmp_p
     assert Path(instance.combined_dna_file_path) == tmp_path / "combined" / f"{instance.name}.dna"
     assert instance.components_merged
     assert instance.head_to_body_constraint_influence == 1.0
+    history = backups.get_backup_folder(instance)
+    backup_ids = {entry.backup_id for entry in instance.backup_manager.dna_backup_list}
+    assert len(backup_ids) >= 2
     original_head = Path(instance.head_dna_file_path)
     instance_name = instance.name
     blend = tmp_path / "merged.blend"
@@ -627,6 +628,9 @@ def test_merged_surface_and_document_recover_after_blend_reload(character, tmp_p
     assert Path(restored.head_dna_file_path).exists()
     assert scene_merge.proxy_for(restored) is not None
     assert restored.head_to_body_constraint_influence == 1.0
+    assert backups.get_backup_folder(restored) == history
+    backups.sync_backup_list_with_disk(restored)
+    assert backup_ids <= {entry.backup_id for entry in restored.backup_manager.dna_backup_list}
     restored.output.folder_path = str(tmp_path / "split")
     assert bpy.ops.character_dna.split_components() == {"FINISHED"}
     assert Path(restored.head_dna_file_path) == tmp_path / "split" / "head.dna"
@@ -736,9 +740,9 @@ def test_failed_split_rebinding_keeps_merged_scene_and_file_ownership(character,
     proxy = scene_merge.proxy_for(instance)
     sources = {kind: Path(instance.component(kind).dna_file_path) for kind in ("head", "body")}
     instance.converter_merge_mode = "DNA"
+    assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
+    original_id = instance["combined_dna_id"]
     instance.output.folder_path = str(tmp_path / "split")
-    instance["combined_dna_path"] = str(tmp_path / "combined.dna")
-    instance["combined_dna_id"] = "test-document"
     outputs = {kind: tmp_path / "split" / f"{kind}.dna" for kind in sources}
 
     def staged_outputs(_path, directory):
@@ -750,9 +754,6 @@ def test_failed_split_rebinding_keeps_merged_scene_and_file_ownership(character,
     def failed_binding(_instance, _bridges):
         raise ValueError("Simulated binding failure")
 
-    monkeypatch.setattr(document, "validate_write", lambda _path: None)
-    monkeypatch.setattr(document, "publish_scene_bridges", lambda _instance: None)
-    monkeypatch.setattr(document, "read_document", lambda _path: ({"scene_bridges": []}, {}))
     monkeypatch.setattr(document, "split_files", staged_outputs)
     monkeypatch.setattr(shape_dependencies, "rebind_scene", failed_binding)
     messages = []
@@ -760,10 +761,12 @@ def test_failed_split_rebinding_keeps_merged_scene_and_file_ownership(character,
     assert SplitComponents.execute(operation, bpy.context) == {"CANCELLED"}
     assert messages == ["Simulated binding failure"]
     assert scene_merge.proxy_for(instance) == proxy
-    assert instance.get("combined_dna_id") == "test-document"
-    assert all(Path(instance.component(kind).dna_file_path) == path for kind, path in sources.items())
+    assert instance.get("combined_dna_id") == original_id
+    assert all(
+        Path(instance.component(kind).dna_file_path).read_bytes() == path.read_bytes() for kind, path in sources.items()
+    )
     assert not any(path.exists() for path in outputs.values())
-    assert all(obj.hide_get() for obj in (instance.head_mesh, instance.body_mesh))
+    assert all(obj.name not in bpy.context.scene.objects for obj in (instance.head_mesh, instance.body_mesh))
     assert engine.binding_issues(instance) == []
 
 

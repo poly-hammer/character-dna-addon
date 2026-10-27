@@ -181,6 +181,10 @@ def set_hidden(scene_object: bpy.types.Object | None, state: bool) -> bool:
     """
     if not scene_object:
         return False
+    if scene_object.get("dna_working_source") and (
+        not bpy.context.view_layer or scene_object.name not in bpy.context.view_layer.objects
+    ):
+        return False
     try:
         scene_object.hide_set(state)
     except RuntimeError as error:
@@ -214,7 +218,7 @@ def set_active(scene_object: bpy.types.Object | None) -> bool:
 
 
 def deselect_all():
-    for scene_object in bpy.data.objects:
+    for scene_object in bpy.context.view_layer.objects if bpy.context.view_layer else ():
         scene_object.select_set(False)
 
 
