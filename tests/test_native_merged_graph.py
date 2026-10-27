@@ -2,12 +2,11 @@
 
 import base64
 import copy
-import uuid
 
 import numpy as np
 import pytest
 
-from character_dna.dna_io import merged_graph
+from character_dna.dna_io import merged_graph, partitions
 from constants import TEST_DNA_FOLDER
 
 
@@ -48,7 +47,7 @@ def test_native_all_lods_and_domains(graphs, combined):
 
 def test_native_inverse_without_edits(graphs, combined):
     native, info = combined
-    projected = merged_graph.project(native, graphs, info, "NativeRoundTrip")
+    projected = partitions.project(native, info, partitions.describe(graphs, native, info))
     for kind in graphs:
         assert merged_graph.digest(projected[kind]) == merged_graph.digest(graphs[kind]), first_difference(
             projected[kind], graphs[kind]
@@ -81,7 +80,7 @@ def test_native_inverse_uses_current_edits(graphs, combined):
     native_vertex = surface["vertices"]["head"][vertex]
     edited["geom1.1"]["meshes"][surface["mesh"]]["positions"]["xs"][native_vertex] += 1.0
     edited["rbfb1.0"]["solvers"][-1]["radius"] += 0.25
-    projected = merged_graph.project(edited, graphs, info, "NativeRoundTrip")
+    projected = partitions.project(edited, info, partitions.describe(graphs, native, info))
     assert projected["head"]["geom1.1"]["meshes"][surface["head"]]["positions"]["xs"][vertex] == pytest.approx(
         graphs["head"]["geom1.1"]["meshes"][surface["head"]]["positions"]["xs"][vertex] + 1
     )
@@ -103,23 +102,11 @@ def test_document_split_projects_edits_from_native_graph_without_cache(graphs, c
     source = tmp_path / "source.dna"
     source.write_bytes(merged_graph.to_bytes(native))
     output = tmp_path / "edited.dna"
-    parts = {kind: (TEST_DNA_FOLDER / "ada" / f"{kind}.dna").read_bytes() for kind in graphs}
-    manifest = {
-        "version": 1,
-        "id": str(uuid.uuid4()),
-        "name": "NativeRoundTrip",
-        "partitions": {
-            kind: {"id": kind, "db_name": graph["desc1.1"]["dbName"], "sha256": document.fingerprint(parts[kind])}
-            for kind, graph in graphs.items()
-        },
-    }
-    payload = {
-        "schema": 2,
-        "manifest": manifest,
-        "indices": indices,
-        "graph_digest": merged_graph.digest(native),
-        "recovery": {kind: base64.b64encode(content).decode("ascii") for kind, content in parts.items()},
-    }
+    document.merge_files(
+        {kind: TEST_DNA_FOLDER / "ada" / f"{kind}.dna" for kind in graphs}, tmp_path / "compact.dna", "NativeRoundTrip"
+    )
+    source = tmp_path / "compact.dna"
+    payload = document._payload(source)
     # Simulate an external SDK edit in the file's canonical basis. The addon's
     # Blender-space adapter would also re-express neutral Euler rotations.
     input_stream = dna.FileStream(str(source), dna.AccessMode_Read, dna.OpenMode_Binary, None)
@@ -139,7 +126,9 @@ def test_document_split_projects_edits_from_native_graph_without_cache(graphs, c
             release_dna_handle(handle)
     document._read_cache.clear()
     outputs = document.split_files(output, tmp_path / "split")
-    assert document.fingerprint(outputs["head"].read_bytes()) == document.fingerprint(parts["head"])
+    assert merged_graph.digest(merged_graph.from_bytes(outputs["head"].read_bytes())) == merged_graph.digest(
+        graphs["head"]
+    )
     reader = get_dna_reader(outputs["body"])
     try:
         assert reader.getRBFSolverRadius(reader.getRBFSolverCount() - 1) == pytest.approx(radius)

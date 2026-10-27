@@ -121,3 +121,26 @@ def test_compute_dna_deltas_emits_list_of_float_lists():
     finally:
         bpy.data.objects.remove(mesh_object, do_unlink=True)
         bpy.data.meshes.remove(mesh)
+
+
+def test_sparse_native_write_preserves_untouched_fields(tmp_path):
+    from character_dna.dna_io import merged_graph
+    from character_dna.dna_io.coordinates import write_shape_targets
+    from test_native_merged_graph import first_difference
+
+    path = tmp_path / "head.dna"
+    path.write_bytes(HEAD_DNA_FILE.read_bytes())
+    expected = merged_graph.from_bytes(path.read_bytes())
+    mesh = next(index for index, item in enumerate(expected["geom1.1"]["meshes"]) if item["blendShapeTargets"])
+    indices = [0, 1, 2]
+    deltas = [[0.25, -0.5, 0.75], [-1.0, 2.0, -3.0], [0.0, 0.0, 0.0]]
+    target = expected["geom1.1"]["meshes"][mesh]["blendShapeTargets"][0]
+    target["vertexIndices"] = indices
+    target["deltas"] = {"xs": [0.25, -1.0, 0.0], "ys": [0.75, -3.0, 0.0], "zs": [0.5, -2.0, 0.0]}
+    write_shape_targets(path, {(mesh, 0): (indices, deltas)})
+    assert first_difference(merged_graph.from_bytes(path.read_bytes()), expected) is None
+
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="target-only"):
+        write_shape_targets(path, {(mesh, 65535): ([0], [[0.0, 0.0, 0.0]])})
+    assert path.read_bytes() == before

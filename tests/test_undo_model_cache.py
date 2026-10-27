@@ -208,6 +208,7 @@ def test_canonical_writer_invalidates_pending_undo_model(model_cache):
 
 def test_backup_restore_invalidates_even_with_preserved_timestamps(model_cache, monkeypatch):
     core = pytest.importorskip("character_dna.editors.backup_manager.core")
+    surfaces = pytest.importorskip("character_dna.editors.converter.surface_session")
     path, _loads, _hashes = model_cache
     stamp = path.stat()
     old = engine._model(str(path), False)
@@ -221,6 +222,7 @@ def test_backup_restore_invalidates_even_with_preserved_timestamps(model_cache, 
     monkeypatch.setattr(core, "get_backup_folder", lambda **_kwargs: folder.parent)
     # Verify the write's invalidation independently of the later UI refresh.
     monkeypatch.setattr(core, "get_addon_ops_module", lambda: SimpleNamespace(force_evaluate=lambda: None))
-    assert core.restore_backup(SimpleNamespace(name="UndoProbe"), "saved")
+    monkeypatch.setattr(surfaces, "refresh", lambda _instance: None)
+    assert core.restore_backup(SimpleNamespace(name="UndoProbe", get=lambda _key, default=None: default), "saved")
     assert not engine._undo_models and not engine._model_files
     assert restore(monkeypatch, [(path, False)])[0] is not old

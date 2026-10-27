@@ -1,11 +1,10 @@
 """Reversible native DNA composition with explicit component index domains.
 
-JSON is an intermediate layer schema, with native float and string restoration.
+JSON describes the small behavior layers; geometry uses typed native arrays.
 The published file is an SDK binary containing the complete remapped graph.
 """
 
 import base64
-import copy
 import hashlib
 import json
 import tempfile
@@ -17,7 +16,8 @@ import numpy as np
 
 from ..bindings import dna
 from ..constants import HEAD_TO_BODY_EDGE_LOOP_FILE_PATH, HEAD_TO_BODY_LOD_MAPPING
-from .coordinates import configuration, transform_reader
+from . import native_geometry
+from .coordinates import configuration
 from .misc import release_dna_handle
 
 
@@ -52,12 +52,23 @@ LOD_DOMAINS = {
 }
 
 
+def clone(value: Any) -> Any:
+    """Copy mutable graph containers without visiting every numeric array element."""
+    if isinstance(value, dict):
+        return {key: clone(item) for key, item in value.items()}
+    if isinstance(value, list):
+        if not value or not isinstance(value[0], (dict, list)):
+            return list(value)
+        return [clone(item) for item in value]
+    return value
+
+
 def _status() -> None:
     if not dna.Status.isOk():
         raise ValueError(dna.Status.get().message)
 
 
-def from_bytes(content: bytes) -> dict:
+def from_bytes(content: bytes, *, geometry: bool = True) -> dict:
     """Read every SDK layer in canonical Y-up coordinates, including extensions."""
     with tempfile.TemporaryDirectory(prefix="dna-graph-") as directory:
         root = Path(directory)
@@ -66,28 +77,30 @@ def from_bytes(content: bytes) -> dict:
         reader = dna.BinaryStreamReader(stream, configuration(blender=False), None)
         output = dna.FileStream(str(root / "output.json"), dna.AccessMode_Write, dna.OpenMode_Binary, None)
         writer = dna.JSONStreamWriter(output, 0, None)
-        normalized = None
         try:
             reader.read()
             _status()
-            normalized = transform_reader(reader, blender=False)
-            writer.setFrom(normalized, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
+            writer.setFrom(reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
             writer.setFileFormatGeneration(2)
             writer.setFileFormatVersion(8)
             # The SDK JSON writer does not escape quotes inside metadata strings.
             # Transport descriptor strings through the native API instead.
             descriptor_metadata = [
-                [normalized.getMetaDataKey(index), normalized.getMetaDataValue(normalized.getMetaDataKey(index))]
-                for index in range(normalized.getMetaDataCount())
+                [reader.getMetaDataKey(index), reader.getMetaDataValue(reader.getMetaDataKey(index))]
+                for index in range(reader.getMetaDataCount())
             ]
             writer.clearMetaData()
+            writer.clearMeshes()
+            for index in range(reader.getJointGroupCount()):
+                writer.setJointGroupValues(index, [])
             writer.write()
             _status()
             graph = json.loads((root / "output.json").read_text(encoding="utf-8"))
             graph["desc1.1"]["metadata"] = descriptor_metadata
-            _float_fields(graph, reader=normalized)
+            graph["geom1.1"] = native_geometry.read(reader) if geometry else {"meshes": []}
+            _float_fields(graph, reader=reader)
         finally:
-            for handle in (writer, output, normalized, reader, stream):
+            for handle in (writer, output, reader, stream):
                 release_dna_handle(handle)
         return graph
 
@@ -97,7 +110,21 @@ def to_bytes(graph: dict, payload: dict | None = None) -> bytes:
 
     with tempfile.TemporaryDirectory(prefix="dna-graph-") as directory:
         root = Path(directory)
-        serialized = {**graph, "desc1.1": {**graph["desc1.1"], "metadata": []}}
+        serialized = {**graph, "desc1.1": {**graph["desc1.1"], "metadata": []}, "geom1.1": {"meshes": []}}
+        behavior = graph["bhvr1.1"]
+        serialized["bhvr1.1"] = {
+            **behavior,
+            "joints": {
+                **behavior["joints"],
+                "jointGroups": [{**group, "values": []} for group in behavior["joints"]["jointGroups"]],
+            },
+        }
+        # The SDK JSON reader consumes layers in archive order, not arbitrary map order.
+        order = [
+            entry["id"].to_bytes(4, "big").decode("ascii") + f"{entry['version'] >> 16}.{entry['version'] & 65535}"
+            for entry in graph["index"]["entries"]
+        ]
+        serialized = {key: serialized[key] for key in ("signature", "version", "index", *order) if key in serialized}
         raw = json.dumps(serialized, separators=(",", ":"), allow_nan=False)
         # The SDK JSON float parser rejects subnormal values on some platforms.
         from .misc import _json_input_stream
@@ -112,6 +139,7 @@ def to_bytes(graph: dict, payload: dict | None = None) -> bytes:
             _status()
             writer.setFrom(reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
             _float_fields(graph, writer=writer)
+            native_geometry.write(writer, graph["geom1.1"])
             for key, value in graph["desc1.1"]["metadata"]:
                 if not isinstance(key, str) or not isinstance(value, str) or "\0" in key or "\0" in value:
                     raise ValueError("DNA metadata requires strings without literal NUL characters.")
@@ -131,7 +159,7 @@ def to_bytes(graph: dict, payload: dict | None = None) -> bytes:
         return result
 
 
-def _float_fields(graph: dict, *, reader: Any = None, writer: Any = None) -> None:  # noqa: PLR0912 - SDK float domains
+def _float_fields(graph: dict, *, reader: Any = None, writer: Any = None) -> None:
     """Bypass SDK JSON's six-digit floats and its subnormal parser limitation."""
 
     def values(record: dict, field: str, api: str, *indices: int, scalar: bool = False) -> None:
@@ -166,17 +194,6 @@ def _float_fields(graph: dict, *, reader: Any = None, writer: Any = None) -> Non
     values(behavior["controls"]["psds"], "values", "PSDValues")
     for index, group in enumerate(behavior["joints"]["jointGroups"]):
         values(group, "values", "JointGroupValues", index)
-    for index, mesh in enumerate(graph["geom1.1"]["meshes"]):
-        for field, api in (
-            ("positions", "VertexPosition"),
-            ("normals", "VertexNormal"),
-            ("textureCoordinates", "VertexTextureCoordinate"),
-        ):
-            vectors(mesh[field], api, index)
-        for vertex, weights in enumerate(mesh["skinWeights"]):
-            values(weights, "weights", "SkinWeightsValues", index, vertex)
-        for target_index, target in enumerate(mesh["blendShapeTargets"]):
-            vectors(target["deltas"], "BlendShapeTargetDelta", index, target_index)
     for index, solver in enumerate(graph["rbfb1.0"]["solvers"]):
         values(solver, "rawControlValues", "RBFSolverRawControlValues", index)
         values(solver, "radius", "RBFSolverRadius", index, scalar=True)
@@ -295,7 +312,18 @@ def _mapped(values: list, mapping: dict | list) -> list:
 
 def transform(graph: dict, maps: dict, *, inverse: bool = False) -> dict:  # noqa: PLR0912 - typed SDK index domains
     """Remap each known index domain independently; never offset arbitrary numbers."""
-    graph = copy.deepcopy(graph)
+    geometry = graph["geom1.1"]
+    graph = clone({key: value if key != "geom1.1" else {} for key, value in graph.items()})
+    graph["geom1.1"] = {
+        "meshes": [
+            {
+                **mesh,
+                "skinWeights": [dict(weights) for weights in mesh["skinWeights"]],
+                "blendShapeTargets": [dict(target) for target in mesh["blendShapeTargets"]],
+            }
+            for mesh in geometry["meshes"]
+        ]
+    }
     maps = (
         {domain: {value: index for index, value in enumerate(values)} for domain, values in maps.items()}
         if inverse
@@ -328,7 +356,9 @@ def transform(graph: dict, maps: dict, *, inverse: bool = False) -> dict:  # noq
         remap(table, "outputIndices", domain)
     for mesh in graph["geom1.1"]["meshes"]:
         for weights in mesh["skinWeights"]:
-            remap(weights, "jointIndices", "joint")
+            # SDK skin indices are already unsigned; avoid revalidating millions
+            # of small arrays while applying this known component domain.
+            weights["jointIndices"] = [maps["joint"][index] for index in weights["jointIndices"]]
         for target in mesh["blendShapeTargets"]:
             target["blendShapeChannelIndex"] = maps["blend"][target["blendShapeChannelIndex"]]
     for solver in graph["rbfb1.0"]["solvers"]:
@@ -361,24 +391,12 @@ def _join(head: Any, body: Any) -> Any:
     if isinstance(head, dict):
         return {key: _join(value, body[key]) for key, value in head.items()}
     if isinstance(head, list):
-        return copy.deepcopy(head + body)
+        return clone(head + body)
     if isinstance(head, (int, float)):
         return head + body
     if head != body:
         raise ValueError("Incompatible DNA layer descriptors.")
     return head
-
-
-def _slice(value: Any, head: Any, body: Any, kind: str) -> Any:
-    template = head if kind == "head" else body
-    if isinstance(template, dict):
-        return {key: _slice(value[key], head[key], body[key], kind) for key in template}
-    if isinstance(template, list):
-        start = 0 if kind == "head" else len(head)
-        if len(value) != len(head) + len(body):
-            raise ValueError("Merged structural edits require component ownership before Split.")
-        return copy.deepcopy(value[start : start + len(template)])
-    return template
 
 
 def _merge_table(parts: dict, lods: dict, *, animated: bool) -> tuple[dict, dict]:
@@ -419,7 +437,11 @@ def _weld(head: dict, body: dict, seam: dict) -> tuple[dict, dict]:
             head_ids.append(count)
             count += 1
     maps = {"head": head_ids, "body": list(range(len(body["positions"]["xs"])))}
-    result = copy.deepcopy(body)
+    result = {
+        **body,
+        "positions": {axis: list(values) for axis, values in body["positions"].items()},
+        "skinWeights": list(body["skinWeights"]),
+    }
     for axis in ("xs", "ys", "zs"):
         result["positions"][axis] += [value for index, value in enumerate(head["positions"][axis]) if index not in seam]
     result["skinWeights"] += [weights for index, weights in enumerate(head["skinWeights"]) if index not in seam]
@@ -434,14 +456,14 @@ def _weld(head: dict, body: dict, seam: dict) -> tuple[dict, dict]:
         "normals": head["layouts"]["normals"]
         + [index + len(head["normals"]["xs"]) for index in body["layouts"]["normals"]],
     }
-    result["faces"] = copy.deepcopy(head["faces"]) + [
+    result["faces"] = clone(head["faces"]) + [
         {"layoutIndices": [index + len(head["layouts"]["positions"]) for index in face["layoutIndices"]]}
         for face in body["faces"]
     ]
     result["blendShapeTargets"] = []
     for kind, mesh in (("head", head), ("body", body)):
         for original in mesh["blendShapeTargets"]:
-            target = copy.deepcopy(original)
+            target = clone(original)
             target["vertexIndices"] = _mapped(target["vertexIndices"], maps[kind])
             result["blendShapeTargets"].append(target)
     return result, maps
@@ -471,7 +493,7 @@ def compose(originals: dict, name: str, bridges: list | None = None) -> tuple[di
     for kind, graph in parts.items():
         for group in graph["bhvr1.1"]["joints"]["jointGroups"]:
             group["lods"] = [group["lods"][lod] for lod in lods[kind]]
-    result = copy.deepcopy(parts["head"])
+    result = clone({key: value if key != "geom1.1" else {} for key, value in parts["head"].items()})
     for layer in ("defn1.1", "bhvr1.1", "mlbh1.0", "rbfb1.0", "rbfe1.0", "jbmd1.0", "twsw1.0"):
         result[layer] = _join(parts["head"][layer], parts["body"][layer])
     result["desc1.1"]["name"] = name
@@ -502,7 +524,7 @@ def compose(originals: dict, name: str, bridges: list | None = None) -> tuple[di
     # Replace head surfaces in place. Each body surface can participate in two
     # head LODs; the inverse records both references to the same source mesh.
     names = {kind: parts[kind]["defn1.1"]["meshNames"] for kind in KINDS}
-    meshes = copy.deepcopy(parts["head"]["geom1.1"]["meshes"])
+    meshes = list(parts["head"]["geom1.1"]["meshes"])
     merged_names = list(names["head"])
     mesh_maps = {"head": {str(index): [index] for index in range(len(names["head"]))}, "body": {}}
     necklines = json.loads(HEAD_TO_BODY_EDGE_LOOP_FILE_PATH.read_text())
@@ -531,10 +553,10 @@ def compose(originals: dict, name: str, bridges: list | None = None) -> tuple[di
     for index, mesh_name in enumerate(names["body"]):
         if str(index) not in mesh_maps["body"]:
             mesh_maps["body"][str(index)] = [len(meshes)]
-            meshes.append(copy.deepcopy(parts["body"]["geom1.1"]["meshes"][index]))
+            meshes.append(clone(parts["body"]["geom1.1"]["meshes"][index]))
             merged_names.append(f"DNA_body::{mesh_name}" if mesh_name in merged_names else mesh_name)
     info["meshes"] = mesh_maps
-    result["geom1.1"]["meshes"] = meshes
+    result["geom1.1"] = {"meshes": meshes}
     result["defn1.1"]["meshNames"] = merged_names
     mesh_rows = []
     for lod in range(head_lods):
@@ -565,12 +587,13 @@ def compose(originals: dict, name: str, bridges: list | None = None) -> tuple[di
                 membership["regionNames"][destination].extend(regions)
                 membership["indices"][destination].extend(source["indices"][index])
     result["mlbh1.0"]["neuralNetworkToMeshRegion"] = membership
-    info["bridges"] = copy.deepcopy(bridges or [])
+    info["bridges"] = clone(bridges or [])
     _embed_bridges(result, originals, info)
     return result, info
 
 
-def _bridge_channel(originals: dict, bridge: dict) -> int:
+def bridge_channel(originals: dict, bridge: dict) -> int:
+    """Resolve a cross-component corrective's channel in its owning component."""
     definition = originals[bridge["source"]["kind"]]["defn1.1"]
     name = bridge["source"]["name"]
     for mesh_name in definition["meshNames"]:
@@ -583,7 +606,8 @@ def _bridge_channel(originals: dict, bridge: dict) -> int:
         raise ValueError(f"Corrective has no owning DNA channel: {name}") from error
 
 
-def _bridge_delta(originals: dict, bridge: dict) -> np.ndarray:
+def bridge_delta(originals: dict, bridge: dict) -> np.ndarray:
+    """Convert scene corrective coordinates into native DNA-space deltas."""
     graph = originals[bridge["kind"]]
     basis = np.asarray(list(graph["geom1.1"]["meshes"][bridge["mesh"]]["positions"].values())).T
     values = np.frombuffer(
@@ -600,14 +624,20 @@ def _embed_bridges(graph: dict, originals: dict, info: dict) -> None:
     """Publish cross-component deltas as real native targets on every affected LOD."""
     for bridge in info["bridges"]:
         kind = bridge["kind"]
-        channel = info["maps"][bridge["source"]["kind"]]["blend"][_bridge_channel(originals, bridge)]
-        delta = _bridge_delta(originals, bridge)
+        channel = info["maps"][bridge["source"]["kind"]]["blend"][bridge_channel(originals, bridge)]
+        delta = bridge_delta(originals, bridge)
         for destination in info["meshes"][kind][str(bridge["mesh"])]:
             record = next((surface for surface in info["surfaces"] if surface["mesh"] == destination), None)
             ids = record["vertices"][kind] if record else list(range(len(delta)))
             other = set(record["vertices"]["head" if kind == "body" else "body"]) if record else set()
-            targets = graph["geom1.1"]["meshes"][destination]["blendShapeTargets"]
+            mesh = graph["geom1.1"]["meshes"][destination]
+            targets = list(mesh["blendShapeTargets"])
+            graph["geom1.1"]["meshes"][destination] = {**mesh, "blendShapeTargets": targets}
             target = next((item for item in targets if item["blendShapeChannelIndex"] == channel), None)
+            if target is not None:
+                index = targets.index(target)
+                target = clone(target)
+                targets[index] = target
             if target is None:
                 target = {
                     "deltas": {axis: [] for axis in ("xs", "ys", "zs")},
@@ -629,167 +659,3 @@ def _embed_bridges(graph: dict, originals: dict, info: dict) -> None:
         for target in mesh["blendShapeTargets"]:
             mapping["from"].append(index)
             mapping["to"].append(target["blendShapeChannelIndex"])
-
-
-def _unweld(current: dict, baseline: dict, source: dict, record: dict, kind: str, head: dict) -> dict:
-    """Recover source arrays as original data plus the native merged edit delta."""
-    if current["layouts"] != baseline["layouts"] or current["faces"] != baseline["faces"]:
-        raise ValueError("Merged native topology changed without updating component correspondence.")
-    result = copy.deepcopy(source)
-    vertices = record["vertices"][kind]
-    for axis in ("xs", "ys", "zs"):
-        result["positions"][axis] = (
-            np.asarray(source["positions"][axis])
-            + (np.asarray(current["positions"][axis])[vertices] - np.asarray(baseline["positions"][axis])[vertices])
-        ).tolist()
-        start = 0 if kind == "head" else len(head["normals"][axis])
-        result["normals"][axis] = current["normals"][axis][start : start + len(source["normals"][axis])]
-    for axis in ("us", "vs"):
-        start = 0 if kind == "head" else len(head["textureCoordinates"][axis])
-        result["textureCoordinates"][axis] = current["textureCoordinates"][axis][
-            start : start + len(source["textureCoordinates"][axis])
-        ]
-    seam = set(record["seam"]) if kind == "head" else set()
-    result["skinWeights"] = [
-        copy.deepcopy(source["skinWeights"][index] if index in seam else current["skinWeights"][merged_index])
-        for index, merged_index in enumerate(vertices)
-    ]
-    start = 0 if kind == "head" else len(head["blendShapeTargets"])
-    if len(current["blendShapeTargets"]) != len(baseline["blendShapeTargets"]):
-        raise ValueError("New native shape targets need component ownership before Split.")
-    inverse = {value: index for index, value in enumerate(vertices)}
-    result["blendShapeTargets"] = []
-    for index in range(len(source["blendShapeTargets"])):
-        target = current["blendShapeTargets"][start + index]
-        original = baseline["blendShapeTargets"][start + index]
-        if target == original:
-            result["blendShapeTargets"].append(copy.deepcopy(source["blendShapeTargets"][index]))
-            continue
-        selected = [i for i, vertex in enumerate(target["vertexIndices"]) if vertex in inverse]
-        foreign = {
-            vertex: [target["deltas"][axis][i] for axis in target["deltas"]]
-            for i, vertex in enumerate(target["vertexIndices"])
-            if vertex not in inverse
-        }
-        baseline_foreign = {
-            vertex: [original["deltas"][axis][i] for axis in original["deltas"]]
-            for i, vertex in enumerate(original["vertexIndices"])
-            if vertex not in inverse
-        }
-        if foreign != baseline_foreign:
-            raise ValueError("This native corrective changes an unassigned cross-component dependency.")
-        result["blendShapeTargets"].append(
-            {
-                "deltas": {axis: [values[i] for i in selected] for axis, values in target["deltas"].items()},
-                "vertexIndices": [inverse[target["vertexIndices"][i]] for i in selected],
-                "blendShapeChannelIndex": target["blendShapeChannelIndex"],
-            }
-        )
-    return result
-
-
-def project(current: dict, originals: dict, info: dict, name: str) -> dict:  # noqa: PLR0912 - inverse SDK domains
-    """Recover current component graphs; recovery originals never override edits."""
-    baseline, _ = compose(originals, name, info.get("bridges"))
-    parts = {kind: transform(graph, info["maps"][kind]) for kind, graph in originals.items()}
-    projected = {}
-    for kind in KINDS:
-        result = copy.deepcopy(parts[kind])
-        excluded = {
-            "defn1.1": {*LOD_DOMAINS, "meshNames", "meshBlendShapeChannelMapping"},
-            "bhvr1.1": {"blendShapeChannels", "animatedMaps"},
-            "mlbh1.0": {"lodNeuralNetworkMapping", "neuralNetworkToMeshRegion"},
-            "rbfb1.0": {"lodSolverMapping"},
-            "rbfe1.0": set(),
-            "jbmd1.0": set(),
-            "twsw1.0": set(),
-        }
-        for layer, skip in excluded.items():
-            for field in result[layer]:
-                if field not in skip:
-                    result[layer][field] = _slice(
-                        current[layer][field], parts["head"][layer][field], parts["body"][layer][field], kind
-                    )
-        source_lods = info["lods"][kind]
-        first_lods = [source_lods.index(lod) for lod in range(originals[kind]["desc1.1"]["lodCount"])]
-        for group in result["bhvr1.1"]["joints"]["jointGroups"]:
-            group["lods"] = [group["lods"][index] for index in first_lods]
-        for layer in ("defn1.1", "mlbh1.0", "rbfb1.0"):
-            for field, domain in LOD_DOMAINS.items():
-                if field in result[layer] and domain != "mesh":
-                    owned = set(info["maps"][kind][domain])
-                    rows = [
-                        [index for index in row if index in owned]
-                        for row in _lod_rows(current[layer][field], first_lods)
-                    ]
-                    template = result[layer][field]
-                    if rows != _lod_rows(template, list(range(len(first_lods)))):
-                        result[layer][field] = _lod_map(rows)
-        for field in ("blendShapeChannels", "animatedMaps"):
-            indices = info["tables"][field][kind]
-            values = current["bhvr1.1"][field]
-            if field == "animatedMaps":
-                values = values["conditionals"]
-                destination = result["bhvr1.1"][field]["conditionals"]
-            else:
-                destination = result["bhvr1.1"][field]
-            for key, array in values.items():
-                if key != "lods":
-                    destination[key] = [array[index] for index in indices]
-            counts = current["bhvr1.1"][field]["lods"]
-            result["bhvr1.1"][field]["lods"] = (
-                [sum(index < counts[lod] for index in indices) for lod in first_lods]
-                if parts[kind]["bhvr1.1"][field]["lods"]
-                else []
-            )
-        for identity, names in info["names"].items():
-            layer, field = identity.split("/")
-            start = 0 if kind == "head" else len(parts["head"][layer][field])
-            result[layer][field] = [
-                old if value == names[start + index] else value
-                for index, (old, value) in enumerate(zip(parts[kind][layer][field], result[layer][field], strict=True))
-            ]
-        for field in ("solvers", "poses"):
-            for old, value in zip(parts[kind]["rbfb1.0"][field], result["rbfb1.0"][field], strict=True):
-                if value["name"] == f"DNA_body::{old['name']}":
-                    value["name"] = old["name"]
-        memberships = result["mlbh1.0"]["neuralNetworkToMeshRegion"]
-        for index, source in enumerate(parts[kind]["geom1.1"]["meshes"]):
-            destinations = info["meshes"][kind][str(index)]
-            variants = []
-            for native_index in destinations:
-                record = next((item for item in info["surfaces"] if item["mesh"] == native_index), None)
-                if record:
-                    variants.append(
-                        _unweld(
-                            current["geom1.1"]["meshes"][native_index],
-                            baseline["geom1.1"]["meshes"][native_index],
-                            source,
-                            record,
-                            kind,
-                            parts["head"]["geom1.1"]["meshes"][record["head"]],
-                        )
-                    )
-                else:
-                    variants.append(copy.deepcopy(current["geom1.1"]["meshes"][native_index]))
-            # Shared body geometry must agree where more than one head LOD
-            # was edited. Select the changed copy if its sibling stayed intact.
-            changed = [variant for variant in variants if variant != source]
-            if changed and any(variant != changed[0] for variant in changed[1:]):
-                raise ValueError(f"Conflicting native edits to shared {kind} mesh {index} across LODs.")
-            result["geom1.1"]["meshes"][index] = changed[0] if changed else source
-            if index < len(memberships["regionNames"]):
-                native_index = destinations[0]
-                start = 0
-                if kind == "body" and (
-                    record := next((item for item in info["surfaces"] if item["mesh"] == native_index), None)
-                ):
-                    head_regions = parts["head"]["mlbh1.0"]["neuralNetworkToMeshRegion"]["regionNames"]
-                    start = len(head_regions[record["head"]]) if record["head"] < len(head_regions) else 0
-                length = len(memberships["regionNames"][index])
-                for field in memberships:
-                    memberships[field][index] = current["mlbh1.0"]["neuralNetworkToMeshRegion"][field][native_index][
-                        start : start + length
-                    ]
-        projected[kind] = transform(result, info["maps"][kind], inverse=True)
-    return projected

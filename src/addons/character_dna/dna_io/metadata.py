@@ -17,7 +17,7 @@ MAX_DOCUMENT_BYTES = 2 * 1024**3
 def encode(payload: dict, *, prefix: str = PREFIX) -> dict[str, str]:
     raw = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), allow_nan=False).encode("ascii")
     if len(raw) > MAX_PAYLOAD_BYTES:
-        raise ValueError("Component recovery metadata exceeds the supported memory budget.")
+        raise ValueError("Component ownership metadata exceeds the supported memory budget.")
     packed = base64.b64encode(zlib.compress(raw)).decode("ascii")
     chunks = [packed[offset : offset + CHUNK_BYTES] for offset in range(0, len(packed), CHUNK_BYTES)]
     manifest = {

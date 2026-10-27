@@ -250,7 +250,7 @@ def _live_records() -> list[dict[str, Any]]:
 
 def active(instance: Any) -> bool:
     """Whether native drivers own any output channels for the instance."""
-    return any(_belongs_to(record["carrier"], instance) for record in _live_records())
+    return any(not record.get("paused") and _belongs_to(record["carrier"], instance) for record in _live_records())
 
 
 def bound_carriers(instance: Any) -> list[Any]:
@@ -260,8 +260,10 @@ def bound_carriers(instance: Any) -> list[Any]:
 
 def invalidate() -> None:
     """Release borrowed wrappers and sessions before graph/ID storage can disappear."""
+    from .retention import clear
     from .ui_refresh import invalidate_migration
 
+    clear()
     invalidate_migration()
     global _generation, _restoring_undo
     _generation += 1
@@ -283,8 +285,10 @@ def clear_contexts() -> None:
 
 def discard(instance: Any = None) -> None:
     """Remove only owned drivers and carriers in a write-safe operator/lifecycle context."""
+    from . import retention
     from .ui_refresh import invalidate_migration
 
+    retention.clear() if instance is None else retention.forget(instance)
     invalidate_migration()
     _live_records()
     for carrier in carriers(instance):
@@ -345,7 +349,8 @@ def sync_settings(instance: Any, _context: Any = None) -> None:
             carrier["settings"] = settings
             carrier.update_tag()
         component = "head" if carrier["component"] == "switches" else carrier["component"]
-        mute_targets(carrier, not (instance.auto_evaluate and getattr(instance, f"auto_evaluate_{component}")))
+        if not carrier.get("authoring_paused"):
+            mute_targets(carrier, not (instance.auto_evaluate and getattr(instance, f"auto_evaluate_{component}")))
 
 
 def missing_components(instance: Any) -> list[str]:
@@ -482,6 +487,7 @@ def make_record(carrier: Any, instance: Any = None) -> dict[str, Any]:
             "identity": instance_id(instance),
             "instance": instance,
             "carrier": carrier,
+            "paused": bool(carrier.get("authoring_paused")),
             "component": component,
             "face": carrier["face"],
             "contexts": {},
@@ -498,6 +504,7 @@ def make_record(carrier: Any, instance: Any = None) -> dict[str, Any]:
         "identity": instance_id(instance),
         "instance": instance,
         "carrier": carrier,
+        "paused": bool(carrier.get("authoring_paused")),
         "rig": carrier["rig"],
         "face": carrier.get("face"),
         "model": model,
@@ -735,6 +742,8 @@ def solve(owner: Any, graph: Any) -> float:
     original = owner.original
     _live_records()
     record = _records.get(original.as_pointer())
+    if original.get("authoring_paused"):
+        return float(owner.get("epoch", 0.0))
     if record is None:
         warn_unavailable(original)
         return float(owner.get("epoch", 0.0))
@@ -976,6 +985,8 @@ def ui_raw_control_value(instance: Any, index: int, graph: Any, component: str =
     for record in _live_records():
         if not _belongs_to(record["carrier"], instance) or record["component"] != component:
             continue
+        if record.get("paused"):
+            return None
         carrier = record["carrier"].evaluated_get(graph)
         key = (_generation, graph.as_pointer(), carrier.as_pointer(), graph.mode)
         context = record["contexts"].get(key)
@@ -1006,6 +1017,8 @@ def synchronize_authoring(instance: Any, component: str, state: Any) -> Any:
     for record in _live_records():
         if not _belongs_to(record["carrier"], instance) or record["component"] != component:
             continue
+        if record.get("paused"):
+            return state
         context = record.get("last_context")
         if context is None or record.get("authoring_revision") == record["calls"]:
             return state

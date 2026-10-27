@@ -50,7 +50,7 @@ def _json_input_stream(file_path: Path, memory_resource: Any) -> Any:
             return token
         return b"0.0" if 0 < abs(float(token)) < minimum else token
 
-    data = re.sub(rb'"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?[eE]-\d+', normalize, file_path.read_bytes())
+    data = re.sub(rb'"(?:[^"\\]|\\.)*"|(?<![0-9.])-?\d+(?:\.\d+)?[eE]-\d+', normalize, file_path.read_bytes())
     stream = dna.MemoryStream(memory_resource)
     stream.write(data.decode("utf-8"), len(data))
     stream.seek(0)

@@ -2,15 +2,13 @@
 
 import base64
 import hashlib
-import io
 import json
 import logging
-import math
 import os
 import tempfile
 import uuid
-import zipfile
 
+from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -18,12 +16,14 @@ from typing import Any
 from ..shape_names import ensure_name, find_key, logical_name
 
 
-MAGIC = b"CHARACTER-DNA\x00\x01\r\n"
+SCHEMA = 3
 PARTITIONS = ("head", "body")
 EXTENSION_PREFIX = "character_dna.shape_extensions"
 _leases: dict[Path, tuple[Path, str, str]] = {}
-_read_cache: dict[str, tuple[dict, dict[str, bytes]]] = {}
+_read_cache: OrderedDict[str, tuple[dict, dict[str, bytes]]] = OrderedDict()
+MAX_VIEW_CACHE_BYTES = 256 * 1024**2
 _pending: dict[Path, dict] = {}
+_pending_targets: dict[Path, set | None] = {}
 
 
 def fingerprint(data: bytes) -> str:
@@ -35,9 +35,7 @@ def is_document(path: Path) -> bool:
     from .misc import get_dna_reader, release_dna_handle
 
     with Path(path).open("rb") as stream:
-        header = stream.read(len(MAGIC))
-    if header == MAGIC:
-        return True
+        header = stream.read(3)
     if not header.startswith(b"DNA"):
         return False
     reader = get_dna_reader(path, data_layer="Descriptor")
@@ -47,104 +45,50 @@ def is_document(path: Path) -> bool:
         release_dna_handle(reader)
 
 
-def read_document(path: Path) -> tuple[dict, dict[str, bytes]]:
-    """Project the current native graph, retaining exact bytes for untouched data."""
-    from . import merged_graph, metadata
+def _payload(path: Path) -> dict:
+    from . import metadata
     from .misc import get_dna_reader, release_dna_handle
 
-    data = Path(path).read_bytes()
-    if data.startswith(MAGIC):
-        try:
-            return _read_archive(data[len(MAGIC) :])
-        except (zipfile.BadZipFile, KeyError, TypeError, AttributeError, UnicodeError) as error:
-            raise ValueError("Invalid combined DNA manifest or partition archive.") from error
-    revision = fingerprint(data)
-    if revision in _read_cache:
-        manifest, parts = _read_cache[revision]
-        return json.loads(json.dumps(manifest)), dict(parts)
     reader = get_dna_reader(path, data_layer="Descriptor")
     try:
         payload = metadata.decode(reader)
+        if payload.get("schema") != SCHEMA:
+            raise ValueError("Unsupported combined DNA schema. Merge the component files again.")
+        uuid.UUID(payload["manifest"]["id"])
+        if set(payload["manifest"]["partitions"]) != set(PARTITIONS):
+            raise ValueError("Invalid combined DNA ownership records.")
+        return payload
     finally:
         release_dna_handle(reader)
-    try:
-        manifest = payload["manifest"]
-        uuid.UUID(manifest["id"])
-        if payload["schema"] != 2 or set(manifest["partitions"]) != set(PARTITIONS):
-            raise ValueError("Unsupported combined DNA component schema.")
-        parts = {kind: base64.b64decode(payload["recovery"][kind], validate=True) for kind in PARTITIONS}
-        if any(fingerprint(parts[kind]) != manifest["partitions"][kind]["sha256"] for kind in PARTITIONS):
-            raise ValueError("The component recovery records failed their integrity check.")
-        current = None
-        if payload.get("digest_kind") == "sdk-binary":
-            digest = merged_graph.binary_digest(path)
-        else:
-            current = merged_graph.from_bytes(data)
-            digest = merged_graph.digest(current)
-        if digest != payload["graph_digest"]:
-            current = current or merged_graph.from_bytes(data)
-            originals = {kind: merged_graph.from_bytes(content) for kind, content in parts.items()}
-            projected = merged_graph.project(current, originals, payload["indices"], manifest["name"])
-            parts = {
-                kind: parts[kind]
-                if merged_graph.digest(graph) == merged_graph.digest(originals[kind])
-                else merged_graph.to_bytes(graph)
-                for kind, graph in projected.items()
-            }
-    except (KeyError, TypeError, AttributeError, IndexError) as error:
-        raise ValueError("Invalid combined DNA ownership records.") from error
+
+
+def read_document(path: Path) -> tuple[dict, dict[str, bytes]]:
+    """Project disposable component views from the authoritative native document."""
+    from . import native_projection
+
+    data = Path(path).read_bytes()
+    revision = fingerprint(data)
+    if revision in _read_cache:
+        manifest, parts = _read_cache[revision]
+        _read_cache.move_to_end(revision)
+        return json.loads(json.dumps(manifest)), dict(parts)
+    payload = _payload(path)
+    manifest = payload["manifest"]
+    parts, manifest["scene_bridges"] = native_projection.project(data, payload)
     _cache_read(revision, manifest, parts)
     return json.loads(json.dumps(manifest)), dict(parts)
 
 
 def _cache_read(revision: str, manifest: dict, parts: dict[str, bytes]) -> None:
-    _read_cache.clear()
+    for key, (existing, _) in list(_read_cache.items()):
+        if existing["id"] == manifest["id"]:
+            del _read_cache[key]
     _read_cache[revision] = (json.loads(json.dumps(manifest)), dict(parts))
-
-
-def _read_archive(data: bytes) -> tuple[dict, dict[str, bytes]]:
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        expected = {"manifest.json", "head.dna", "body.dna"}
-        if set(archive.namelist()) != expected or len(archive.infolist()) != len(expected):
-            raise ValueError("Invalid combined DNA partition table.")
-        if any(info.file_size > 1024**3 for info in archive.infolist()):
-            raise ValueError("Combined DNA partition exceeds the supported size.")
-        manifest = json.loads(archive.read("manifest.json"))
-        if manifest.get("version") != 1 or set(manifest.get("partitions", {})) != set(PARTITIONS):
-            raise ValueError("Unsupported combined DNA document version or partitions.")
-        uuid.UUID(manifest["id"])
-        if not isinstance(manifest["name"], str) or not manifest["name"].strip():
-            raise ValueError("Invalid combined DNA rig name.")
-        for kind in PARTITIONS:
-            if manifest["partitions"][kind]["id"] != kind or not isinstance(
-                manifest["partitions"][kind]["db_name"], str
-            ):
-                raise ValueError("Invalid combined DNA partition identity.")
-        parts = {kind: archive.read(f"{kind}.dna") for kind in PARTITIONS}
-    for kind, content in parts.items():
-        if fingerprint(content) != manifest["partitions"][kind]["sha256"]:
-            raise ValueError(f"The {kind} DNA partition failed its integrity check.")
-    identities = set()
-    for bridge in manifest.get("scene_bridges", []):
-        identity = (bridge["kind"], bridge["mesh"], bridge["name"])
-        if (
-            bridge["kind"] not in PARTITIONS
-            or bridge["source"]["kind"] not in PARTITIONS
-            or bridge["source"]["kind"] == bridge["kind"]
-            or not isinstance(bridge["mesh"], int)
-            or bridge["mesh"] < 0
-            or not isinstance(bridge["name"], str)
-            or not bridge["name"]
-            or len(bridge["name"].encode("utf-8")) > 63
-            or not isinstance(bridge["source"]["name"], str)
-            or not all(math.isfinite(bridge[field]) for field in ("min", "max"))
-            or bridge["min"] > bridge["max"]
-            or identity in identities
-        ):
-            raise ValueError("Invalid combined DNA shape relationship.")
-        base64.b64decode(bridge["coordinates"], validate=True)
-        identities.add(identity)
-    return manifest, parts
+    while (
+        len(_read_cache) > 1
+        and sum(len(data) for _, values in _read_cache.values() for data in values.values()) > MAX_VIEW_CACHE_BYTES
+    ):
+        _read_cache.popitem(last=False)
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
@@ -164,65 +108,32 @@ def _atomic_write(path: Path, data: bytes) -> None:
 def write_document(
     path: Path, manifest: dict, parts: dict[str, bytes], *, expected_revision: str | None = None
 ) -> None:
-    """Atomically replace a document, rejecting edits made by another owner."""
-    if expected_revision is not None and fingerprint(path.read_bytes()) != expected_revision:
-        raise ValueError("The combined DNA changed on disk. Reload it before writing further edits.")
-    manifest = json.loads(json.dumps(manifest))
-    for kind in PARTITIONS:
-        manifest["partitions"][kind]["sha256"] = fingerprint(parts[kind])
-    from ..bindings import dna
-    from . import merged_graph, metadata
-    from .misc import get_dna_reader, release_dna_handle
+    """Recompose structural changes, serializing native geometry only once."""
+    from . import merged_graph, partitions
 
+    _check_revision(path, expected_revision)
+    manifest = json.loads(json.dumps(manifest))
     originals = {kind: merged_graph.from_bytes(content) for kind, content in parts.items()}
-    graph, indices = merged_graph.compose(originals, manifest["name"], manifest.get("scene_bridges"))
-    native = merged_graph.to_bytes(graph)
+    bridges = manifest.pop("scene_bridges", [])
+    graph, indices = merged_graph.compose(originals, manifest["name"], bridges)
+    indices.pop("bridges", None)
     payload = {
-        "schema": 2,
+        "schema": SCHEMA,
         "manifest": manifest,
         "indices": indices,
-        "digest_kind": "sdk-binary",
-        "recovery": {kind: base64.b64encode(content).decode("ascii") for kind, content in parts.items()},
+        "components": partitions.describe(originals, graph, indices),
+        "bridges": partitions.compact_bridges(originals, bridges, indices),
     }
-    # Attach descriptor metadata without serializing geometry to JSON a second time.
-    with tempfile.TemporaryDirectory(prefix="dna-document-") as directory:
-        staged = Path(directory) / "native.dna"
-        staged.write_bytes(native)
-        payload["graph_digest"] = merged_graph.binary_digest(staged)
-        from .coordinates import configuration
-
-        input_stream = dna.FileStream(str(staged), dna.AccessMode_Read, dna.OpenMode_Binary, None)
-        source = dna.BinaryStreamReader(input_stream, configuration(blender=False), None)
-        source.read()
-        if not dna.Status.isOk():
-            raise ValueError(dna.Status.get().message)
-        output_path = Path(directory) / "published.dna"
-        output_stream = dna.FileStream(str(output_path), dna.AccessMode_Write, dna.OpenMode_Binary, None)
-        writer = dna.BinaryStreamWriter(output_stream)
-        try:
-            writer.setFrom(source, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
-            metadata.write(writer, source, payload)
-            writer.write()
-            if not dna.Status.isOk():
-                raise ValueError(dna.Status.get().message)
-        finally:
-            release_dna_handle(writer)
-            release_dna_handle(source)
-            release_dna_handle(input_stream)
-            release_dna_handle(output_stream)
-        published = output_path.read_bytes()
-        check = get_dna_reader(output_path, data_layer="Descriptor")
-        try:
-            if metadata.decode(check) != payload:
-                raise ValueError("Native component metadata failed read-back verification.")
-        finally:
-            release_dna_handle(check)
-    if len(published) >= metadata.MAX_DOCUMENT_BYTES:
-        raise ValueError("Combined DNA exceeds the supported file-size budget.")
-    if expected_revision is not None and fingerprint(path.read_bytes()) != expected_revision:
-        raise ValueError("The combined DNA changed while preparing the write. Reload before committing.")
+    published = merged_graph.to_bytes(graph, payload)
+    _check_revision(path, expected_revision)
     _atomic_write(path, published)
+    manifest["scene_bridges"] = bridges
     _cache_read(fingerprint(published), manifest, parts)
+
+
+def _check_revision(path: Path, expected_revision: str | None) -> None:
+    if expected_revision is not None and fingerprint(path.read_bytes()) != expected_revision:
+        raise ValueError("The combined DNA changed on disk. Reload it before writing further edits.")
 
 
 def merge_files(paths: dict[str, Path], destination: Path, name: str) -> None:
@@ -294,20 +205,26 @@ def validate_write(path: Path) -> None:
         raise ValueError("The combined DNA changed on disk. Reload it before committing edits.")
 
 
-def publish_partition(path: Path) -> None:
+def publish_partition(path: Path, *, targets: set | None = None) -> None:
     """Publish a successfully written SDK partition back into its document."""
     lease = _leases.get(path.resolve())
     if lease is None:
         return
     document, kind, revision = lease
     if document in _pending:
+        if targets is None:
+            _pending_targets[document] = None
+        elif _pending_targets[document] is not None:
+            _pending_targets[document].update((kind, mesh, target) for mesh, target in targets)
         return
     manifest, parts = read_document(document)
     content = path.read_bytes()
     if content == parts[kind]:
         return
     parts[kind] = content
-    write_document(document, manifest, parts, expected_revision=revision)
+    _publish_edit(
+        document, manifest, parts, revision, {(kind, mesh, target) for mesh, target in targets} if targets else None
+    )
     _advance_lease(path, document)
 
 
@@ -330,11 +247,12 @@ def edit_transaction(instance: Any):
         manifest, parts = read_document(combined)
         revision = fingerprint(combined.read_bytes())
         _pending[combined] = manifest
+        _pending_targets[combined] = set()
     try:
         yield
         if combined:
             parts[instance.editor_component] = authored.read_bytes()
-            write_document(combined, _pending[combined], parts, expected_revision=revision)
+            _publish_edit(combined, _pending[combined], parts, revision, _pending_targets[combined])
             _advance_lease(authored, combined)
     except Exception:
         if authored.read_bytes() != previous:
@@ -343,6 +261,33 @@ def edit_transaction(instance: Any):
     finally:
         if combined:
             _pending.pop(combined, None)
+            _pending_targets.pop(combined, None)
+
+
+def _publish_edit(path: Path, manifest: dict, parts: dict[str, bytes], revision: str, targets: set | None) -> None:
+    from .document_edits import write_targets
+
+    previous, old_parts = read_document(path)
+    if manifest == previous and parts == old_parts:
+        return
+    before = {key: value for key, value in previous.items() if key != "scene_bridges"}
+    after = {key: value for key, value in manifest.items() if key != "scene_bridges"}
+
+    def identity(bridge: dict) -> tuple[str, int, str]:
+        return bridge["kind"], bridge["mesh"], bridge["name"]
+
+    old_bridges = {identity(item) for item in previous.get("scene_bridges", [])}
+    new_bridges = {identity(item) for item in manifest.get("scene_bridges", [])}
+    if targets is not None and (targets or parts == old_parts) and before == after and old_bridges <= new_bridges:
+        _check_revision(path, revision)
+        published = write_targets(
+            path, parts, targets, _payload(path), manifest.get("scene_bridges", []), previous.get("scene_bridges", [])
+        )
+        _check_revision(path, revision)
+        _atomic_write(path, published)
+        _cache_read(fingerprint(published), manifest, parts)
+    else:
+        write_document(path, manifest, parts, expected_revision=revision)
 
 
 def _advance_lease(path: Path, document: Path) -> None:
@@ -358,7 +303,7 @@ def partition_backup(path: Path) -> bytes | None:
 
 
 def split_files(path: Path, directory: Path) -> dict[str, Path]:
-    """Restore exact component bytes, using the recorded RigDefinition ownership."""
+    """Reconstruct component data using the recorded RigDefinition ownership."""
     from ..rig_definition import get_rig_definition
     from .misc import get_dna_component_type, get_dna_reader, release_dna_handle
 
@@ -452,7 +397,7 @@ def publish_scene_bridges(instance: Any) -> None:
     if Path(path).resolve() in _pending:
         _pending[Path(path).resolve()] = manifest
         return
-    write_document(Path(path), manifest, parts, expected_revision=_leases[working.resolve()][2])
+    _publish_edit(Path(path), manifest, parts, _leases[working.resolve()][2], set())
     _advance_lease(working, Path(path))
 
 

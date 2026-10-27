@@ -87,7 +87,7 @@ def _extend(originals: dict, kind: str, source_kind: str, bridges: list[dict]) -
     source = originals[source_kind]
     recipient = originals[kind]
     src_definition = source["defn1.1"]
-    channels = sorted({graph._bridge_channel(originals, bridge) for bridge in bridges})
+    channels = sorted({graph.bridge_channel(originals, bridge) for bridge in bridges})
     table = source["bhvr1.1"]["blendShapeChannels"]
     rows = [index for index, channel in enumerate(table["outputIndices"]) if channel in channels]
     raw_count = len(src_definition["rawControlNames"])
@@ -238,9 +238,9 @@ def _extend(originals: dict, kind: str, source_kind: str, bridges: list[dict]) -
     definition["lodBlendShapeMapping"] = graph._lod_map([row + list(channel_map.values()) for row in lod_rows])
     destination["bhvr1.1"]["joints"]["colCount"] += len(raw) + len(psd)
     for bridge in bridges:
-        delta = graph._bridge_delta(originals, bridge)
+        delta = graph.bridge_delta(originals, bridge)
         indices = np.flatnonzero(np.any(np.abs(delta) > 1e-5, axis=1))
-        channel = channel_map[graph._bridge_channel(originals, bridge)]
+        channel = channel_map[graph.bridge_channel(originals, bridge)]
         target = {
             "deltas": {axis: delta[indices, index].tolist() for index, axis in enumerate(("xs", "ys", "zs"))},
             "vertexIndices": indices.tolist(),

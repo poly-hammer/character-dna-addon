@@ -62,6 +62,22 @@ def test_native_duplicate_rejected(native_objects):
     assert target.animation_data is None
 
 
+def test_batched_editor_mutes_preserve_unowned_drivers(native_objects):
+    from character_dna.runtime import retention
+
+    carrier, target = native_objects.carrier, native_objects.target
+    unrelated = target.driver_add("location", 2)
+    unrelated.driver.expression = "3"
+    unrelated.mute = True
+    install_targets(carrier, [Target(target, "location", 0, 0)])
+    curves = retention._curves([carrier])
+    retention._set_mutes(curves, True)
+    assert all(curve.mute for curve in target.animation_data.drivers)
+    retention.restore_mutes(curves)
+    assert not target.animation_data.drivers.find("location", index=0).mute
+    assert unrelated.mute and unrelated.driver.expression == "3"
+
+
 def test_native_rejects_keyframed_output(native_objects):
     """Output drivers must not hide an existing user's keyed animation."""
     carrier, target = native_objects.carrier, native_objects.target

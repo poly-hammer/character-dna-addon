@@ -1296,7 +1296,10 @@ class RigInstance(bpy.types.PropertyGroup):
                 (self.head_rig and not self.head_initialized) or (self.body_rig and not self.body_initialized)
             ):
                 with controller.preserve_bindings():
-                    self.initialize()
+                    if self.head_rig and not self.head_initialized:
+                        self.head_initialize()
+                    if self.body_rig and not self.body_initialized:
+                        self.body_initialize()
             engine.sync_settings(self)
         else:
             if not self.head_initialized and self.head_rig:

@@ -449,7 +449,7 @@ def test_scene_split_preserves_seam_edit_and_source_indices_after_reordering(cha
     assert bpy.ops.character_dna.split_components() == {"FINISHED"}
 
 
-def test_document_noop_restores_exact_bytes_and_rejects_collisions(tmp_path, monkeypatch):
+def test_document_noop_restores_all_native_data_and_rejects_collisions(tmp_path, monkeypatch):
     paths = {kind: TEST_DNA_FOLDER / "ada" / f"{kind}.dna" for kind in document.PARTITIONS}
     merged = tmp_path / "Bruce.dna"
     document.merge_files(paths, merged, "Bruce")
@@ -458,7 +458,15 @@ def test_document_noop_restores_exact_bytes_and_rejects_collisions(tmp_path, mon
     assert document.is_document(merged)
     outputs = document.split_files(merged, tmp_path / "split")
     for kind in document.PARTITIONS:
-        assert outputs[kind].read_bytes() == paths[kind].read_bytes()
+        from character_dna.dna_io import merged_graph
+        from test_native_merged_graph import first_difference
+
+        assert (
+            first_difference(
+                merged_graph.from_bytes(outputs[kind].read_bytes()), merged_graph.from_bytes(paths[kind].read_bytes())
+            )
+            is None
+        )
     with pytest.raises(ValueError, match="already exists"):
         document.merge_files(paths, merged, "Bruce")
     with pytest.raises(ValueError, match="already exists"):
@@ -902,8 +910,8 @@ def test_combined_neckline_shape_is_portable_and_backup_restores_document(  # no
 
 def test_document_rejects_corruption_before_materializing(tmp_path):
     invalid = tmp_path / "bad.dna"
-    invalid.write_bytes(document.MAGIC + b"broken")
-    with pytest.raises(ValueError, match="Invalid combined"):
+    invalid.write_bytes(b"DNA\x00broken")
+    with pytest.raises((ValueError, RuntimeError)):
         document.materialize(invalid)
 
 
