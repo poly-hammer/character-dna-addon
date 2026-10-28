@@ -64,7 +64,9 @@ def assert_faceboard_live(instance):
 
 def import_operator():
     # Run the production modal methods without registering a timer in headless bpy.
-    operator = SimpleNamespace(_timer=None, _commands_queue=queue.Queue(), _batch_size=25)
+    operator = SimpleNamespace(
+        _timer=None, _commands_queue=queue.Queue(), _batch_size=25, _time_budget=60.0, _progress_limit=0.8
+    )
     for name in ("validate", "set_commands_queue", "finish", "modal"):
         method = getattr(shape_operators.ImportShapeKeys, name)
         setattr(operator, name, lambda *args, method=method: method(operator, *args))
@@ -73,17 +75,19 @@ def import_operator():
 
 
 def start_small_import(monkeypatch, operator):
-    build = shape_operators.utilities.build_shape_key_import_commands
+    from character_dna.editors.shape_key_editor import import_session
 
-    def small_queue(component, commands):
+    build = import_session.build_shape_key_import_commands
+
+    def small_queue(component, commands, **kwargs):
         # Keep real DNA geometry and callbacks, but only allocate the first two
         # head targets so the lifecycle regression is small enough for CI.
         all_commands = queue.Queue()
-        build(component, all_commands)
+        build(component, all_commands, **kwargs)
         for _ in range(3):
             commands.put(all_commands.get_nowait())
 
-    monkeypatch.setattr(shape_operators, "build_shape_key_import_commands", small_queue)
+    monkeypatch.setattr(import_session, "build_shape_key_import_commands", small_queue)
     operator.set_commands_queue(bpy.context, get_active_head(), operator._commands_queue)
     operator._commands_queue_size = operator._commands_queue.qsize()
 
@@ -102,7 +106,11 @@ def test_shape_import_restores_live_bindings(character, monkeypatch, finish_even
         # The first timer tick mutates shape keys; the next finishes or cancels.
         operator.modal(bpy.context, SimpleNamespace(type="TIMER"))
         assert_current_scene()
-        assert operator.modal(bpy.context, SimpleNamespace(type=finish_event)) == {"FINISHED"}
+        result = operator.modal(bpy.context, SimpleNamespace(type=finish_event))
+        if finish_event == "ESC":
+            assert result == {"RUNNING_MODAL"}
+            result = operator.modal(bpy.context, SimpleNamespace(type="TIMER"))
+        assert result == {"FINISHED"}
         assert instance.body_instance is body_state
         assert instance.head_shape_key_blocks
         for blocks in instance.head_shape_key_blocks.values():
@@ -113,7 +121,7 @@ def test_shape_import_restores_live_bindings(character, monkeypatch, finish_even
         assert_faceboard_live(instance)
 
 
-@pytest.mark.parametrize("editor_name", ["raw_control_editor", "rbf_editor", "shape_key_editor"])
+@pytest.mark.parametrize("editor_name", ["raw_control_editor", "rbf_editor", "shape_key_editor", "swing_twist_editor"])
 def test_failed_editor_entry_restores_runtime(character, monkeypatch, editor_name):
     from character_dna.editors.shared.editor import Editor
 
@@ -131,12 +139,14 @@ def test_failed_editor_entry_restores_runtime(character, monkeypatch, editor_nam
     assert_faceboard_live(character)
 
 
-@pytest.mark.parametrize("editor_name", ["raw_control_editor", "rbf_editor", "shape_key_editor"])
+@pytest.mark.parametrize("editor_name", ["raw_control_editor", "rbf_editor", "shape_key_editor", "swing_twist_editor"])
 @pytest.mark.parametrize("finish", ["commit", "revert"])
 def test_editor_lifecycle_is_not_legacy(character, monkeypatch, editor_name, finish):
     from character_dna.editors.shared.editor import Editor
 
     instance = character
+    if editor_name == "swing_twist_editor":
+        instance.editor_component = "body"
     if editor_name == "shape_key_editor":
         operator = import_operator()
         start_small_import(monkeypatch, operator)

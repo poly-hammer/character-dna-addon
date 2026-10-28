@@ -47,7 +47,15 @@ def _record(instance: Any, component: str) -> dict[str, Any]:
     return record
 
 
-def sample(instance: Any, component: str, overrides: dict | None = None, graph: Any = None) -> Any:
+def sample(
+    instance: Any,
+    component: str,
+    overrides: dict | None = None,
+    graph: Any = None,
+    *,
+    target: Any = None,
+    manager: Any = None,
+) -> Any:
     """Sample live or overridden GUI inputs without writing scene outputs."""
     record = _record(instance, component)
     context = record["sample"]
@@ -80,7 +88,8 @@ def sample(instance: Any, component: str, overrides: dict | None = None, graph: 
         aim,
     )
     controls = native.control_snapshot(context["session"])
-    target = instance.data[instance.cache_key(component, "instance")]
+    draft = target is not None
+    target = target if draft else instance.data[instance.cache_key(component, "instance")]
     for index, value in enumerate(controls["gui"]):
         target.setGUIControl(index, value)
     for index, value in enumerate(controls["raw"]):
@@ -91,8 +100,9 @@ def sample(instance: Any, component: str, overrides: dict | None = None, graph: 
             value = overrides.get(name, {}).get(axis)
             if value is not None:
                 target.setRawControl(index, value)
-    getattr(instance, f"{component}_manager").calculate(target)
-    engine.mark_authoring_current(instance, component)
+    (manager if draft else getattr(instance, f"{component}_manager")).calculate(target)
+    if not draft:
+        engine.mark_authoring_current(instance, component)
     return target
 
 
@@ -116,12 +126,14 @@ def raw_inputs(instance: Any, component: str, overrides: dict | None = None) -> 
     binding.manager.calculate(target)
 
 
-def bone_transforms(instance: Any, component: str, collect: bool = False) -> list:
+def bone_transforms(
+    instance: Any, component: str, collect: bool = False, *, state: Any = None, bone_names: set[str] | None = None
+) -> list:
     """Convert SDK authoring outputs in C++, applying only outside native ownership."""
     if not getattr(instance, f"{component}_rig") or not getattr(instance, f"{component}_dna_reader"):
         return []
     record = _record(instance, component)
-    state = getattr(instance, f"{component}_instance")
+    state = state if state is not None else getattr(instance, f"{component}_instance")
     values = record["sample"]["local"]
     engine.native_module().transform_into(
         record["plan"], array("d", state.getJointOutputs()), values, component == "body"
@@ -132,6 +144,8 @@ def bone_transforms(instance: Any, component: str, collect: bool = False) -> lis
     result = []
     rig = getattr(instance, f"{component}_rig")
     for name, slot in record["bone_slots"].items():
+        if bone_names is not None and name not in bone_names:
+            continue
         offset = slot * 9
         location = Vector(values[offset : offset + 3])
         rotation = Euler(values[offset + 3 : offset + 6], "XYZ")

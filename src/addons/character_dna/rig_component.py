@@ -370,7 +370,7 @@ def component_selection_locked(instance: Any) -> bool:
 
     return any(
         getattr(getattr(instance, name, None), "is_editing", False)
-        for name in ("raw_control_editor", "shape_key_editor", "rbf_editor")
+        for name in ("raw_control_editor", "shape_key_editor", "rbf_editor", "swing_twist_editor")
     ) or is_suspended(instance)
 
 
@@ -396,7 +396,7 @@ def refresh_editor_component(instance: Any, context: Any = None) -> None:
     from .editors.raw_control_editor.callbacks import update_head_raw_control_list
     from .editors.rbf_editor.callbacks import update_body_rbf_solver_list
 
-    for editor_name in ("raw_control_editor", "rbf_editor", "shape_key_editor"):
+    for editor_name in ("raw_control_editor", "rbf_editor", "shape_key_editor", "swing_twist_editor"):
         # Component-local lists are rebuilt; session data must not leak across selections.
         instance.data.pop(f"{instance.name}_{editor_name}_editor", None)
         instance.data.pop(f"{instance.name}_{editor_name}_cache", None)
@@ -404,3 +404,6 @@ def refresh_editor_component(instance: Any, context: Any = None) -> None:
     update_head_raw_control_list(instance)
     update_body_rbf_solver_list(instance)
     instance.sync_shape_key_list()
+    from .editors.swing_twist_editor.callbacks import refresh
+
+    refresh(instance)

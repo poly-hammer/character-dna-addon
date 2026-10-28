@@ -949,6 +949,10 @@ class RigInstance(bpy.types.PropertyGroup):
         self.head_bone_transform_plan  # noqa: B018
 
         self.data[self.cache_key("head", "initialized")] = True
+        if self.is_pro and self.editor_component == "head":
+            from .editors.swing_twist_editor.callbacks import refresh
+
+            refresh(self)
         if update_raw_control_list and self.editor_component == "head":
             self.update_body_rbf_solver_list()
 
@@ -1022,6 +1026,10 @@ class RigInstance(bpy.types.PropertyGroup):
         self.body_bone_transform_plan  # noqa: B018
 
         self.data[self.cache_key("body", "initialized")] = True
+        if self.is_pro and self.editor_component == "body":
+            from .editors.swing_twist_editor.callbacks import refresh
+
+            refresh(self)
         if update_rbf_solver_list and self.editor_component == "body":
             self.update_head_raw_control_list()
             self.sync_shape_key_list()
