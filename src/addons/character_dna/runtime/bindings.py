@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -74,9 +75,24 @@ def validate_targets(targets: list[Target]) -> None:
 
 def install_targets(carrier: Any, targets: list[Target]) -> None:
     """Install owned identity drivers with rollback on any failed write."""
+    for _curve in install_targets_iter(carrier, targets):
+        pass
+
+
+def _set_targets(carrier: Any, targets: list) -> None:
+    # Blender's array-of-properties IDProperty cannot be resized by assignment.
+    if "targets" in carrier:
+        del carrier["targets"]
+    carrier["targets"] = targets
+    carrier.property_overridable_library_set('["targets"]', True)
+
+
+def install_targets_iter(carrier: Any, targets: list[Target], *, append: bool = False) -> Iterator:
+    """Install targets in resumable steps, retaining existing drivers when appending."""
     validate_targets(targets)
     installed = []
-    carrier["targets"] = [
+    previous = [dict(item) for item in carrier.get("targets", [])] if append else []
+    records = previous + [
         {
             "owner": _persistent_owner(target.owner),
             "embedded": bool(target.owner.is_embedded_data),
@@ -86,6 +102,7 @@ def install_targets(carrier: Any, targets: list[Target]) -> None:
         }
         for target in targets
     ]
+    _set_targets(carrier, records)
     try:
         for target in targets:
             curve = (
@@ -100,11 +117,31 @@ def install_targets(carrier: Any, targets: list[Target]) -> None:
             add_variable(curve.driver, "output", carrier, f'["outputs"][{target.channel}]')
             add_variable(curve.driver, "epoch", carrier, '["epoch"]')
             curve.driver.expression = DRIVER_EXPRESSION
-    except Exception:
+            yield target.owner, curve
+    except BaseException:
         for target, _curve in reversed(installed):
             _remove_driver(target.owner, target.path, target.index)
-        del carrier["targets"]
+        _set_targets(carrier, previous)
         raise
+
+
+def remove_shape_targets(carrier: Any) -> set[int]:
+    """Detach only Key outputs before an importer replaces their datablocks."""
+    remaining, owners = [], set()
+    for item in carrier.get("targets", []):
+        owner, path = resolve_output_target(carrier, item)
+        if owner is not None and owner.id_type == "KEY":
+            owners.add(owner.as_pointer())
+            curve = (
+                owner.animation_data.drivers.find(path, index=max(0, item["index"])) if owner.animation_data else None
+            )
+            if curve is not None and owned_curve(curve, carrier):
+                _remove_driver(owner, path, item["index"])
+        else:
+            remaining.append(dict(item))
+    if owners:
+        _set_targets(carrier, remaining)
+    return owners
 
 
 def mute_targets(carrier: Any, muted: bool) -> None:

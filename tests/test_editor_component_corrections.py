@@ -136,7 +136,10 @@ def test_shape_import_availability_matches_selected_dna(character):
         CHARACTER_DNA_PT_shape_keys.draw(panel, bpy.context)
         assert f"No shape keys on {instance.name}. {count} in {kind} DNA" in layout.labels
         assert (f"{ToolInfo.NAME}.import_shape_keys" in layout.operators) == bool(count)
-        assert ("generate_neutral_shapes" in layout.properties) == bool(count)
+        assert "generate_neutral_shapes" not in layout.properties
+        generate = "generate_rbf_shape_keys" if kind == "body" else "generate_neutral_shape_keys"
+        assert f"{ToolInfo.NAME}.{generate}" in layout.operators
+        assert layout.scale_y == 1.5
         assert bpy.ops.character_dna.import_shape_keys.poll() == bool(count)
         reports = []
         operator = SimpleNamespace(report=lambda _level, message, reports=reports: reports.append(message))

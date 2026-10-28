@@ -11,6 +11,7 @@ import hashlib
 import logging
 
 from array import array
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +66,7 @@ def _curves(carriers: list) -> list:
     return result
 
 
-def _scene_signature(instance: Any, carriers: list, curves: list) -> tuple:
+def _scene_signature(instance: Any, carriers: list, curves: list, shape_meshes: set | None = None) -> tuple:
     """Copy identities/structure only; sculpted coordinates and pose values may change."""
     rigs = [
         (
@@ -93,7 +94,7 @@ def _scene_signature(instance: Any, carriers: list, curves: list) -> tuple:
             obj.name,
             len(obj.data.vertices),
             tuple((key.as_pointer(), key.name, len(key.data)) for key in obj.data.shape_keys.key_blocks)
-            if obj.data.shape_keys
+            if obj.data.shape_keys and obj.as_pointer() not in (shape_meshes or ())
             else (),
         )
         for obj in bpy.data.objects
@@ -159,6 +160,54 @@ def pause(instance: Any) -> bool:
     return True
 
 
+def prepare_shape_import(instance: Any, component: str, meshes: list) -> None:
+    """Keep unchanged native outputs while allowing the importer to replace selected Keys."""
+    snapshot = _sessions.get(engine.instance_id(instance))
+    if snapshot is None:
+        return
+    from .bindings import remove_shape_targets
+
+    carriers = engine.carriers(instance)
+    removed = set()
+    for carrier in carriers:
+        if carrier["component"] == component:
+            removed.update(remove_shape_targets(carrier))
+    snapshot["curves"] = [item for item in snapshot["curves"] if item[0].as_pointer() not in removed]
+    snapshot["shape_component"] = component
+    snapshot["shape_meshes"] = {obj.as_pointer() for obj in meshes}
+    snapshot["signature"] = _scene_signature(instance, carriers, snapshot["curves"], snapshot["shape_meshes"])
+
+
+def bind_imported_shapes(instance: Any) -> Iterator[None]:
+    """Append only imported Key outputs, keeping bone drivers and model/session identities."""
+    snapshot = _sessions.get(engine.instance_id(instance))
+    if snapshot is None or "shape_component" not in snapshot:
+        return
+    from .bindings import Target, install_targets_iter
+
+    carriers = engine.carriers(instance)
+    if _scene_signature(instance, carriers, _curves(carriers), snapshot["shape_meshes"]) != snapshot["signature"]:
+        # The regular resume path detects the pending import and rebuilds safely.
+        return
+    component = snapshot["shape_component"]
+    for carrier in carriers:
+        if carrier["component"] != component:
+            continue
+        targets = []
+        offset = int(carrier["joint_count"]) * 9
+        for blocks, positions, channels, _driven, _buffer in instance.component(component).shape_key_apply_plan:
+            for position, channel in zip(positions, channels, strict=True):
+                block = blocks[int(position)]
+                targets.append(Target(block.id_data, block.path_from_id("value"), -1, offset + int(channel)))
+        for owner, curve in install_targets_iter(carrier, targets, append=True):
+            curve.mute = True
+            snapshot["curves"].append((owner, curve, False))
+            yield
+    snapshot["signature"] = _scene_signature(instance, carriers, _curves(carriers))
+    del snapshot["shape_component"]
+    del snapshot["shape_meshes"]
+
+
 def resume(instance: Any) -> list:
     """Return prior mute states on reuse, or discard and let the caller rebuild."""
     snapshot = _sessions.pop(engine.instance_id(instance), None)
@@ -169,6 +218,8 @@ def resume(instance: Any) -> list:
             instance.destroy()
         return []
     try:
+        if "shape_component" in snapshot:
+            raise ValueError("Shape import bindings were not completed")
         curves = _curves(carriers)
         if _scene_signature(instance, carriers, curves) != snapshot["signature"]:
             raise ValueError("Scene binding structure changed")

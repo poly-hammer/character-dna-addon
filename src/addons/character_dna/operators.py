@@ -2,6 +2,7 @@
 import logging
 import queue
 import shutil
+import time
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -63,6 +64,8 @@ class GenericProgressQueueOperator(bpy.types.Operator):
     # when importing hundreds of shape keys, while still keeping the UI responsive
     # and the progress bar updating smoothly.
     _batch_size = 25
+    _time_budget = 0.02
+    _progress_limit = 1.0
 
     def modal(self, context: "Context", event: bpy.types.Event) -> set[str]:
         addon_window_manager_properties = utilities.get_addon_window_manager_properties(context)
@@ -77,6 +80,7 @@ class GenericProgressQueueOperator(bpy.types.Operator):
             # Process a batch of commands per tick instead of one, so the timer
             # cadence and redraw cost don't dominate the total import time.
             description = ""
+            deadline = time.perf_counter() + self._time_budget
             for _ in range(self._batch_size):
                 if self._commands_queue.empty():
                     break
@@ -90,11 +94,13 @@ class GenericProgressQueueOperator(bpy.types.Operator):
                     self.finish(context)
                     self.report({"ERROR"}, str(error))
                     return {"CANCELLED"}
+                if time.perf_counter() >= deadline:
+                    break
 
             remaining = self._commands_queue.qsize()
             addon_window_manager_properties.progress = (
-                self._commands_queue_size - remaining
-            ) / self._commands_queue_size
+                (self._commands_queue_size - remaining) / self._commands_queue_size * self._progress_limit
+            )
             addon_window_manager_properties.progress_description = description
 
             # redraw once per batch so the progress bar updates without paying the

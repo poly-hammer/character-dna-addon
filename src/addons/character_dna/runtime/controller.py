@@ -253,6 +253,21 @@ def resume(instance: Any, was_active: bool) -> None:
 
 
 @contextmanager
+def shape_import_operation(instance: Any):
+    """Lock component selection even when import starts with evaluation disabled."""
+    if is_suspended(instance):
+        raise RuntimeError("Commit or revert active edits before importing shape keys.")
+    was_active = suspend(instance, preserve_bindings=True)
+    identity = engine.instance_id(instance)
+    _suspended.add(identity)
+    try:
+        yield
+    finally:
+        _suspended.discard(identity)
+        resume(instance, was_active)
+
+
+@contextmanager
 def authoring_operation(instance: Any):
     """Temporarily release output drivers for editing or animation baking."""
     was_active = suspend(instance)
