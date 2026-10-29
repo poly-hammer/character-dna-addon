@@ -159,9 +159,15 @@ def test_editor_preview_and_lifecycle(character, finish):
     path = Path(instance.edit_target.dna_file_path)
     before = path.read_bytes()
     original = core.read_setups(instance.edit_target.dna_reader)
+    driver = instance.body_rig.pose.bones["calf_l"]
+    driver.rotation_mode = "QUATERNION"
+    driver.rotation_quaternion = Quaternion((0.9, 0.1, 0.2, 0.3)).normalized()
+    instance.body_rig.update_tag()
+    bpy.context.view_layer.update()
     pose = np.array(instance.body_rig.pose.bones["calf_l"].matrix_basis)
     bpy.context.scene.tool_settings.use_keyframe_insert_auto = True
     editor.enter(bpy.context)
+    np.testing.assert_allclose(driver.matrix_basis, np.eye(4), atol=2e-5)
     assert controller.is_suspended(instance)
     assert not bpy.context.scene.tool_settings.use_keyframe_insert_auto
     assert len(instance.swing_twist_editor.setups) == 16
@@ -321,13 +327,13 @@ def test_preview_matches_committed_native_runtime(character, rbfs):
     properties = character.swing_twist_editor
     properties.active_index = 6
     rig = character.body_rig
-    for name in ("calf_l", "upperarm_l"):
-        bone = rig.pose.bones[name]
-        bone.rotation_mode = "QUATERNION"
-        bone.rotation_quaternion = Quaternion((0.9, 0.1, 0.2, 0.3)).normalized()
+    editor.enter(bpy.context)
+    properties.preview_offset = math.radians(45)
+    bone = rig.pose.bones["calf_l"]
+    bone.rotation_mode = "QUATERNION"
+    bone.rotation_quaternion = Quaternion((0.9, 0.1, 0.2, 0.3)).normalized()
     rig.update_tag()
     bpy.context.view_layer.update()
-    editor.enter(bpy.context)
     properties.setups[6].outputs[0].weight = 0.25
     properties.setups[6].axis = "Z"
     assert not properties.error
@@ -442,11 +448,8 @@ def test_read_only_records_survive_ui_roundtrip(character):
 def test_parameter_undo_redo_restores_scene_values(character):
     from character_dna.utilities import switch_to_object_mode
 
-    driver = character.body_rig.pose.bones["calf_l"]
-    driver.rotation_quaternion = Quaternion((0.9, 0.1, 0.2, 0.3)).normalized()
-    character.body_rig.update_tag()
-    bpy.context.view_layer.update()
     SwingTwistEditor.for_instance(character).enter(bpy.context)
+    character.swing_twist_editor.preview_offset = math.radians(45)
     switch_to_object_mode()
     bpy.context.preferences.edit.use_global_undo = True
     original = character.swing_twist_editor.setups[0].outputs[0].weight
@@ -622,10 +625,15 @@ def test_failed_entry_restores_collection_visibility(character, monkeypatch):
     from character_dna.editors.swing_twist_editor import editor as editor_module
 
     rig = character.body_rig
+    driver = rig.pose.bones["calf_l"]
+    driver.rotation_mode = "QUATERNION"
+    driver.rotation_quaternion = Quaternion((0.9, 0.1, 0.2, 0.3)).normalized()
+    original_pose = np.array(driver.matrix_basis)
     before = {c.name: (c.is_visible, c.is_solo) for c in rig.data.collections_all}
 
     def fail(_instance):
         assert rig.data.collections_all["Swings"].is_visible
+        np.testing.assert_allclose(driver.matrix_basis, np.eye(4), atol=2e-5)
         raise RuntimeError("evaluation failed")
 
     monkeypatch.setattr(editor_module, "apply_selected", fail)
@@ -634,6 +642,7 @@ def test_failed_entry_restores_collection_visibility(character, monkeypatch):
         editor.enter(bpy.context)
     assert not editor.is_editing
     assert before == {c.name: (c.is_visible, c.is_solo) for c in rig.data.collections_all}
+    np.testing.assert_allclose(driver.matrix_basis, original_pose, atol=2e-5)
     assert engine.binding_issues(character) == []
 
 
@@ -645,13 +654,26 @@ def test_offset_is_absolute_preview_only_and_restores_pose(character, index, fin
     baseline = core.read_setups(character.edit_target.dna_reader)
     path = Path(character.edit_target.dna_file_path)
     before = path.read_bytes()
-    driver = character.body_rig.pose.bones[baseline[index].driver]
+    rig = character.body_rig
+    evaluated = rig.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    rest_pose = {bone.name: np.array(bone.matrix_basis) for bone in evaluated.pose.bones}
+    character.auto_evaluate_body = False
+    driver = rig.pose.bones[baseline[index].driver]
+    for bone in (driver, rig.pose.bones["upperarm_r"], rig.pose.bones[0]):
+        bone.rotation_mode = "QUATERNION"
+        bone.rotation_quaternion = Quaternion((0.9, 0.1, 0.2, 0.3)).normalized()
+        bone.location = (0.1, 0.2, -0.1)
+        bone.scale = (1.1, 0.9, 1.2)
+    rig.update_tag()
+    bpy.context.view_layer.update()
+    before_poses = {bone.name: np.array(bone.matrix_basis) for bone in rig.pose.bones}
     original_pose = np.array(driver.matrix_basis)
     properties.preview_offset = math.radians(10)
     editor = SwingTwistEditor.for_instance(character)
     editor.enter(bpy.context)
     assert properties.preview_offset == 0
-    np.testing.assert_allclose(driver.matrix_basis, original_pose, atol=2e-5)
+    for name, pose in rest_pose.items():
+        np.testing.assert_allclose(rig.pose.bones[name].matrix_basis, pose, atol=2e-5, err_msg=name)
     properties.preview_offset = math.radians(45)
     initial_pose = np.array(driver.matrix_basis)
     output = character.body_rig.pose.bones[baseline[index].output_names[0]]
@@ -663,19 +685,21 @@ def test_offset_is_absolute_preview_only_and_restores_pose(character, index, fin
     for degrees in (10, 90, -30, 45):
         properties.preview_offset = math.radians(degrees)
         assert not properties.error
-    # Re-evaluation from the entry pose must never add the same offset twice.
+    # Re-evaluation from rest must never add the same offset twice.
     np.testing.assert_allclose(driver.matrix_basis, initial_pose, atol=2e-5)
     np.testing.assert_allclose(output.matrix_basis, initial_output, atol=2e-5)
     assert bpy.ops.character_dna.reset_swing_twist_preview() == {"FINISHED"}
     assert properties.preview_offset == 0
     assert not properties.error
-    np.testing.assert_allclose(driver.matrix_basis, original_pose, atol=2e-5)
+    np.testing.assert_allclose(driver.matrix_basis, rest_pose[driver.name], atol=2e-5)
     properties.preview_offset = math.radians(90)
     assert callbacks.draft(character) == baseline
     assert path.read_bytes() == before
     getattr(editor, finish)(bpy.context)
     assert path.read_bytes() == before
-    np.testing.assert_allclose(driver.matrix_basis, original_pose, atol=2e-5)
+    assert not character.auto_evaluate_body
+    for name, pose in before_poses.items():
+        np.testing.assert_allclose(rig.pose.bones[name].matrix_basis, pose, atol=2e-5, err_msg=name)
     assert core.read_setups(character.edit_target.dna_reader) == baseline
 
 
