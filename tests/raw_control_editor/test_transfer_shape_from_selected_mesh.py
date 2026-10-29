@@ -79,7 +79,7 @@ class _FakeInstance:
 
     def __init__(self, head: list[Any], body: list[Any], head_mesh: Any = None) -> None:
         self.output = SimpleNamespace(head_item_list=head, body_item_list=body)
-        self.head_mesh = head_mesh
+        self.edit_target = SimpleNamespace(mesh=head_mesh)
 
 
 class _FakeEditor:

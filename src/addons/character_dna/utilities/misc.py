@@ -218,8 +218,14 @@ def set_active(scene_object: bpy.types.Object | None) -> bool:
 
 
 def deselect_all():
-    for scene_object in bpy.context.view_layer.objects if bpy.context.view_layer else ():
-        scene_object.select_set(False)
+    view_layer = bpy.context.view_layer
+    if view_layer is None:
+        return
+    # The active-object getter synchronizes bases without evaluating the rig. Otherwise,
+    # select_set can rebuild a stale base list while the RNA iterator still traverses it.
+    _ = view_layer.objects.active
+    for scene_object in tuple(view_layer.objects):
+        scene_object.select_set(False, view_layer=view_layer)
 
 
 def select_only(*scene_object: bpy.types.Object) -> bool:

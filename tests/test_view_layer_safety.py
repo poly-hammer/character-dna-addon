@@ -2,6 +2,7 @@ import bpy
 import pytest
 
 from character_dna.utilities import (
+    deselect_all,
     is_collection_in_scene,
     move_to_collection,
     select_only,
@@ -67,6 +68,36 @@ def test_visibility_helpers_tolerate_no_object():
     assert set_hidden(None, True) is False
     assert set_selected(None, True) is False
     assert set_active(None) is False
+
+
+@pytest.mark.parametrize("change", ["remove", "unlink", "exclude"])
+def test_deselect_all_after_collection_changes(empty_scene, change):
+    collection = bpy.data.collections.new("changing_collection")
+    empty_scene.collection.children.link(collection)
+    removed = _armature_object("removed_rig")
+    collection.objects.link(removed)
+    remaining = _armature_object("remaining_rig")
+    empty_scene.collection.objects.link(remaining)
+    removed.select_set(True)
+    remaining.select_set(True)
+    remaining.hide_set(True)
+
+    if change == "remove":
+        bpy.data.objects.remove(removed, do_unlink=True)
+    elif change == "unlink":
+        empty_scene.collection.children.unlink(collection)
+    else:
+        bpy.context.view_layer.layer_collection.children[collection.name].exclude = True
+    replacement = _armature_object("replacement_rig")
+    empty_scene.collection.objects.link(replacement)
+
+    # Do not update or read selection here: that would synchronize away the stale bases.
+    deselect_all()
+
+    assert remaining.select_get() is False
+    assert remaining.hide_get() is True
+    assert replacement.name in bpy.context.view_layer.objects
+    assert "removed_rig" not in bpy.context.view_layer.objects
 
 
 def test_select_only_tolerates_an_object_outside_the_view_layer(empty_scene):
