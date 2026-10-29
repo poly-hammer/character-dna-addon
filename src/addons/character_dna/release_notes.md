@@ -7,6 +7,10 @@
 
 * Added Shape Key support to RBF Editor. Assign Shape Key values to a RBF Pose individually, or batch per poses in all solvers.
 
+## Patch Changes
+
+* Fixed baking bug [#67](https://github.com/orgs/poly-hammer/discussions/67)
+
 ## Tests Passing On
 
 * Blender `4.5`, `5.2` (installed from blender.org)
