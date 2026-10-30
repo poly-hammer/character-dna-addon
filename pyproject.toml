@@ -220,7 +220,7 @@ markers = [
   "rig_profile: explicit scene-profile options for a fixture"
 ]
 minversion = "8.0"
-pythonpath = ["tests", "tests/blender", "src/addons"]
+pythonpath = [".", "tests", "tests/blender", "src/addons"]
 testpaths = ["tests"]
 tmp_path_retention_policy = "failed"
 
