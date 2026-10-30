@@ -2,6 +2,11 @@
 
 import pickle
 
+from operator import eq
+
+
+_SCALAR_TYPES = {bool, float, int, str, type(None)}
+
 
 def copy_graph(graph):
     """Copy every value without Python recursion over millions of scalars.
@@ -38,10 +43,7 @@ def first_difference(left, right, path=""):
     elif isinstance(left, list):
         if len(left) != len(right):
             return path, len(left), len(right)
-        if left == right and all(
-            not isinstance(value, (dict, list)) and value == value  # noqa: PLR0124 - NaN
-            for value in left
-        ):
+        if left == right and set(map(type, left)) <= _SCALAR_TYPES and all(map(eq, left, left)):
             return None
         for index, (a, b) in enumerate(zip(left, right, strict=True)):
             if result := first_difference(a, b, path + "/" + str(index)):

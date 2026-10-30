@@ -60,14 +60,17 @@ def test_reference_material_remapping_updates_mesh_slots():
     mesh = bpy.data.meshes.new("ReferenceMaterialContract")
     original = bpy.data.materials.new("ReferenceOriginal")
     replacement = bpy.data.materials.new("ReferenceReplacement")
+    unchanged = bpy.data.materials.new("ReferenceUnchanged")
     try:
         mesh.materials.append(original)
+        mesh.materials.append(unchanged)
         changed = _remap_id(mesh, {original: replacement})
         assert mesh.materials[0] == replacement
-        assert "materials[0]" in changed
+        assert mesh.materials[1] == unchanged
+        assert changed == {"materials[0]"}
         assert original.users == 0
     finally:
-        bpy.data.batch_remove(ids=[mesh, original, replacement])
+        bpy.data.batch_remove(ids=[mesh, original, replacement, unchanged])
 
 
 def test_face_widgets_reuse_matching_geometry_only():
@@ -797,6 +800,7 @@ def test_reference_blend_file(  # noqa: PLR0912, PLR0915
 ):
     protected_paths = (
         setup_reference_blend_file,
+        *(setup_reference_blend_file.parent / name for name in ("head.dna", "body.dna")),
         *(TEST_DNA_FOLDER / "ada" / name for name in ("head.dna", "body.dna")),
     )
     fingerprints = {path: hashlib.sha256(path.read_bytes()).digest() for path in protected_paths}

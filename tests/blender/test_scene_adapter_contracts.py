@@ -34,6 +34,11 @@ def test_skin_weight_import_matches_native_values_and_reuses_existing_groups(emp
         unrelated = obj.vertex_groups.new(name="AuthoredUnrelatedGroup")
         unrelated.add([0], 0.375, "REPLACE")
         observed = Mock(spec=type(reader), wraps=reader)
+        # Observe only the getter whose lookup count is the contract. Recording
+        # every unmodified skin-weight read adds no assertion and retains a
+        # large Mock call history; these still call the actual native reader.
+        observed.getSkinWeightsJointIndices = reader.getSkinWeightsJointIndices
+        observed.getSkinWeightsValues = reader.getSkinWeightsValues
         importer = SimpleNamespace(_dna_reader=observed)
         DNAImporter.set_vertex_groups(importer, 0, obj)
         used_joints = set()

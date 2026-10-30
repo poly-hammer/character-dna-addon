@@ -76,18 +76,17 @@ def animate_character(instance):
     bpy.context.view_layer.update()  # type: ignore[union-attr]
 
 
-@pytest.fixture(scope="session")
-def animated_scene_with_a_second_character(addon):
-    bpy.ops.wm.read_homefile(app_template="")
-    for scene_object in list(bpy.data.objects):
-        bpy.data.objects.remove(scene_object, do_unlink=True)
+@pytest.fixture(scope="module")
+def animated_scene_with_a_second_character(rig_factory, tmp_path_factory):
+    from fixtures.rigs import RigProfile
 
-    import_dna(TEST_DNA_FOLDER / "ada" / "head.dna")
-    scene_properties = bpy.context.scene.character_dna  # type: ignore[attr-defined]
-    animate_character(scene_properties.rig_instance_list[0])
-
-    import_dna(TEST_DNA_FOLDER / "default" / "head.dna")
-    return scene_properties.rig_instance_list
+    # The first complete character is preparation, while the second import
+    # exercises duplication, placement and native ownership in every run.
+    profile = RigProfile(face_board=True, materials=True)
+    with rig_factory.lease(profile, tmp_path_factory.mktemp("second_character")) as first:
+        animate_character(first)
+        import_dna(TEST_DNA_FOLDER / "default" / "head.dna")
+        yield bpy.context.scene.character_dna.rig_instance_list
 
 
 def test_second_import_places_the_face_board_beside_its_own_head(animated_scene_with_a_second_character):

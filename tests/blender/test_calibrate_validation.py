@@ -1,26 +1,14 @@
 import bmesh
-import bpy
 import pytest
 
 from character_dna.dna_io.calibrator import DNACalibrator
 from character_dna.ui.callbacks import get_active_rig_instance
-from constants import TEST_DNA_FOLDER
 
 
 @pytest.fixture
-def head_only_character(addon):
-    """A head DNA imported on its own, reloaded per test since these mutate the topology."""
-    from fixtures.scene import load_dna
-
-    load_dna(
-        file_path=TEST_DNA_FOLDER / "ada" / "head.dna",
-        import_lods=["lod0"],
-        import_shape_keys=False,
-        import_face_board=False,
-        include_body=False,
-    )
+def head_only_character(load_head_only_dna):
+    """A private full head surface, restored per test before topology changes."""
     yield get_active_rig_instance()
-    bpy.ops.wm.read_homefile(use_empty=True)
 
 
 def _calibrator(instance) -> DNACalibrator:

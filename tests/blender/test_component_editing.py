@@ -188,31 +188,20 @@ def test_head_shared_pose_can_add_a_neutral_driven_joint():
             release_dna_handle(handle)
 
 
-def test_component_selection_routes_and_locks_sessions(tmp_path):
+def test_component_selection_routes_and_locks_sessions(tmp_path, rig_factory):
     import hashlib
-    import shutil
 
     import bpy
 
     from character_dna.editors.rbf_editor.editor import RBFEditor
     from character_dna.runtime import engine
-    from character_dna.utilities import get_active_rig_instance
-    from constants import TEST_DNA_FOLDER
+    from fixtures.compact_dna import STATE_BONES
+    from fixtures.rigs import RigProfile
 
-    bpy.ops.wm.read_homefile(use_empty=True)
-    for name in ("head.dna", "body.dna", "ExportManifest.json"):
-        shutil.copyfile(TEST_DNA_FOLDER / "ada" / name, tmp_path / name)
-    bpy.ops.character_dna.import_dna(
-        filepath=str(tmp_path / "head.dna"),
-        include_body=True,
-        import_face_board=False,
-        import_mesh=False,
-        import_bones=True,
-        import_materials=False,
-        **{f"import_lod{index}": index == 0 for index in range(8)},
-    )
-    instance = get_active_rig_instance()
-    try:
+    # This contract observes routing, lock ownership and publication, not every
+    # output bone. The DNA and solver lists remain complete and private.
+    profile = RigProfile(meshes=False, face_board=True, pose_bones=STATE_BONES)
+    with rig_factory.lease(profile, tmp_path) as instance:
         for kind, other in (("body", "head"), ("head", "body")):
             instance.editor_component = kind
             reader = instance.edit_target.dna_reader
@@ -228,8 +217,6 @@ def test_component_selection_routes_and_locks_sessions(tmp_path):
             assert hashlib.sha256((tmp_path / f"{other}.dna").read_bytes()).digest() == digest
             assert not editor.is_editing
             assert engine.binding_issues(instance) == []
-    finally:
-        bpy.ops.wm.read_homefile(use_empty=True)
 
 
 def test_body_shape_channels_bind_and_preview(tmp_path):

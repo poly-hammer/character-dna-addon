@@ -37,6 +37,20 @@ def test_graph_comparison_rejects_nan_even_when_the_same_object_is_shared():
     assert math.isnan(result[1]) and math.isnan(result[2])
 
 
+def test_graph_comparison_mixed_scalars_and_nested_containers():
+    source = [None, False, True, -3, -0.0, 1.25, "text"]
+    assert first_difference(source, list(source)) is None
+    changed = list(source)
+    changed[-1] = "other"
+    assert first_difference(source, changed) == ("/6", "text", "other")
+    nested = [*source, {"size": 10, "values": [2, 4]}]
+    candidate = copy_graph(nested)
+    candidate[-1]["size"] = 20
+    assert first_difference(nested, candidate) is None
+    candidate[-1]["values"][-1] = 5
+    assert first_difference(nested, candidate) == ("/7/values/1", 4, 5)
+
+
 def test_graph_archive_restores_independent_mutable_owners():
     original = {"weights": [0.1, 0.2], "channels": {"name": "left"}}
     archive = snapshot_graph(original)

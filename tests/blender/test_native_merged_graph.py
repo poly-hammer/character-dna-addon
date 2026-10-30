@@ -45,10 +45,12 @@ def test_graph_digest_preserves_scalars_and_filters_nested_archive_fields():
         "desc1.1": {"metadata": [["author", "Ada"], [PREFIX, "payload"], [PREFIX + ".0", "chunk"]]},
         "size": 40,
         "values": [1, 2.5, "text", None, True, [], {"offset": 12, "keep": [3, {"index": 4, "value": 5}]}],
+        "scalars": [-0.0, 1e-310, 1e308, float("nan"), None, True, "text"],
     }
     expected = {
         "desc1.1": {"metadata": [["author", "Ada"]]},
         "values": [1, 2.5, "text", None, True, [], {"keep": [3, {"value": 5}]}],
+        "scalars": [-0.0, 1e-310, 1e308, float("nan"), None, True, "text"],
     }
     before = snapshot_graph(graph)
     encoded = json.dumps(expected, sort_keys=True, separators=(",", ":")).encode()

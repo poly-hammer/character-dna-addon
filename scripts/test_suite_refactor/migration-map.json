@@ -343,7 +343,7 @@
       ],
       "after": [
         "__init__.py",
-        "\"version\": (0, 15, 6),"
+        "\"version\": (0, 15, 7),"
       ],
       "reason": "Required patch-version metadata update; no conditional behavior."
     },

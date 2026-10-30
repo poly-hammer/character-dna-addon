@@ -258,6 +258,27 @@
         "test_skin_weight_import_matches_native_values_and_reuses_existing_groups",
         "All original full geometry importer, exporter, calibration and deformation tests"
       ]
+    },
+    {
+      "case": "Component selection session routing",
+      "before": "The routing/lock test freshly imported every head and body output bone before two no-op editor commits.",
+      "after": "A private no-mesh lease retains complete native DNA, complete solver lists, input bones, observed output bones and ancestors. The actual editor entry, component lock, commit, untouched-component file hash and native binding checks remain. Full output matrices and per-component native round trips remain separate integration oracles.",
+      "retained_integration": [
+        "test_component_selection_routes_and_locks_sessions",
+        "test_rbf_noop_preserves_behavior (both components)",
+        "Complete Maya/Unreal pose matrices and full reference transport"
+      ]
+    },
+    {
+      "case": "Full reference sources, topology validation and second-character import",
+      "before": "Preparation repeated complete DNA imports and the second-character fixture retained live RNA at session scope.",
+      "after": "Owned leases restore complete head or paired-character profiles with all original geometry, bones and materials. The full reference still authors the same controls and animation before saving; all six reference modes retain every frame and reload assertion. Both original and private source DNA files are protected by byte fingerprints. The second character is still imported fresh into the animated scene, and no live RNA escapes the module lease. Calibration cases restore an independent full head before changing topology.",
+      "retained_integration": [
+        "All original test_reference_blend_file parameters and animation frames",
+        "All four test_multi_character_import assertions",
+        "Both original test_calibrate_validation cases",
+        "Pristine lease mutation and path-ownership canaries"
+      ]
     }
   ],
   "fault_checks": {

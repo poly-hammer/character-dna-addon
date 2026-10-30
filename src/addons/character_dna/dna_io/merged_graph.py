@@ -228,12 +228,16 @@ def digest(graph: dict) -> str:
     """Ignore archive byte offsets and our descriptor payload when comparing data."""
     from .metadata import PREFIX
 
+    scalar_types = {bool, float, int, str, type(None)}
+
     def clean(value: Any) -> Any:
         if isinstance(value, dict):
             return {key: clean(item) for key, item in value.items() if key not in {"index", "size", "offset"}}
         if isinstance(value, list):
             # SDK geometry and behavior arrays contain millions of scalar
             # values. Only containers need recursive archive-field filtering.
+            if set(map(type, value)) <= scalar_types:
+                return value
             return [clean(item) if isinstance(item, (dict, list)) else item for item in value]
         return value
 

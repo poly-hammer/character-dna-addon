@@ -166,33 +166,27 @@ def load_mhc_conformed_topology_meshes(empty_character_scene):
 
 
 @pytest.fixture(scope="session")
-def setup_reference_blend_file(addon, temp_folder) -> Path:
-    load_dna(
-        file_path=TEST_DNA_FOLDER / "ada" / "head.dna",
-        import_lods=["lod0"],
-        import_shape_keys=False,
-        import_face_board=True,
-        include_body=True,
-    )
-    instance = bpy.context.scene.character_dna.rig_instance_list[0]
-    face = instance.face_board
-    face["authored_reference_control"] = True
-    jaw = face.pose.bones["CTRL_C_jaw"]
-    for frame, value in ((1, 0.0), (10, 0.8), (25, 0.2), (50, 1.0), (100, 0.4), (200, 0.0)):
-        jaw.location.y = value
-        jaw.keyframe_insert(data_path="location", index=1, frame=frame)
-    root = bpy.data.collections.get((instance.name, None))
-    nested = bpy.data.collections.new("reference_nested")
-    root.children.link(nested)
-    helper = bpy.data.objects.new("reference_shared_helper", None)
-    root.objects.link(helper)
-    nested.objects.link(helper)
-    _add_reference_control_rig(instance, root)
-    bpy.context.scene.frame_set(1)
-    file_path = temp_folder / "reference_blend_file.blend"
-    # Save the blend file
-    bpy.ops.wm.save_as_mainfile(filepath=str(file_path))
-
+def setup_reference_blend_file(rig_factory, tmp_path_factory) -> Path:
+    # Keep the complete source character and authored animation. Only its
+    # initial construction is shared; the saved reference owns private DNA.
+    folder = tmp_path_factory.mktemp("reference_source")
+    with rig_factory.lease(RigProfile(face_board=True, materials=True), folder) as instance:
+        face = instance.face_board
+        face["authored_reference_control"] = True
+        jaw = face.pose.bones["CTRL_C_jaw"]
+        for frame, value in ((1, 0.0), (10, 0.8), (25, 0.2), (50, 1.0), (100, 0.4), (200, 0.0)):
+            jaw.location.y = value
+            jaw.keyframe_insert(data_path="location", index=1, frame=frame)
+        root = bpy.data.collections.get((instance.name, None))
+        nested = bpy.data.collections.new("reference_nested")
+        root.children.link(nested)
+        helper = bpy.data.objects.new("reference_shared_helper", None)
+        root.objects.link(helper)
+        nested.objects.link(helper)
+        _add_reference_control_rig(instance, root)
+        bpy.context.scene.frame_set(1)
+        file_path = folder / "reference_blend_file.blend"
+        bpy.ops.wm.save_as_mainfile(filepath=str(file_path))
     return file_path
 
 
