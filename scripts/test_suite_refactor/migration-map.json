@@ -1,0 +1,373 @@
+{
+  "tests": {
+    "tests/test_addon_registration.py": "tests/blender/test_addon_registration.py",
+    "tests/test_animation.py": "tests/blender/test_animation.py",
+    "tests/test_animation_validators.py": "tests/blender/test_animation_validators.py",
+    "tests/test_bindings_no_top_level_modules.py": "tests/blender/test_bindings_no_top_level_modules.py",
+    "tests/test_binding_installation.py": "tests/blender/test_binding_installation.py",
+    "tests/test_blender_process.py": "tests/blender/test_blender_process.py",
+    "tests/test_body_rbf_editor.py": "tests/blender/test_body_rbf_editor.py",
+    "tests/test_body_rig_logic.py": "tests/blender/test_body_rig_logic.py",
+    "tests/test_body_rig_logic_unreal.py": "tests/blender/test_body_rig_logic_unreal.py",
+    "tests/test_calibrate_validation.py": "tests/blender/test_calibrate_validation.py",
+    "tests/test_ci_benchmark.py": "tests/blender/test_ci_benchmark.py",
+    "tests/test_compact_document.py": "tests/blender/test_compact_document.py",
+    "tests/test_component_editing.py": "tests/blender/test_component_editing.py",
+    "tests/test_component_lod_visibility.py": "tests/blender/test_component_lod_visibility.py",
+    "tests/test_coordinate_migration.py": "tests/blender/test_coordinate_migration.py",
+    "tests/test_dna_coordinates.py": "tests/blender/test_dna_coordinates.py",
+    "tests/test_dna_document_metadata.py": "tests/blender/test_dna_document_metadata.py",
+    "tests/test_dna_metadata.py": "tests/blender/test_dna_metadata.py",
+    "tests/test_dna_operation_backups.py": "tests/blender/test_dna_operation_backups.py",
+    "tests/test_dna_scene_sources.py": "tests/blender/test_dna_scene_sources.py",
+    "tests/test_driver_recovery.py": "tests/blender/test_driver_recovery.py",
+    "tests/test_editor_component_corrections.py": "tests/blender/test_editor_component_corrections.py",
+    "tests/test_editor_runtime_lifecycle.py": "tests/blender/test_editor_runtime_lifecycle.py",
+    "tests/test_eye_convergence.py": "tests/blender/test_eye_convergence.py",
+    "tests/test_eye_visibility_bindings.py": "tests/blender/test_eye_visibility_bindings.py",
+    "tests/test_face_board_reposition.py": "tests/blender/test_face_board_reposition.py",
+    "tests/test_fbx_reader.py": "tests/blender/test_fbx_reader.py",
+    "tests/test_fbx_writer.py": "tests/blender/test_fbx_writer.py",
+    "tests/test_head_body_seam_normals.py": "tests/blender/test_head_body_seam_normals.py",
+    "tests/test_head_calibrator.py": "tests/blender/test_head_calibrator.py",
+    "tests/test_head_exporter.py": "tests/blender/test_head_exporter.py",
+    "tests/test_head_import_metadata.py": "tests/blender/test_head_import_metadata.py",
+    "tests/test_head_import_repeatability.py": "tests/blender/test_head_import_repeatability.py",
+    "tests/test_head_only_evaluation.py": "tests/blender/test_head_only_evaluation.py",
+    "tests/test_head_overwrite_exporter.py": "tests/blender/test_head_overwrite_exporter.py",
+    "tests/test_head_overwrite_shape_keys.py": "tests/blender/test_head_overwrite_shape_keys.py",
+    "tests/test_head_rig_logic.py": "tests/blender/test_head_rig_logic.py",
+    "tests/test_head_shape_keys.py": "tests/blender/test_head_shape_keys.py",
+    "tests/test_legacy_data_migration.py": "tests/blender/test_legacy_data_migration.py",
+    "tests/test_merge_lod_selection.py": "tests/blender/test_merge_lod_selection.py",
+    "tests/test_merge_restore_visibility.py": "tests/blender/test_merge_restore_visibility.py",
+    "tests/test_merge_split.py": "tests/blender/test_merge_split.py",
+    "tests/test_multi_character_import.py": "tests/blender/test_multi_character_import.py",
+    "tests/test_name_prefixes.py": "tests/blender/test_name_prefixes.py",
+    "tests/test_native_baking.py": "tests/blender/test_native_baking.py",
+    "tests/test_native_bindings.py": "tests/blender/test_native_bindings.py",
+    "tests/test_native_document.py": "tests/blender/test_native_document.py",
+    "tests/test_native_evaluation_ownership.py": "tests/blender/test_native_evaluation_ownership.py",
+    "tests/test_native_loader.py": "tests/blender/test_native_loader.py",
+    "tests/test_native_merged_graph.py": "tests/blender/test_native_merged_graph.py",
+    "tests/test_native_runtime.py": "tests/blender/test_native_runtime.py",
+    "tests/test_native_ui_refresh.py": "tests/blender/test_native_ui_refresh.py",
+    "tests/test_native_undo.py": "tests/blender/test_native_undo.py",
+    "tests/test_output_component_selection.py": "tests/blender/test_output_component_selection.py",
+    "tests/test_rbf_edits.py": "tests/blender/test_rbf_edits.py",
+    "tests/test_reference_blend_file.py": "tests/blender/test_reference_blend_file.py",
+    "tests/test_render_sync.py": "tests/blender/test_render_sync.py",
+    "tests/test_rig_definition_validator.py": "tests/blender/test_rig_definition_validator.py",
+    "tests/test_rig_fixtures.py": "tests/blender/test_rig_fixtures.py",
+    "tests/test_rig_instance_ops.py": "tests/blender/test_rig_instance_ops.py",
+    "tests/test_runtime_namespace.py": "tests/blender/test_runtime_namespace.py",
+    "tests/test_runtime_retention.py": "tests/blender/test_runtime_retention.py",
+    "tests/test_shape_generation.py": "tests/blender/test_shape_generation.py",
+    "tests/test_shape_import_finalization.py": "tests/blender/test_shape_import_finalization.py",
+    "tests/test_shape_names.py": "tests/blender/test_shape_names.py",
+    "tests/test_source_animation.py": "tests/blender/test_source_animation.py",
+    "tests/test_swing_twist_editor.py": "tests/blender/test_swing_twist_editor.py",
+    "tests/test_undo_model_cache.py": "tests/blender/test_undo_model_cache.py",
+    "tests/test_view_layer_safety.py": "tests/blender/test_view_layer_safety.py",
+    "tests/test_working_source_editor_access.py": "tests/blender/test_working_source_editor_access.py",
+    "tests/conftest.py": "tests/blender/conftest.py",
+    "tests/behavior_viewer/test_graph.py": "tests/blender/behavior_viewer/test_graph.py",
+    "tests/behavior_viewer/test_html_report.py": "tests/blender/behavior_viewer/test_html_report.py",
+    "tests/converter/test_converter_data.py": "tests/blender/converter/test_converter_data.py",
+    "tests/converter/test_converter_e2e.py": "tests/blender/converter/test_converter_e2e.py",
+    "tests/converter/test_finger_frames.py": "tests/blender/converter/test_finger_frames.py",
+    "tests/converter/test_lod_transfer.py": "tests/blender/converter/test_lod_transfer.py",
+    "tests/converter/test_solver.py": "tests/blender/converter/test_solver.py",
+    "tests/converter/test_templates.py": "tests/blender/converter/test_templates.py",
+    "tests/converter/__init__.py": "tests/blender/converter/__init__.py",
+    "tests/raw_control_editor/test_bind_pose_defaults.py": "tests/blender/raw_control_editor/test_bind_pose_defaults.py",
+    "tests/raw_control_editor/test_blend_shape_backsolve.py": "tests/blender/raw_control_editor/test_blend_shape_backsolve.py",
+    "tests/raw_control_editor/test_bone_locking.py": "tests/blender/raw_control_editor/test_bone_locking.py",
+    "tests/raw_control_editor/test_dependency_chain.py": "tests/blender/raw_control_editor/test_dependency_chain.py",
+    "tests/raw_control_editor/test_lbs_forward.py": "tests/blender/raw_control_editor/test_lbs_forward.py",
+    "tests/raw_control_editor/test_mirror_raw_control_name.py": {
+      "matrix": "tests/unit/test_mirror_raw_control_name.py",
+      "live_dna": "tests/blender/raw_control_editor/test_mirror_raw_control_name.py"
+    },
+    "tests/raw_control_editor/test_paste_raw_control.py": "tests/blender/raw_control_editor/test_paste_raw_control.py",
+    "tests/raw_control_editor/test_raw_control_active_channels.py": "tests/blender/raw_control_editor/test_raw_control_active_channels.py",
+    "tests/raw_control_editor/test_shape_key_transfer.py": "tests/blender/raw_control_editor/test_shape_key_transfer.py",
+    "tests/raw_control_editor/test_solver_env_e2e.py": "tests/blender/raw_control_editor/test_solver_env_e2e.py",
+    "tests/raw_control_editor/test_solver_env_index.py": "tests/blender/raw_control_editor/test_solver_env_index.py",
+    "tests/raw_control_editor/test_solver_env_paths.py": "tests/blender/raw_control_editor/test_solver_env_paths.py",
+    "tests/raw_control_editor/test_solver_setup_operator.py": "tests/blender/raw_control_editor/test_solver_setup_operator.py",
+    "tests/raw_control_editor/test_target_mesh_symmetry.py": "tests/blender/raw_control_editor/test_target_mesh_symmetry.py",
+    "tests/raw_control_editor/test_transfer_pose_aware.py": "tests/blender/raw_control_editor/test_transfer_pose_aware.py",
+    "tests/raw_control_editor/test_transfer_shape_from_selected_mesh.py": "tests/blender/raw_control_editor/test_transfer_shape_from_selected_mesh.py",
+    "tests/raw_control_editor/test_transfer_to_head_shape_keys.py": "tests/blender/raw_control_editor/test_transfer_to_head_shape_keys.py",
+    "tests/raw_control_editor/__init__.py": "tests/blender/raw_control_editor/__init__.py",
+    "tests/rbf_editor/test_mirror_rbf_name.py": {
+      "matrix": "tests/unit/test_mirror_rbf_name.py",
+      "live_dna": "tests/blender/rbf_editor/test_mirror_rbf_name.py"
+    },
+    "tests/rbf_editor/test_shape_driven.py": "tests/blender/rbf_editor/test_shape_driven.py",
+    "tests/rbf_editor/test_unapplied_pose_edits.py": "tests/blender/rbf_editor/test_unapplied_pose_edits.py",
+    "tests/shape_key_editor/test_dependency_visibility.py": "tests/blender/shape_key_editor/test_dependency_visibility.py",
+    "tests/shape_key_editor/test_filter_helpers.py": "tests/blender/shape_key_editor/test_filter_helpers.py",
+    "tests/shape_key_editor/test_paste_shape_key_values.py": "tests/blender/shape_key_editor/test_paste_shape_key_values.py",
+    "tests/shape_key_editor/test_rbf_solve.py": "tests/blender/shape_key_editor/test_rbf_solve.py",
+    "tests/shape_key_editor/test_shape_key_delta_writeback.py": "tests/blender/shape_key_editor/test_shape_key_delta_writeback.py",
+    "tests/shape_key_editor/test_shape_key_side_classification.py": {
+      "matrix": "tests/unit/test_shape_key_side_classification.py",
+      "live_dna": "tests/blender/shape_key_editor/test_shape_key_side_classification.py"
+    },
+    "tests/mesh_editor/test_mesh_data_transfer.py": "tests/blender/mesh_editor/test_mesh_data_transfer.py",
+    "tests/mesh_editor/test_symmetry.py": "tests/blender/mesh_editor/test_symmetry.py",
+    "tests/mesh_editor/__init__.py": "tests/blender/mesh_editor/__init__.py"
+  },
+  "functions": {
+    "editors/shared/utilities.py:21": {
+      "name": "_swap_side_token",
+      "old_end": 31
+    },
+    "editors/shared/utilities.py:34": {
+      "name": "regex_side_mirror",
+      "old_end": 59
+    },
+    "editors/shared/utilities.py:62": {
+      "name": "classify_side_by_regex",
+      "old_end": 92
+    },
+    "editors/raw_control_editor/core.py:1299": {
+      "name": "get_mirror_side_replacement",
+      "old_end": 1320
+    },
+    "editors/raw_control_editor/core.py:1323": {
+      "name": "get_mirrored_name",
+      "old_end": 1351
+    },
+    "editors/raw_control_editor/core.py:1358": {
+      "name": "_RAW_CONTROL_PH_SUFFIX_RE",
+      "old_end": 1358
+    },
+    "editors/raw_control_editor/core.py:1359": {
+      "name": "_RAW_CONTROL_WORD_SIDE_RE",
+      "old_end": 1359
+    },
+    "editors/raw_control_editor/core.py:1360": {
+      "name": "_RAW_CONTROL_TRAILING_SIDE_RE",
+      "old_end": 1360
+    },
+    "editors/raw_control_editor/core.py:1362": {
+      "name": "_WORD_SIDE_SWAP",
+      "old_end": 1362
+    },
+    "editors/raw_control_editor/core.py:1363": {
+      "name": "_LETTER_SIDE_SWAP",
+      "old_end": 1363
+    },
+    "editors/raw_control_editor/core.py:1366": {
+      "name": "mirror_raw_control_name",
+      "old_end": 1409
+    },
+    "editors/raw_control_editor/core.py:1412": {
+      "name": "classify_raw_control_side",
+      "old_end": 1430
+    },
+    "editors/rbf_editor/utilities.py:1163": {
+      "name": "rbf_mirror_side_replacement",
+      "old_end": 1187
+    },
+    "editors/rbf_editor/utilities.py:1190": {
+      "name": "rbf_mirrored_name",
+      "old_end": 1212
+    },
+    "editors/rbf_editor/utilities.py:1215": {
+      "name": "can_mirror_rbf_name",
+      "old_end": 1216
+    },
+    "editors/shape_key_editor/properties.py:17": {
+      "name": "DEFAULT_SIDE_MIRROR_REGEX",
+      "old_end": 17
+    },
+    "editors/rbf_editor/properties.py:13": {
+      "name": "DEFAULT_SOLVER_MIRROR_REGEX",
+      "old_end": 13
+    },
+    "editors/rbf_editor/properties.py:14": {
+      "name": "DEFAULT_POSE_MIRROR_REGEX",
+      "old_end": 14
+    },
+    "editors/rbf_editor/properties.py:15": {
+      "name": "DEFAULT_BONE_MIRROR_REGEX",
+      "old_end": 15
+    }
+  },
+  "renamed_identifiers": {
+    "editors/rbf_editor/utilities.py": {
+      "get_mirror_side_replacement": "rbf_mirror_side_replacement",
+      "get_mirrored_name": "rbf_mirrored_name",
+      "can_mirror_name": "can_mirror_rbf_name"
+    }
+  },
+  "declarations": [
+    {
+      "before": "__init__.py",
+      "after": "__init__.py",
+      "name": "bl_info"
+    },
+    {
+      "before": "__init__.py",
+      "after": "__init__.py",
+      "name": "post_setup_scene_callbacks"
+    },
+    {
+      "before": "constants.py",
+      "after": "naming.py",
+      "name": "RAW_CONTROL_PREFIX"
+    }
+  ],
+  "imports": [
+    {
+      "before": [
+        "editors/raw_control_editor/core.py",
+        "import re"
+      ],
+      "after": [
+        "naming.py",
+        "import re"
+      ]
+    },
+    {
+      "before": [
+        "editors/shared/utilities.py",
+        "import re"
+      ],
+      "after": [
+        "naming.py",
+        "import re"
+      ]
+    },
+    {
+      "before": [
+        "editors/rbf_editor/utilities.py",
+        "import re"
+      ],
+      "after": [
+        "naming.py",
+        "import re"
+      ]
+    },
+    {
+      "before": [
+        "__init__.py",
+        "from collections.abc import Callable"
+      ],
+      "after": [
+        "__init__.py",
+        "from collections.abc import Callable"
+      ]
+    },
+    {
+      "before": [
+        "__init__.py",
+        "from . import constants, manual_map, operators, properties, rig_instance, utilities"
+      ],
+      "after": [
+        "registration.py",
+        "from . import constants, manual_map, operators, properties, utilities"
+      ]
+    }
+  ],
+  "reader_aliases": {
+    "rig_instance.py": {
+      "head_driven_bone_names": "self.head_dna_reader",
+      "body_driven_bone_names": "self.body_dna_reader"
+    }
+  },
+  "statements": [
+    {
+      "before": [
+        "runtime/bindings.py",
+        "from ..utilities.reference import resolve_output_target"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "from ..utilities.reference import resolve_output_target as resolve"
+      ],
+      "reason": "Defer the same import to avoid an engine-first import cycle; native undo and output binding cases exercise it."
+    },
+    {
+      "before": [
+        "runtime/bindings.py",
+        "variable.type = \"SINGLE_PROP\""
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "if variable.type != \"SINGLE_PROP\":"
+      ],
+      "reason": "Avoid a redundant RNA write when the default already matches; real driver variable tests verify the final type and target."
+    },
+    {
+      "before": [
+        "runtime/bindings.py",
+        "variable.targets[0].id_type = owner.id_type"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "if target.id_type != owner.id_type:"
+      ],
+      "reason": "Guard the same assignment; real OBJECT and SCENE owner cases cover both outcomes and resolve the variable."
+    },
+    {
+      "before": [
+        "runtime/bindings.py",
+        "variable.targets[0].id = owner"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "target.id = owner"
+      ],
+      "reason": "The same target is retained in a local variable; output binding numerical tests remain."
+    },
+    {
+      "before": [
+        "runtime/bindings.py",
+        "variable.targets[0].data_path = path"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "target.data_path = path"
+      ],
+      "reason": "The same target is retained in a local variable; output binding numerical tests remain."
+    },
+    {
+      "before": [
+        "__init__.py",
+        "\"version\": (0, 15, 1),"
+      ],
+      "after": [
+        "__init__.py",
+        "\"version\": (0, 15, 2),"
+      ],
+      "reason": "Required patch-version metadata update; no conditional behavior."
+    },
+    {
+      "before": [
+        "editors/rbf_editor/operators.py",
+        "toast_success(f\"Duplicated pose '{pose.name}' to '{new_pose_name}'\", duration=2.5)"
+      ],
+      "after": [
+        "editors/rbf_editor/operators.py",
+        "toast_success(f\"Duplicated pose '{source_name}' to '{new_pose_name}'\", duration=2.5)"
+      ],
+      "reason": "Capture the RNA name before a collection mutation can invalidate its wrapper; original duplicate-pose cases remain."
+    },
+    {
+      "before": [
+        "editors/rbf_editor/utilities.py",
+        "return False, f\"Poses '{name}' and '{other_name}' have the same complete driver rotation vector.\""
+      ],
+      "after": [
+        "editors/rbf_editor/utilities.py",
+        "return False, f\"Poses '{name}' and '{other_name}' have duplicate complete driver rotation vectors.\""
+      ],
+      "reason": "Diagnostic wording retains the same rejection branch; existing duplicate-driver validation asserts rejection."
+    }
+  ]
+}

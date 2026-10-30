@@ -1,0 +1,137 @@
+name: Test suite refactor benchmark
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/test-suite-refactor-benchmark.yaml"
+      - "scripts/test_suite_refactor/run_benchmarks.py"
+      - "scripts/test_suite_refactor/compare_runs.py"
+      - "scripts/test_suite_refactor/prepare_ci.py"
+      - "scripts/test_suite_refactor/summarize_benchmarks.py"
+      - "scripts/test_suite_refactor/combine_benchmarks.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-suite-refactor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matched-pairs:
+    # Original-suite qualification is intentionally limited to this refactor.
+    # Ordinary PRs use the supported matrix in on-pr.yaml.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 380
+    name: Matched pair ${{ matrix.repetition }} ${{ matrix.os }} Blender ${{ matrix.blender }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        blender: ["4.5", "5.2"]
+        repetition: [1, 2, 3]
+        exclude:
+          - {os: ubuntu-latest, blender: "4.5"}
+        include:
+          - {python: "3.11", blender: "4.5"}
+          - {python: "3.13", blender: "5.2"}
+    env:
+      RUNNING_CI: "1"
+      CHARACTER_DNA_DEV: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Install Blender system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends git-lfs libegl1 libgl1 libsm6 libxfixes3 libxi6 libxkbcommon0 libxrender1 libxxf86vm1
+      - name: Checkout candidate
+        uses: actions/checkout@v7
+        with:
+          path: candidate
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          lfs: true
+          submodules: true
+          token: ${{ secrets.GH_PAT }}
+      - name: Checkout original suite
+        uses: actions/checkout@v7
+        with:
+          path: baseline
+          ref: f5f204b34673b0717404741b964f8de885ba9990
+          lfs: true
+          submodules: true
+          token: ${{ secrets.GH_PAT }}
+      - name: Checkout bindings
+        uses: actions/checkout@v7
+        with:
+          repository: poly-hammer/character-dna-bindings
+          ref: f72548dff3502394d1638b8e451382e8f58b2459
+          path: character-dna-bindings
+          token: ${{ secrets.GH_PAT }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v7
+      - name: Install one environment for both suites
+        working-directory: candidate
+        run: |
+          uv sync --python ${{ matrix.python }}
+          uv pip install "bpy==${{ matrix.blender }}.*" pytest==9.0.2 coverage==7.13.5
+      - name: Prepare identical bindings
+        working-directory: candidate
+        run: uv run --no-sync python scripts/test_suite_refactor/prepare_ci.py --bindings ../character-dna-bindings ../baseline .
+      - name: Measure one complete matched pair
+        id: measurement
+        continue-on-error: true
+        working-directory: candidate
+        run: uv run --no-sync python scripts/test_suite_refactor/run_benchmarks.py --baseline-root ../baseline --repeat 1 --repeat-start ${{ matrix.repetition }} --label ci-matched
+      - name: Compare the complete pair
+        if: ${{ !cancelled() }}
+        working-directory: candidate
+        run: uv run --no-sync python scripts/test_suite_refactor/summarize_benchmarks.py reports/test-suite-refactor/ci-matched/runs.json --minimum-pairs 1
+      - name: Preserve complete and interrupted evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-refactor-${{ matrix.os }}-${{ matrix.blender }}-${{ matrix.repetition }}
+          path: |
+            candidate/reports/test-suite-refactor/ci-matched/*.json
+            candidate/reports/test-suite-refactor/ci-matched/*.jsonl
+            candidate/reports/test-suite-refactor/ci-matched/*.log
+            candidate/reports/test-suite-refactor/ci-matched/*.xml
+            candidate/reports/test-suite-refactor/ci-matched/.coverage.*
+          include-hidden-files: true
+          retention-days: 14
+
+  acceptance:
+    name: Complete matrix acceptance
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 380) }}
+    needs: [matched-pairs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: test-refactor-*
+          path: reports/test-suite-refactor/ci-matrix
+      - name: Require all fifteen complete comparisons
+        run: python scripts/test_suite_refactor/combine_benchmarks.py reports/test-suite-refactor/ci-matrix
+      - name: Preserve acceptance summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-refactor-acceptance
+          path: reports/test-suite-refactor/ci-matrix/acceptance.json
+          retention-days: 14

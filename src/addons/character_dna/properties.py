@@ -3,6 +3,7 @@ import logging
 
 # third party imports
 import bpy
+import bpy.utils.previews
 
 # local imports
 from .constants import NUMBER_OF_HEAD_LODS, SIBLING_EDITIONS, ToolInfo

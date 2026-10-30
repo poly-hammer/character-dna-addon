@@ -8,11 +8,17 @@ from typing import Any
 
 import bpy
 
-from ..utilities.reference import resolve_output_target
-
 
 CARRIER_MARKER = "character_dna_native_carrier"
 DRIVER_EXPRESSION = "output + 0 * epoch"
+
+
+def resolve_output_target(carrier: Any, target: Any) -> tuple[Any, str]:
+    # Utilities also use the runtime controller. Resolve only when needed so
+    # either package can be imported first, without an eager addon bootstrap.
+    from ..utilities.reference import resolve_output_target as resolve
+
+    return resolve(carrier, target)
 
 
 @dataclass(frozen=True)
@@ -29,10 +35,15 @@ def add_variable(driver: Any, name: str, owner: Any, path: str) -> None:
     """Declare a driver dependency using public RNA paths."""
     variable = driver.variables.new()
     variable.name = name
-    variable.type = "SINGLE_PROP"
-    variable.targets[0].id_type = owner.id_type
-    variable.targets[0].id = owner
-    variable.targets[0].data_path = path
+    # Even assigning the existing RNA value invalidates Blender's dependencies.
+    # Most carriers already match the defaults; avoid two updates per output.
+    if variable.type != "SINGLE_PROP":
+        variable.type = "SINGLE_PROP"
+    target = variable.targets[0]
+    if target.id_type != owner.id_type:
+        target.id_type = owner.id_type
+    target.id = owner
+    target.data_path = path
 
 
 def owned_curve(curve: Any, carrier: Any) -> bool:

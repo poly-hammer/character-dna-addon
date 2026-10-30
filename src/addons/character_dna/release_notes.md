@@ -10,6 +10,8 @@
 ## Patch Changes
 
 * Fixed baking bug [#67](https://github.com/orgs/poly-hammer/discussions/67)
+* Reduced repeated DNA export allocation and native driver setup work.
+* Fixed stale mesh lookups during shape migration and RBF pose duplication after collection changes.
 
 ## Tests Passing On
 

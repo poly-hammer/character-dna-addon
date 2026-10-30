@@ -10,6 +10,8 @@ import bpy
 
 from mathutils import Euler, Vector
 
+from .naming import RAW_CONTROL_PREFIX as RAW_CONTROL_PREFIX  # noqa: PLC0414
+
 
 IS_BLENDER_5 = bpy.app.version >= (5, 0, 0)
 
@@ -70,7 +72,6 @@ LOD_REGEX = r"(?i)(_LOD\d).*"
 # Prefix of every MetaHuman face expression raw control in the DNA
 # (e.g. ``CTRL_expressions.jawOpen``). Lives at the top level so both the
 # Raw Control Editor and the shared dependency-chain resolver can use it.
-RAW_CONTROL_PREFIX = "CTRL_expressions."
 
 # this is the difference in scale between unreal and blender
 SCALE_FACTOR = 100.0

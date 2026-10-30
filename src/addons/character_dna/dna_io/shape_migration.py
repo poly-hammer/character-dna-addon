@@ -92,6 +92,9 @@ def migrate_instance(instance: Any) -> None:
         reader = component.dna_reader
         if reader is None:
             continue
+        # Export may follow an object deletion without an undo/load event.
+        # Reacquire scene IDs before migration dereferences cached RNA wrappers.
+        instance.data.pop(component.cache_key("mesh_index_lookup"), None)
         scale = 1 / SCALE_FACTOR if enums.TranslationUnit(reader.getTranslationUnit()).name.lower() == "cm" else 1.0
         for mesh, obj in component.mesh_index_lookup.items():
             changes = recover_mesh(obj, reader, mesh, scale)

@@ -498,6 +498,10 @@ class DNAExporter:
         self._dna_writer.setVertexPositions(meshIndex=mesh_index, positions=positions)
 
     def set_dna_faces(self, mesh_index: int, face_layouts: list[tuple[int, list[int]]]):
+        # SDK indexed collections otherwise grow once per face, copying the
+        # preceding rows repeatedly. Allocate through the last index once.
+        if face_layouts:
+            self._dna_writer.setFaceVertexLayoutIndices(mesh_index, max(row[0] for row in face_layouts), [])
         for face_index, face_vertex_indices in face_layouts:
             self._dna_writer.setFaceVertexLayoutIndices(
                 meshIndex=mesh_index, faceIndex=face_index, layoutIndices=face_vertex_indices
@@ -518,6 +522,10 @@ class DNAExporter:
         # Create a lookup table for the vertex group names by their index
         vertex_group_lookup = {vertex_group.index: vertex_group.name for vertex_group in mesh_object.vertex_groups}
 
+        # Allocate the indexed skin table before populating its variable-length
+        # rows. This preserves every vertex, influence and weight unchanged.
+        if mesh_object.data.vertices:
+            self._dna_writer.setSkinWeightsValues(mesh_index, len(mesh_object.data.vertices) - 1, [])
         # Loop through the vertices and get the vertex group names and the vertex and weights
         for vertex in mesh_object.data.vertices:
             vertex_group_names = [vertex_group_lookup.get(group.group, "") for group in vertex.groups]

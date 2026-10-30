@@ -24,7 +24,7 @@ keywords = ["blender", "metahuman", "dna", "riglogic", "animation", "3d"]
 name = "character-dna-addon"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
-version = "0.15.1"
+version = "0.15.2"
 
 [project.optional-dependencies]
 dev = [
@@ -202,7 +202,7 @@ typeCheckingMode = "basic"
 
 [tool.pytest.ini_options]
 addopts = [
-  "--tb=long",
+  "--tb=short",
   "-vv",
   "--junitxml=reports/pytest/results.xml",
   "--ignore-glob=scratches/**",
@@ -211,14 +211,18 @@ addopts = [
 ]
 env_files = [".env"]
 filterwarnings = []
-log_cli = true
-log_level = "DEBUG"
+log_cli = false
+log_level = "WARNING"
 markers = [
-  "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+  "unit: Python-only domain contracts",
+  "blender: real Blender/native integration",
+  "rig_profile: explicit scene-profile options for a fixture"
 ]
 minversion = "8.0"
-pythonpath = ["tests", "src/addons"]
+pythonpath = ["tests", "tests/blender", "src/addons"]
 testpaths = ["tests"]
+tmp_path_retention_policy = "failed"
 
 # =============================================================================
 # Ruff Configuration - Unified Linting & Formatting
