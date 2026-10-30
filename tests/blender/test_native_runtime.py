@@ -624,6 +624,7 @@ def test_native_preview_preserves_disabled_output_ranges(native_head):
     engine.sync_settings(instance)
     bpy.context.view_layer.update()
     record = engine._component_record(instance, "head")
+    assert record is not None
     graph = bpy.context.evaluated_depsgraph_get()
     owner = record["carrier"].evaluated_get(graph)
     assert engine.solve(owner, graph) > 0
@@ -658,6 +659,7 @@ def test_native_disabled_evaluation_preserves_published_buffer(native_head):
     native_head.face_board.update_tag()
     bpy.context.view_layer.update()
     record = engine._component_record(native_head, "head")
+    assert record is not None
     graph = bpy.context.evaluated_depsgraph_get()
     owner = record["carrier"].evaluated_get(graph)
     assert engine.solve(owner, graph) > 0
