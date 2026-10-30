@@ -317,7 +317,6 @@ def test_apply_shape_value_and_mirror_membership(character):
 @pytest.mark.parametrize("paired_character", ["all_lods"], indirect=True)
 @pytest.mark.parametrize("mode", ["SCENE", "DNA"])
 @pytest.mark.rig_profile(compact=True)
-@pytest.mark.rig_profile(compact=True, pose_bones=())
 def test_merged_shape_commit_and_split(paired_character, mode, tmp_path):
     character = paired_character
     from character_dna.dna_io import document, get_dna_reader

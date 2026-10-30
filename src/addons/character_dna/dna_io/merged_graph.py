@@ -232,7 +232,9 @@ def digest(graph: dict) -> str:
         if isinstance(value, dict):
             return {key: clean(item) for key, item in value.items() if key not in {"index", "size", "offset"}}
         if isinstance(value, list):
-            return [clean(item) for item in value]
+            # SDK geometry and behavior arrays contain millions of scalar
+            # values. Only containers need recursive archive-field filtering.
+            return [clean(item) if isinstance(item, (dict, list)) else item for item in value]
         return value
 
     cleaned = clean(graph)

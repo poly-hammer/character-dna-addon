@@ -7,7 +7,7 @@ import pytest
 
 from character_dna.runtime import bindings, controller, engine
 from character_dna.utilities import get_active_rig_instance, migration
-from constants import TEST_DNA_FOLDER
+from fixtures.rigs import RigProfile
 
 
 pytestmark = pytest.mark.skipif(
@@ -33,37 +33,32 @@ def _assert_visibility(names):
 
 
 @pytest.fixture(scope="module")
-def saved_visibility_rig(addon, tmp_path_factory):
-    bpy.ops.wm.read_homefile(app_template="")
-    bpy.ops.character_dna.import_dna(
-        filepath=str(TEST_DNA_FOLDER / "ada" / "head.dna"),
-        include_body=False,
-        import_face_board=True,
-        import_mesh=False,
-        import_bones=True,
-        import_shape_keys=False,
-        import_materials=False,
+def saved_visibility_rig(addon, tmp_path_factory, rig_factory):
+    folder = tmp_path_factory.mktemp("eye_visibility")
+    profile = RigProfile(
+        components=("head",), meshes=False, face_board=True, pose_bones=("FACIAL_L_Eye", "FACIAL_R_Eye")
     )
-    instance = get_active_rig_instance()
-    face = instance.face_board
-    carrier = _switch_carrier()
-    names = []
-    for target in carrier["targets"]:
-        if target["path"].endswith(".hide"):
-            bone = face.path_resolve(target["path"].removesuffix(".hide"))
-            names.append(bone.name)
-            # Blender moves the real FCurve but leaves the addon's ID-property
-            # descriptor untouched. Reproduce that state without an old binary.
-            target["owner"] = face.data
-            target["path"] = bone.bone.path_from_id("hide")
-    assert len(names) == 7
-    switch = face.pose.bones["CTRL_lookAtSwitch"]
-    for frame, value in ((1, 0.0), (2, 1.0), (3, 0.5)):
-        switch.location.y = value
-        switch.keyframe_insert("location", index=1, frame=frame)
-    path = tmp_path_factory.mktemp("eye_visibility") / "converted.blend"
-    bpy.ops.wm.save_as_mainfile(filepath=str(path))
-    return path, names, instance.name
+    with rig_factory.lease(profile, folder):
+        instance = get_active_rig_instance()
+        face = instance.face_board
+        carrier = _switch_carrier()
+        names = []
+        for target in carrier["targets"]:
+            if target["path"].endswith(".hide"):
+                bone = face.path_resolve(target["path"].removesuffix(".hide"))
+                names.append(bone.name)
+                # Blender moves the real FCurve but leaves the addon's ID-property
+                # descriptor untouched. Reproduce that state without an old binary.
+                target["owner"] = face.data
+                target["path"] = bone.bone.path_from_id("hide")
+        assert len(names) == 7
+        switch = face.pose.bones["CTRL_lookAtSwitch"]
+        for frame, value in ((1, 0.0), (2, 1.0), (3, 0.5)):
+            switch.location.y = value
+            switch.keyframe_insert("location", index=1, frame=frame)
+        path = folder / "converted.blend"
+        bpy.ops.wm.save_as_mainfile(filepath=str(path))
+        return path, names, instance.name
 
 
 @pytest.fixture

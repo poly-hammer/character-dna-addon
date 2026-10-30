@@ -1,51 +1,33 @@
 # Character DNA test suite refactor plan
 
-Reduce complete test execution to at most **25% of the matched baseline**, while preserving every existing behavioral contract and improving failure-path coverage. The first implementation work should remove unnecessary character construction, introduce fixtures that own their scene state, and separate orchestration assertions from native evaluation. Keep real DNA and Blender wherever they are the subject of the assertion.
+Reduce complete test execution to at most **25% of the matched baseline**, while preserving every existing behavioral contract and improving failure-path coverage. Implementation is underway on `rbf-shape-keys` and the editors submodule's `main` branch. **The runtime target is not yet achieved.**
 
-Implementation is now underway on `rbf-shape-keys` and the editors submodule's `main` branch. The original pilot measurements below are retained as historical evidence. They do not establish the full-suite fourfold reduction; complete matched runtime and coverage remain the acceptance gates.
+The implementation separates Python domain tests from Blender tests, leases private scene/DNA fixtures from process-local pristine artifacts, narrows component profiles, and retains the original numerical matrices. The assertion-boundary ledger is `scripts/test_suite_refactor/contracts.json`; exact case and source mappings are in `migration-map.json`. Measurements retain incomplete phase records and compare every original case, covered line and arc. Numerical references, tolerances and existing skips remain unchanged.
 
-The implementation separates Python domain tests from Blender tests, leases private scene/DNA fixtures from process-local pristine artifacts, narrows component profiles, and retains the original numerical matrices. An assertion-boundary ledger is maintained in `scripts/test_suite_refactor/contracts.json`; the exact case/extraction map is in `migration-map.json`. Native projection, export-table preallocation, and driver-variable setup have focused numerical/integration checks. Measurement tools retain incomplete phase records and compare exact coverage through reviewed source mappings.
+The latest complete local measurement is frozen parent `776be85` with editors `05963c4`: **1,830.73 seconds (30m 31s), 30.74% of baseline**. It collects 4,194 cases: 4,128 passed, the same 42 pre-existing Unreal numerical failures remain, and 24 existing cases skip. Every one of the 4,101 original cases is retained, with no unfinished cases, new failures or new skips; 11 original failing cases are repaired. **No originally covered line or arc is missing or unmapped.** Source hashes and the recorded environment match. This shared-cache diagnostic still exceeds the 1,488.81-second local ceiling by 341.91 seconds and does not replace repeated cold-cache qualification.
 
-The first complete diagnostic candidate retained all **4,101 original cases**, with no new skips. Its four new failures were traced to missing compatibility re-exports and an import cycle; both fixes passed focused tests. That diagnostic also exposed existing stale test APIs and an absent report directory. These are being corrected while the original Unreal numerical failures remain visible. The diagnostic runs overlapped and used different reporting overhead, so their wall times are **not acceptance evidence**. Sequential measurements and the five-lane CI comparison remain in progress.
+| Complete local measurement | Process seconds | Baseline ratio | Cases | Missing covered lines / arcs |
+| --- | ---: | ---: | ---: | ---: |
+| Original `f5f204b` | 5,955.25 | 100% | 4,101 | Baseline |
+| Third candidate `81286ad` | 2,192.53 | 36.82% | 4,176 | 6 / 10 |
+| Fourth candidate `bb9b05a` | 1,960.00 | 32.91% | 4,186 | 1 / 6 |
+| Fifth candidate `776be85` | 1,830.73 | 30.74% | 4,194 | 0 / 0 |
 
-The later sequential local baseline completed in **5,955.25 seconds of process time** (51 failed, 4,024 passed, 24 skipped, 2 errors). It used a shared solver cache and is a diagnostic, not the repeated cold-cache acceptance result. The second frozen candidate collects **4,148 cases**. Focused validation passed 326 cases with nine existing skips and no new failure or skip against that baseline; the complete Python-only layer passed all 2,276 cases on Python 3.11 and 3.13. Snapshot checks now include cold document projection, cache eviction, DNA revision validation, all requested LODs, and owned partition cleanup. Complete candidate timing and matrix acceptance remain pending.
+The original local baseline had 51 failures, 4,024 passes, 24 skips and two setup errors. The first exploratory runs overlapped and had different reporting overhead; their timings are not acceptance evidence. The complete local evidence is in `reports/test-suite-refactor/comparison-v3.json`, `comparison-v4.json`, `comparison-v5.json`, and each `matched-windows52-candidate-*-r1/runs.json`. The fifth iteration's native/fixture checks passed all 127 cases on Blender 4.5. Blender 5.2 passed every focused test body; its fixture teardown guard was corrected and the affected 16-case group passed again. Both Python versions passed all 2,286 pure contracts.
 
-The third frozen candidate completed in **2,192.53 seconds of process time**
-(36m 33s), **36.82%** of that matched local baseline. All **4,101 original cases**
-were retained: the candidate collected 4,176 cases, with 4,110 passes, the same
-42 pre-existing Unreal numerical failures, and 24 existing skips. There were
-no missing or unfinished cases, new failures, or new skips; 11 original failing
-cases were repaired. Sources stayed unchanged throughout the run. The exact
-coverage comparison still identified six missing lines and ten missing arcs,
-with no unmapped lines or arcs. Both runtime and coverage gates therefore remain
-open. Evidence: `reports/test-suite-refactor/comparison-v3.json` and
-`matched-windows52-candidate-v3-r1/runs.json`. Further iterations target repeated
-scene lookups and driver scans, reference-data construction, and unnecessary
-geometry in transaction tests. This shared-cache diagnostic does not replace
-the repeated cold-cache matrix qualification.
+[Qualification run 40996605128](https://github.com/poly-hammer/character-dna-addon/actions/runs/40996605128) measures the earlier published candidate `0695efe`. Completed cold pairs so far are:
 
-The fourth frozen candidate (`bb9b05a`, editors `05963c4`) completed in
-**1,960.00 seconds** (32m 40s), **32.91%** of the same local baseline. It retained
-all 4,101 original cases and collected 4,186: 4,120 passed, the same 42 Unreal
-numerical failures remained, and 24 existing cases skipped. There were no new
-failures, skips, missing cases or unfinished cases. Coverage had one missing
-line and six missing arcs, with zero unmapped lines/arcs. The fifth iteration
-adds direct cache-eviction, deferred-channel and body-import checks and retains
-original mutation-notification ordering; its complete acceptance is pending.
-The fourth iteration's focused validation passed 73 cases on Blender 4.5 with
-three existing version skips; repaired native/archive and adapter checks passed
-34 cases on Blender 5.2. Both Python versions passed all 2,286 pure contracts.
-Evidence: `comparison-v4.json` and `matched-windows52-candidate-v4-r1/runs.json`.
+| Lane / repetition | Original seconds | Earlier candidate seconds | Ratio |
+| --- | ---: | ---: | ---: |
+| macOS 4.5 / 2 | 5,985.79 | 3,329.01 | 55.62% |
+| Ubuntu 5.2 / 2 | 7,251.25 | 3,808.99 | 52.53% |
+| Windows 4.5 / 1 | 7,963.26 | 4,460.47 | 56.01% |
 
-The first completed cold CI pair on macOS 4.5 measured the earlier published
-candidate (`0695efe`) at **3,329.01 seconds** versus **5,985.79 seconds** for the
-original suite (55.62%). All 4,101 original cases remained, with zero new
-failures or skips and 11 fixed cases. Its older coverage gaps and runtime failed
-the acceptance gate; this is baseline/platform evidence, not qualification of
-the later local revisions. Evidence is retained under
-`reports/test-suite-refactor/ci-0695-macos45-r2/`.
+These reports retain all original cases with no new failures or skips, but fail the runtime and older coverage gates. They establish complete platform baselines; they do not qualify later local revisions. Downloaded artifacts are under `reports/test-suite-refactor/ci-0695-*/`. Publication of the local editor revision is awaiting explicit approval after automatic approval review rejected the push, so the later revisions are currently validated locally.
 
 ## Baseline and success criteria
+
+The sixth candidate adds operation-local RBF routing indices, avoids repeated linear Blender vertex-group searches during skin-weight import, and avoids recursive calls for scalar graph leaves. Its focused editor/graph/visibility checks passed on Blender 5.2 (111 passed, one existing skip) and 4.5 (103 passed, nine existing skips). After the additional skin-weight and RBF group-index changes, all 31 adapter/component contracts passed on each version, with one existing skip. These include exact full head/body skin-weight comparisons, preservation of unrelated groups, safe group replacement, and every native RBF pose compared with uncached reads. Both Python versions also passed all 2,286 pure contracts. A complete timing and coverage comparison is still required for this candidate.
 
 The audit targets parent revision `f5f204b34673b0717404741b964f8de885ba9990` on `rbf-shape-keys`. [GitHub Actions run 40935964822](https://github.com/poly-hammer/character-dna-addon/actions/runs/40935964822) collected **4,101 cases**. All five test jobs reached the 90-minute execution limit. That is a censored baseline: elapsed time before cancellation does not tell us the complete suite duration, and the remaining test cases need not have average cost.
 

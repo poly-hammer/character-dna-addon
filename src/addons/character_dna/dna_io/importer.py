@@ -233,15 +233,22 @@ class DNAImporter:
             )
             return
 
+        # Group membership is stable while this synchronous import runs. Avoid
+        # Blender's linear name lookup for every influence on every vertex.
+        joint_names = {}
+        vertex_groups = {group.name: group for group in mesh_object.vertex_groups}
         for vertex in mesh_object.data.vertices:
             vertex_bone_indices = self._dna_reader.getSkinWeightsJointIndices(mesh_index, vertex.index)
             vertex_weights = self._dna_reader.getSkinWeightsValues(mesh_index, vertex.index)
 
             for bone_index, weight in zip(vertex_bone_indices, vertex_weights, strict=False):
-                vertex_group_name = self._dna_reader.getJointName(bone_index)
-                vertex_group = mesh_object.vertex_groups.get(vertex_group_name)
+                if bone_index not in joint_names:
+                    joint_names[bone_index] = self._dna_reader.getJointName(bone_index)
+                vertex_group_name = joint_names[bone_index]
+                vertex_group = vertex_groups.get(vertex_group_name)
                 if not vertex_group:
                     vertex_group = mesh_object.vertex_groups.new(name=vertex_group_name)
+                    vertex_groups[vertex_group_name] = vertex_group
                 vertex_group.add(index=[vertex.index], weight=weight, type="REPLACE")
 
     def set_mesh_normals(self, mesh_index: int, mesh: bpy.types.Mesh):

@@ -343,7 +343,7 @@
       ],
       "after": [
         "__init__.py",
-        "\"version\": (0, 15, 5),"
+        "\"version\": (0, 15, 6),"
       ],
       "reason": "Required patch-version metadata update; no conditional behavior."
     },
@@ -482,6 +482,126 @@
       ],
       "function": "mute_targets",
       "reason": "Index each current owner once per call. Real removal, replacement, ownership and array-channel tests retain conditional behavior and prevent stale RNA reuse."
+    },
+    {
+      "function": "digest",
+      "reason": "Scalar array leaves are copied directly; nested containers still receive the same archive-field filter. Mixed nested/scalar contract and complete native graph comparisons remain.",
+      "before": [
+        "dna_io/merged_graph.py",
+        "return [clean(item) for item in value]"
+      ],
+      "after": [
+        "dna_io/merged_graph.py",
+        "return [clean(item) if isinstance(item, (dict, list)) else item for item in value]"
+      ]
+    },
+    {
+      "function": "get_rbf_driver_data",
+      "reason": "Lookup selection now uses per-refresh derived data or the original uncached comprehension; every native pose is compared through both paths.",
+      "before": [
+        "editors/rbf_editor/core.py",
+        "bone_index_lookup = {reader.getJointName(index).strip(): index for index in range(reader.getJointCount())}"
+      ],
+      "after": [
+        "editors/rbf_editor/core.py",
+        "else {reader.getJointName(index).strip(): index for index in range(reader.getJointCount())}"
+      ]
+    },
+    {
+      "function": "get_rbf_driven_data",
+      "reason": "The immutable control set is reused only inside one refresh; direct reads still execute the complete original comprehension.",
+      "before": [
+        "editors/rbf_editor/core.py",
+        "all_controls = {"
+      ],
+      "after": [
+        "editors/rbf_editor/core.py",
+        "else {"
+      ]
+    },
+    {
+      "function": "get_rbf_pose_data",
+      "reason": "The pose coefficient table is computed once before the channel loop; all original scalar values and later refreshes are checked against uncached native reads.",
+      "before": [
+        "editors/rbf_editor/core.py",
+        "item.scalar_value = pose_shapes(reader, pose_index).get(index, 0.0)"
+      ],
+      "after": [
+        "editors/rbf_editor/core.py",
+        "item.scalar_value = scalar_values.get(index, 0.0)"
+      ]
+    },
+    {
+      "function": "pose_shapes",
+      "before": [
+        "editors/rbf_editor/shape_channels.py",
+        "def pose_shapes(reader: Any, pose_index: int) -> dict[int, float]:"
+      ],
+      "after": [
+        "editors/rbf_editor/shape_channels.py",
+        "def pose_shapes("
+      ],
+      "reason": "Add an optional operation-local routing table; existing callers and native numerical oracles retain the uncached default."
+    },
+    {
+      "function": "pose_shapes",
+      "before": [
+        "editors/rbf_editor/shape_channels.py",
+        "for channel, inputs in routes(reader).items()"
+      ],
+      "after": [
+        "editors/rbf_editor/shape_channels.py",
+        "for channel, inputs in table.items()"
+      ],
+      "reason": "Iterate the same complete routing table, computed locally or supplied by the enclosing operation."
+    },
+    {
+      "function": "write",
+      "before": [
+        "editors/rbf_editor/shape_channels.py",
+        "original_poses = {i: pose_shapes(original, i) for i in range(original.getRBFPoseCount())}"
+      ],
+      "after": [
+        "editors/rbf_editor/shape_channels.py",
+        "original_poses = {i: pose_shapes(original, i, channel_routes=old_routes) for i in range(original.getRBFPoseCount())}"
+      ],
+      "reason": "Use the original reader routing table already computed immediately above; writer mutations do not affect that reader and full native round trips remain."
+    },
+    {
+      "function": "set_vertex_groups",
+      "before": [
+        "dna_io/importer.py",
+        "vertex_group_name = self._dna_reader.getJointName(bone_index)"
+      ],
+      "after": [
+        "dna_io/importer.py",
+        "vertex_group_name = joint_names[bone_index]"
+      ],
+      "reason": "Resolve each immutable joint name once per mesh; exact native head/body weight dictionaries, preexisting groups and group replacement are checked."
+    },
+    {
+      "function": "set_vertex_groups",
+      "before": [
+        "dna_io/importer.py",
+        "vertex_group = mesh_object.vertex_groups.get(vertex_group_name)"
+      ],
+      "after": [
+        "dna_io/importer.py",
+        "vertex_group = vertex_groups.get(vertex_group_name)"
+      ],
+      "reason": "Use an operation-local group index instead of a linear RNA search per influence; group order, creation, replacement and all original deformation oracles remain."
+    },
+    {
+      "function": "get_rbf_driven_data",
+      "before": [
+        "editors/rbf_editor/core.py",
+        "for group in range(reader.getJointGroupCount()):"
+      ],
+      "after": [
+        "editors/rbf_editor/core.py",
+        "for group in groups:"
+      ],
+      "reason": "The batch reverse index visits exactly the original matching groups in original order; direct native reads retain the full scan and every pose is compared."
     }
   ]
 }

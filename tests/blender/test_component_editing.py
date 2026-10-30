@@ -33,10 +33,25 @@ def solver_data(reader):
     return [{**asdict(solver), "__property_group__": "RBFSolverData"} for solver in get_rbf_solver_data(reader)]
 
 
-def test_batched_solver_reads_match_every_uncached_native_pose(component_reader):
+def test_batched_solver_reads_match_every_uncached_native_pose(component_reader, monkeypatch):
+    from character_dna.editors.rbf_editor import shape_channels
+
     _, reader = component_reader
     observed = Mock(spec=type(reader), wraps=reader)
-    data = get_rbf_solver_data(observed)
+    scalar_reads = Mock(spec=shape_channels.pose_shapes, wraps=shape_channels.pose_shapes)
+    route_reads = Mock(spec=shape_channels.routes, wraps=shape_channels.routes)
+    with monkeypatch.context() as patches:
+        patches.setattr(shape_channels, "pose_shapes", scalar_reads)
+        patches.setattr(shape_channels, "routes", route_reads)
+        data = get_rbf_solver_data(observed)
+    shape_inputs = set(reader.getBlendShapeChannelInputIndices())
+    expected_reads = sum(
+        bool(shape_inputs.intersection(reader.getRBFPoseOutputControlIndices(pose)))
+        for solver in range(reader.getRBFSolverCount())
+        for pose in reader.getRBFSolverPoseIndices(solver)
+    )
+    assert scalar_reads.call_count == expected_reads
+    assert route_reads.call_count == 1
     joint_reads = observed.getJointName.call_count
     assert joint_reads <= reader.getJointCount()
     for solver in data:

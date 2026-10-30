@@ -17,6 +17,47 @@ from character_dna.utilities.action import flush_texture_mask_keyframes_to_actio
 
 
 @pytest.mark.parametrize("kind", ["head", "body"])
+def test_skin_weight_import_matches_native_values_and_reuses_existing_groups(empty_character_scene, kind):
+    from character_dna.dna_io import get_dna_reader, release_dna_handle
+    from character_dna.dna_io.importer import DNAImporter
+    from constants import TEST_DNA_FOLDER
+
+    reader = get_dna_reader(TEST_DNA_FOLDER / "ada" / f"{kind}.dna")
+    try:
+        mesh = bpy.data.meshes.new("NativeWeightContract")
+        mesh.vertices.add(reader.getVertexPositionCount(0))
+        obj = bpy.data.objects.new(mesh.name, mesh)
+        empty_character_scene.collection.objects.link(obj)
+        first_joint = reader.getSkinWeightsJointIndices(0, 0)[0]
+        existing = obj.vertex_groups.new(name=reader.getJointName(first_joint))
+        existing.add([0], 0.125, "REPLACE")
+        unrelated = obj.vertex_groups.new(name="AuthoredUnrelatedGroup")
+        unrelated.add([0], 0.375, "REPLACE")
+        observed = Mock(spec=type(reader), wraps=reader)
+        importer = SimpleNamespace(_dna_reader=observed)
+        DNAImporter.set_vertex_groups(importer, 0, obj)
+        used_joints = set()
+        groups = {group.index: group.name for group in obj.vertex_groups}
+        for vertex in mesh.vertices:
+            joints = reader.getSkinWeightsJointIndices(0, vertex.index)
+            weights = reader.getSkinWeightsValues(0, vertex.index)
+            used_joints.update(joints)
+            expected = {reader.getJointName(joint): weight for joint, weight in zip(joints, weights, strict=False)}
+            if vertex.index == 0:
+                expected[unrelated.name] = 0.375
+            assert {groups[item.group]: item.weight for item in vertex.groups} == expected
+        assert observed.getJointName.call_count == len(used_joints)
+        assert obj.vertex_groups.get(existing.name) == existing
+        # No RNA cache may outlive this import: replacing a group must be safe.
+        obj.vertex_groups.remove(existing)
+        DNAImporter.set_vertex_groups(importer, 0, obj)
+        assert obj.vertex_groups[reader.getJointName(first_joint)].weight(0) == reader.getSkinWeightsValues(0, 0)[0]
+        assert observed.getJointName.call_count == 2 * len(used_joints)
+    finally:
+        release_dna_handle(reader)
+
+
+@pytest.mark.parametrize("kind", ["head", "body"])
 def test_driven_names_match_native_outputs_with_one_name_lookup_per_joint(kind):
     from character_dna.dna_io import get_dna_reader, release_dna_handle
     from character_dna.rig_instance import ATTR_COUNT_PER_EULER_JOINT, RigInstance

@@ -98,6 +98,16 @@
         "Original lifecycle, retention, backup, visibility and editor transaction assertions",
         "Original full geometry, UV, long-key, calf-back-90 deformation, native graph and export/calibration anchors remain"
       ]
+    },
+    {
+      "fixture": "saved_visibility_rig",
+      "owner": "One module artifact; privately reopened for every case",
+      "shared": "Complete face board, native eye bones, quaternion inputs and ancestor chains; no unrelated output bones",
+      "mutable": "Actual animated visibility drivers, converted Blender metadata, conflicts, rebuild and reference transport",
+      "checks": [
+        "All original seven-bone visibility assertions, APPEND/LINK/EDITABLE_LINK, save/reopen and source-byte protection",
+        "Full head and body matrices remain in driver recovery, native runtime and reference transport tests"
+      ]
     }
   ],
   "changed_assertion_boundaries": [
@@ -229,6 +239,24 @@
         "test_compact_leases_preserve_complete_native_data_and_private_scene_state",
         "test_merged_leases_own_document_and_partition_paths",
         "test_import_uses_runtime_without_opt_in"
+      ]
+    },
+    {
+      "case": "RBF refresh metadata reuse",
+      "before": "Solver refreshes rebuilt joint/control indices for each pose and calculated every shape coefficient once per affected shape.",
+      "after": "Derived read-only indices live only in one ReadBatch; shape coefficients are computed once per pose occurrence. Every resulting native pose is compared with an uncached SDK read, and a later refresh reads the document again.",
+      "retained_integration": [
+        "test_batched_solver_reads_match_every_uncached_native_pose (head and body)",
+        "All native RBF round trips and editor pose matrices"
+      ]
+    },
+    {
+      "case": "Skin-weight import lookup reuse",
+      "before": "Every influence searched Blender vertex groups by name and fetched the same native joint name again.",
+      "after": "Names and existing groups are indexed only for one synchronous mesh import. Exact full native head/body weight dictionaries, preexisting unrelated groups and a removed/recreated group are checked. No vertex, influence, precision or full-geometry oracle is removed.",
+      "retained_integration": [
+        "test_skin_weight_import_matches_native_values_and_reuses_existing_groups",
+        "All original full geometry importer, exporter, calibration and deformation tests"
       ]
     }
   ],

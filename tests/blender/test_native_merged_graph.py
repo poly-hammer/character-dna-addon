@@ -1,6 +1,8 @@
 """Native merged DNA retains every component and LOD without external files."""
 
 import base64
+import hashlib
+import json
 
 import numpy as np
 import pytest
@@ -34,6 +36,26 @@ def combined(native_graph_archive):
 def test_sdk_json_interchange(graphs):
     for graph in graphs.values():
         assert merged_graph.to_bytes(graph).startswith(b"DNA")
+
+
+def test_graph_digest_preserves_scalars_and_filters_nested_archive_fields():
+    from character_dna.dna_io.metadata import PREFIX
+
+    graph = {
+        "desc1.1": {"metadata": [["author", "Ada"], [PREFIX, "payload"], [PREFIX + ".0", "chunk"]]},
+        "size": 40,
+        "values": [1, 2.5, "text", None, True, [], {"offset": 12, "keep": [3, {"index": 4, "value": 5}]}],
+    }
+    expected = {
+        "desc1.1": {"metadata": [["author", "Ada"]]},
+        "values": [1, 2.5, "text", None, True, [], {"keep": [3, {"value": 5}]}],
+    }
+    before = snapshot_graph(graph)
+    encoded = json.dumps(expected, sort_keys=True, separators=(",", ":")).encode()
+    assert merged_graph.digest(graph) == hashlib.sha256(encoded).hexdigest()
+    assert snapshot_graph(graph) == before
+    graph["values"][0] += 1
+    assert merged_graph.digest(graph) != hashlib.sha256(encoded).hexdigest()
 
 
 def test_native_all_lods_and_domains(graphs, combined):
