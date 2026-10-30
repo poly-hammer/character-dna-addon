@@ -55,6 +55,7 @@ def test_dna_merge_removes_scene_objects_and_split_imports_new_meshes(character,
     assert all(Path(instance.component(kind).dna_file_path).exists() for kind in ("head", "body"))
 
 
+@pytest.mark.rig_profile(compact=True)
 def test_dna_split_preserves_object_settings_and_loaded_key_state(character):
     instance = character
     head = instance.head_mesh

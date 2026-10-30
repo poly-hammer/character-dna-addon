@@ -89,6 +89,7 @@ from fixtures.dna_data import (  # noqa: E402, F401
     exported_head_dna_json_data,  #  pyright: ignore[reportUnusedImport]
     original_head_dna_json_data,  #  pyright: ignore[reportUnusedImport]
 )
+from fixtures.native_graphs import native_graph_archive  # noqa: E402, F401
 from fixtures.rigs import empty_character_scene, minimal_character, rig_factory  # noqa: E402, F401
 from fixtures.scene import (  # noqa: E402, F401
     head_armature,  #  pyright: ignore[reportUnusedImport]

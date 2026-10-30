@@ -16,6 +16,7 @@ from character_dna.dna_io.misc import create_shape_key
 from character_dna.dna_io.shape_migration import recover_mesh
 from character_dna.editors.converter import scene_merge
 from character_dna.runtime import controller, engine
+from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile
 
 
@@ -24,7 +25,10 @@ character = _character
 
 @pytest.fixture
 def head_character(rig_factory, tmp_path):
-    with rig_factory.lease(RigProfile(components=("head",)), tmp_path) as instance:
+    # This fixture checks shape-channel values, not skin deformation. Keep all
+    # original mesh/target geometry and native behavior, with only the scene
+    # input bones and observed outputs needed to bind the runtime.
+    with rig_factory.lease(RigProfile(components=("head",), pose_bones=STATE_BONES), tmp_path) as instance:
         yield instance
 
 

@@ -16,10 +16,13 @@ from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile, release_partitions
 
 
-@pytest.mark.parametrize("query", ["shape_key_blocks", "shape_key_blocks_by_name", "shape_key_apply_plan"])
+@pytest.mark.parametrize(
+    "query", ["shape_key_blocks", "shape_key_blocks_by_name", "shape_key_apply_plan", "sync_shape_key_list"]
+)
 def test_bone_only_shape_queries_resolve_scene_once(empty_character_scene, query):
     from character_dna.dna_io import get_dna_reader, release_dna_handle
     from character_dna.rig_component import RigComponent
+    from character_dna.rig_instance import RigInstance
     from constants import TEST_DNA_FOLDER
 
     reader = get_dna_reader(TEST_DNA_FOLDER / "ada/head.dna")
@@ -31,12 +34,18 @@ def test_bone_only_shape_queries_resolve_scene_once(empty_character_scene, query
         cache_key=lambda kind, descriptor: (kind, descriptor),
     )
     component = RigComponent(instance, "head")
+    instance.edit_target = component
+    instance.shape_key_editor = bpy.context.scene.character_dna.rig_instance_list.add().shape_key_editor
     try:
         # A head defines thousands of targets even when only its bones are
         # imported. Querying that empty scene must perform one lookup per batch.
         original = RigComponent.meshes_for_reader
         with patch.object(RigComponent, "meshes_for_reader", autospec=True, side_effect=original) as lookup:
-            assert not getattr(component, query)
+            if query == "sync_shape_key_list":
+                RigInstance.sync_shape_key_list(instance)
+                assert not instance.shape_key_editor.shape_key_list
+            else:
+                assert not getattr(component, query)
             assert lookup.call_count == 1
         # The optimization is local to the batch. A later mesh remains visible
         # through the public lookup without persisting an empty scene cache.
@@ -48,6 +57,9 @@ def test_bone_only_shape_queries_resolve_scene_once(empty_character_scene, query
         name = f"{reader.getMeshName(0)}__{reader.getBlendShapeChannelName(reader.getBlendShapeChannelIndex(0, 0))}"
         key = obj.shape_key_add(name=name)
         assert component.get_shape_key_block(0, name) == key
+        if query == "sync_shape_key_list":
+            RigInstance.sync_shape_key_list(instance)
+            assert [item.name for item in instance.shape_key_editor.shape_key_list] == [name]
     finally:
         release_dna_handle(reader)
 

@@ -9,6 +9,7 @@ import pytest
 from character_dna.runtime import engine
 from character_dna.utilities.reference import validate_names
 from constants import TEST_DNA_FOLDER
+from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile, reset_scene
 
 
@@ -757,10 +758,10 @@ def test_reference_object_transport(tmp_path: Path, mode: str):  # noqa: PLR0915
 
 
 @pytest.fixture
-def reference_scene(setup_reference_blend_file, rig_factory, tmp_path, current_metahuman_name):
+def reference_scene(setup_reference_blend_file, rig_factory, tmp_path, current_metahuman_name, compact_dna):
     """Only construct a second character in cases that assert coexistence."""
     if current_metahuman_name:
-        profile = RigProfile(face_board=True, materials=True)
+        profile = RigProfile(asset=str(compact_dna), pose_bones=STATE_BONES, face_board=True, materials=True)
         with rig_factory.lease(profile, tmp_path / "existing") as instance:
             instance.name = current_metahuman_name
             yield

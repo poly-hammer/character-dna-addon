@@ -85,6 +85,12 @@ owner's failure cleanup.
 The fixture canaries exercise pose, key, visibility, auto-key, file-path and
 failed-editor isolation. Extend those checks when adding a new profile option.
 
+Native graph tests share only an immutable, process-local archive. Each module
+restores its own containers and verifies that its reference graphs were not
+mutated. Tests that edit a graph must copy it first. The archive is built through
+the real SDK and composition path, and that construction time remains part of
+the complete run.
+
 ## Mocking and measurement
 
 Mock a collaborator only when that collaborator is outside the behavior being

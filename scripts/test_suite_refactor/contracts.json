@@ -69,7 +69,7 @@
     {
       "fixture": "reference_scene",
       "owner": "One test",
-      "shared": "Pristine full head/body/face-board artifact only in coexistence cases",
+      "shared": "Pristine compact head/body/face-board artifact for the unrelated destination character in coexistence cases; the referenced source keeps full original geometry and skeleton",
       "mutable": "Own DNA files and live scene; empty-destination cases do not build an unused character",
       "checks": [
         "All six test_reference_blend_file combinations, including reload, native animation and source file protection"
@@ -170,7 +170,7 @@
     {
       "case": "test_frame_cost_uses_same_numeric_bindings_for_compact_and_hashed_names",
       "before": "Four 85-frame timing loops verified binding count but never asserted frame outputs or a runtime threshold.",
-      "after": "All 42 original targets and four name-mode transitions remain. Three distinct frame/control samples per mode compare every evaluated channel to the real SDK. Complete-suite performance is measured separately.",
+      "after": "All 42 original targets, their full geometry and four name-mode transitions remain. Three distinct frame/control samples per mode compare every evaluated channel to the real SDK. Scene bones are limited to native inputs, observed outputs and ancestors because this case asserts shape-channel values, while deformation matrices remain elsewhere. Complete-suite performance is measured separately.",
       "retained_integration": [
         "test_all_42_long_head_targets_import_recover_bind_and_split",
         "Full head/body numerical pose matrices"
@@ -179,10 +179,22 @@
     {
       "case": "Native graph copy and equality helpers",
       "before": "Python deepcopy recursively visited every scalar; exact equality recursively revisited large equal scalar arrays.",
-      "after": "Trusted in-memory graphs are independently copied with pickle; scalar-list equality short-circuits in C with explicit nested-container and NaN safeguards. Exact comparisons and mismatch paths are unchanged.",
+      "after": "Trusted in-memory graphs are independently copied with pickle; scalar-list equality short-circuits in C with explicit nested-container and NaN safeguards. Native modules restore private containers from a session archive built through the SDK, then detect reference mutation at teardown. Exact comparisons and mismatch paths are unchanged.",
       "retained_integration": [
-        "test_graph_fixture.py ownership, tiny float differences, metadata and NaN checks",
+        "test_graph_fixture.py ownership, independent archive restoration, tiny float differences, metadata and NaN checks",
         "All original native graph, projection and round-trip tests"
+      ]
+    },
+    {
+      "case": "Merged editor rollback and selection fixtures",
+      "before": "Full geometry and output skeletons were rebuilt for rollback, selected-component publication and list-availability assertions.",
+      "after": "Compact native DNA and observed scene bones retain real transactions, UI callbacks, native channel counts, canonical vertex ordering and untouched-component byte comparisons. The failed-bridge test reads the fixture's actual seam map.",
+      "retained_integration": [
+        "test_merge_all_scene_lods_and_switch_without_splitting",
+        "test_raw_jaw_edit_keeps_merged_surface_and_canonical_target",
+        "test_export_merged_surface_keeps_presentation_and_source_files",
+        "test_combined_neckline_shape_is_portable_and_backup_restores_document",
+        "test_dna_merge_removes_scene_objects_and_split_imports_new_meshes"
       ]
     },
     {

@@ -101,6 +101,34 @@ def test_batched_editor_mutes_preserve_unowned_drivers(native_objects):
     assert unrelated.mute and unrelated.driver.expression == "3"
 
 
+@pytest.mark.parametrize("change", ["remove", "expression", "owner"])
+def test_mute_rechecks_current_ownership_and_array_channels(native_objects, change):
+    from character_dna.runtime.bindings import mute_targets
+
+    carrier, target = native_objects.carrier, native_objects.target
+    install_targets(carrier, [Target(target, "location", axis, 0) for axis in range(3)])
+    mute_targets(carrier, True)
+    assert all(curve.mute for curve in target.animation_data.drivers)
+    curve = target.animation_data.drivers.find("location", index=1)
+    if change == "remove":
+        target.driver_remove("location", 1)
+    elif change == "expression":
+        curve.driver.expression = "42"
+    else:
+        curve.driver.variables[0].targets[0].id = target
+    mute_targets(carrier, False)
+    for axis in (0, 2):
+        assert not target.animation_data.drivers.find("location", index=axis).mute
+    replaced = target.animation_data.drivers.find("location", index=1)
+    assert replaced is None if change == "remove" else replaced.mute
+    # A later call must discover a newly installed curve, with no cached RNA.
+    if change == "remove":
+        replacement = target.driver_add("location", 1)
+        replacement.driver.expression = "7"
+        mute_targets(carrier, True)
+        assert not replacement.mute
+
+
 def test_native_rejects_keyframed_output(native_objects):
     """Output drivers must not hide an existing user's keyed animation."""
     carrier, target = native_objects.carrier, native_objects.target

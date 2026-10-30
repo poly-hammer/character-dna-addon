@@ -2,7 +2,7 @@
 
 import math
 
-from fixtures.graphs import copy_graph, first_difference
+from fixtures.graphs import copy_graph, first_difference, restore_graph, snapshot_graph
 
 
 def test_graph_copy_owns_nested_data_and_preserves_float_bits():
@@ -35,3 +35,15 @@ def test_graph_comparison_rejects_nan_even_when_the_same_object_is_shared():
     result = first_difference({"values": [[nan]]}, {"values": [[nan]]})
     assert result[0] == "/values/0/0"
     assert math.isnan(result[1]) and math.isnan(result[2])
+
+
+def test_graph_archive_restores_independent_mutable_owners():
+    original = {"weights": [0.1, 0.2], "channels": {"name": "left"}}
+    archive = snapshot_graph(original)
+    assert isinstance(archive, bytes)
+    first, second = restore_graph(archive), restore_graph(archive)
+    first["weights"].append(0.8)
+    first["channels"]["name"] = "right"
+    assert second == original
+    assert snapshot_graph(second) == archive
+    assert restore_graph(archive) == original

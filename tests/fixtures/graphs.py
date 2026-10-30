@@ -12,6 +12,16 @@ def copy_graph(graph):
     return pickle.loads(pickle.dumps(graph, protocol=pickle.HIGHEST_PROTOCOL))  # noqa: S301
 
 
+def snapshot_graph(graph):
+    """Freeze a test-owned graph into immutable, process-local bytes."""
+    return pickle.dumps(graph, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def restore_graph(snapshot):
+    """Own a new graph from snapshot_graph output, never external file bytes."""
+    return pickle.loads(snapshot)  # noqa: S301 - trusted bytes produced inside this test process
+
+
 def first_difference(left, right, path=""):
     """Compare every graph value, ignoring only SDK archive bookkeeping.
 
@@ -29,7 +39,8 @@ def first_difference(left, right, path=""):
         if len(left) != len(right):
             return path, len(left), len(right)
         if left == right and all(
-            not isinstance(value, (dict, list)) and value == value for value in left  # noqa: PLR0124 - NaN
+            not isinstance(value, (dict, list)) and value == value  # noqa: PLR0124 - NaN
+            for value in left
         ):
             return None
         for index, (a, b) in enumerate(zip(left, right, strict=True)):

@@ -7,23 +7,28 @@ import pytest
 
 from character_dna.dna_io import merged_graph, partitions
 from constants import TEST_DNA_FOLDER
-from fixtures.graphs import copy_graph, first_difference
+from fixtures.graphs import copy_graph, first_difference, restore_graph, snapshot_graph
 
 
 @pytest.fixture(scope="module")
-def graphs():
-    return {
-        kind: merged_graph.from_bytes((TEST_DNA_FOLDER / "ada" / f"{kind}.dna").read_bytes())
-        for kind in ("head", "body")
-    }
+def graphs(native_graph_archive):
+    value = restore_graph(native_graph_archive[0])
+    before = snapshot_graph(value)
+    yield value
+    unchanged = snapshot_graph(value) == before
+    assert unchanged, "A test mutated the module's reference graphs"
 
 
 @pytest.fixture(scope="module")
-def combined(graphs):
-    graph, info = merged_graph.compose(graphs, "NativeRoundTrip")
-    content = merged_graph.to_bytes(graph)
-    assert content.startswith(b"DNA")
-    return merged_graph.from_bytes(content), info
+def combined(native_graph_archive):
+    value = restore_graph(native_graph_archive[1])
+    before = snapshot_graph(value)
+    yield value
+    # Compare this module's restored representation before/after its tests.
+    # Pickle memoization can change across a serialization round trip. Keep
+    # the assertion scalar so a failure cannot render gigabytes of byte diff.
+    unchanged = snapshot_graph(value) == before
+    assert unchanged, "A test mutated the module's reference composition"
 
 
 def test_sdk_json_interchange(graphs):

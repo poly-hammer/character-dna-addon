@@ -523,15 +523,17 @@ class RigInstance(bpy.types.PropertyGroup):
             return
 
         # Ensure the block cache (and its ordered names) exist before mirroring them.
+        component = self.edit_target
+        meshes = component.mesh_index_lookup
         shape_key_block_names = [
             name
-            for mesh, _, name in self.edit_target.shape_targets()
-            if self.edit_target.get_shape_key_block(mesh, name) is not None
+            for mesh, _, name in component.shape_targets()
+            if component.get_shape_key_block(mesh, name, meshes=meshes) is not None
         ]
 
         # The has-deltas map is derived from the live block coords; drop it so it
         # recomputes lazily against the freshly synced blocks.
-        self.data.pop(self.edit_target.cache_key("shape_key_has_deltas"), None)
+        self.data.pop(component.cache_key("shape_key_has_deltas"), None)
 
         shape_key_editor.shape_key_list.clear()
         for shape_key_block_name in shape_key_block_names:

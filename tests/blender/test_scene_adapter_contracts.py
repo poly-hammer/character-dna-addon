@@ -121,7 +121,10 @@ def test_finishing_shape_import_without_session_is_idempotent(empty_character_sc
         assert bpy.context.window_manager.character_dna.progress == 1
 
 
-def test_head_import_with_missing_optional_body_is_valid(empty_character_scene, compact_dna_asset, tmp_path):
+@pytest.mark.parametrize("include_body", [False, True])
+def test_head_import_with_missing_optional_body_is_valid(
+    empty_character_scene, compact_dna_asset, tmp_path, include_body
+):
     from character_dna.utilities import get_active_rig_instance
 
     head = tmp_path / "head.dna"
@@ -129,7 +132,7 @@ def test_head_import_with_missing_optional_body_is_valid(empty_character_scene, 
     assert not (tmp_path / "body.dna").exists()
     assert bpy.ops.character_dna.import_dna(
         filepath=str(head),
-        include_body=True,
+        include_body=include_body,
         import_bones=False,
         import_mesh=False,
         import_face_board=False,
@@ -141,3 +144,60 @@ def test_head_import_with_missing_optional_body_is_valid(empty_character_scene, 
     assert instance.head_rig is None
     assert instance.body_dna_reader is None
     assert instance.body_rig is None and instance.body_mesh is None
+
+
+@pytest.mark.parametrize("previous_mesh", [False, True])
+def test_head_only_import_spacing_uses_previous_mesh_bounds(
+    empty_character_scene, compact_dna_asset, previous_mesh, tmp_path
+):
+    from character_dna.utilities import (
+        get_active_rig_instance,
+        get_bounding_box_left_x,
+        get_bounding_box_width,
+    )
+
+    (tmp_path / "head.dna").write_bytes((compact_dna_asset / "head.dna").read_bytes())
+    (tmp_path / "ExportManifest.json").write_text(json.dumps({"metaHumanName": "PreviousHead"}))
+    options = {
+        "filepath": str(tmp_path / "head.dna"),
+        "include_body": False,
+        "import_face_board": False,
+        "import_shape_keys": False,
+        "import_materials": False,
+    }
+    assert bpy.ops.character_dna.import_dna(**options, import_bones=False, import_mesh=previous_mesh) == {"FINISHED"}
+    previous = get_active_rig_instance()
+    previous_name = previous.name
+    expected = (
+        get_bounding_box_left_x(previous.head_mesh) - get_bounding_box_width(previous.head_mesh) / 2
+        if previous_mesh
+        else 0
+    )
+    options["filepath"] = str(compact_dna_asset / "head.dna")
+    assert bpy.ops.character_dna.import_dna(**options, import_bones=True, import_mesh=True) == {"FINISHED"}
+    current = get_active_rig_instance()
+    previous = bpy.context.scene.character_dna.rig_instance_list[previous_name]
+    assert current != previous
+    assert current.head_rig.location.x == pytest.approx(expected)
+    assert current.body_rig is None and previous.body_rig is None
+
+
+def test_texture_masks_copy_native_outputs_to_matching_sockets(empty_character_scene):
+    from character_dna.rig_component import RigComponent
+
+    material = bpy.data.materials.new("NativeMaskContract")
+    material.use_nodes = True
+    group = bpy.data.node_groups.new("NativeMaskInputs", "ShaderNodeTree")
+    for name in ("cheek", "jaw", "outside_outputs", "wm1.head_wm1_jawOpen_msk"):
+        group.interface.new_socket(name=name, in_out="INPUT", socket_type="NodeSocketFloat")
+    node = material.node_tree.nodes.new("ShaderNodeGroup")
+    node.name = "head_texture_logic"
+    node.node_tree = group
+    reader = SimpleNamespace(
+        getAnimatedMapCount=lambda: 4,
+        getAnimatedMapName=lambda index: ("cheek", "jaw", "missing", "outside_outputs")[index],
+    )
+    component = RigComponent(SimpleNamespace(head_material=material, head_dna_reader=reader), "head")
+    state = SimpleNamespace(getAnimatedMapOutputs=lambda: (0.25, 0.75, 0.5))
+    assert component.update_texture_masks(state=state) == [("cheek", 0.25), ("jaw", 0.75)]
+    assert [node.inputs[name].default_value for name in ("cheek", "jaw", "outside_outputs")] == [0.25, 0.75, 0.0]

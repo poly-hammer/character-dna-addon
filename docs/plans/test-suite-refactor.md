@@ -10,6 +10,20 @@ The first complete diagnostic candidate retained all **4,101 original cases**, w
 
 The later sequential local baseline completed in **5,955.25 seconds of process time** (51 failed, 4,024 passed, 24 skipped, 2 errors). It used a shared solver cache and is a diagnostic, not the repeated cold-cache acceptance result. The second frozen candidate collects **4,148 cases**. Focused validation passed 326 cases with nine existing skips and no new failure or skip against that baseline; the complete Python-only layer passed all 2,276 cases on Python 3.11 and 3.13. Snapshot checks now include cold document projection, cache eviction, DNA revision validation, all requested LODs, and owned partition cleanup. Complete candidate timing and matrix acceptance remain pending.
 
+The third frozen candidate completed in **2,192.53 seconds of process time**
+(36m 33s), **36.82%** of that matched local baseline. All **4,101 original cases**
+were retained: the candidate collected 4,176 cases, with 4,110 passes, the same
+42 pre-existing Unreal numerical failures, and 24 existing skips. There were
+no missing or unfinished cases, new failures, or new skips; 11 original failing
+cases were repaired. Sources stayed unchanged throughout the run. The exact
+coverage comparison still identified six missing lines and ten missing arcs,
+with no unmapped lines or arcs. Both runtime and coverage gates therefore remain
+open. Evidence: `reports/test-suite-refactor/comparison-v3.json` and
+`matched-windows52-candidate-v3-r1/runs.json`. Further iterations target repeated
+scene lookups and driver scans, reference-data construction, and unnecessary
+geometry in transaction tests. This shared-cache diagnostic does not replace
+the repeated cold-cache matrix qualification.
+
 ## Baseline and success criteria
 
 The audit targets parent revision `f5f204b34673b0717404741b964f8de885ba9990` on `rbf-shape-keys`. [GitHub Actions run 40935964822](https://github.com/poly-hammer/character-dna-addon/actions/runs/40935964822) collected **4,101 cases**. All five test jobs reached the 90-minute execution limit. That is a censored baseline: elapsed time before cancellation does not tell us the complete suite duration, and the remaining test cases need not have average cost.

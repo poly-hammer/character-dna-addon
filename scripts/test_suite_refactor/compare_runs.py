@@ -145,18 +145,33 @@ def source_mapping(baseline_root: Path, candidate_root: Path, migration: dict) -
         mappings[old_file, old_node.lineno] = (new_file, new_node.lineno)
     for transfer in (*migration.get("imports", []), *migration.get("statements", [])):
 
-        def find_import(root: Path, file: str, text: str) -> int:
+        def find_import(root: Path, file: str, text: str, function: str | None = None) -> int:
+            source = (root / SOURCE / file).read_text(encoding="utf-8")
+            start, end = 1, len(source.splitlines())
+            if function is not None:
+                functions = [
+                    node
+                    for node in ast.walk(ast.parse(source))
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function
+                ]
+                if len(functions) != 1:
+                    raise ValueError(f"Ambiguous statement scope: {file}: {function}")
+                start, end = functions[0].lineno, functions[0].end_lineno
             matches = [
                 index
-                for index, line in enumerate((root / SOURCE / file).read_text(encoding="utf-8").splitlines(), 1)
-                if line.strip() == text
+                for index, line in enumerate(source.splitlines(), 1)
+                if start <= index <= end and line.strip() == text
             ]
             if len(matches) != 1:
                 raise ValueError(f"Ambiguous statement mapping: {file}: {text}")
             return matches[0]
 
         before, after = transfer["before"], transfer["after"]
-        mappings[before[0], find_import(baseline_root, *before)] = (after[0], find_import(candidate_root, *after))
+        function = transfer.get("function")
+        mappings[before[0], find_import(baseline_root, *before, function)] = (
+            after[0],
+            find_import(candidate_root, *after, function),
+        )
     return mappings
 
 

@@ -7,12 +7,17 @@ import numpy as np
 import pytest
 
 from character_dna.constants import ToolInfo
+from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile
 
 
 @pytest.fixture
-def character(tmp_path, request, rig_factory):
-    profile = RigProfile(components=("head", "body") if getattr(request, "param", True) else ("head",))
+def character(tmp_path, request, rig_factory, compact_dna):
+    profile = RigProfile(
+        components=("head", "body") if getattr(request, "param", True) else ("head",),
+        asset=str(compact_dna),
+        pose_bones=STATE_BONES,
+    )
     with rig_factory.lease(profile, tmp_path) as instance:
         instance.editor_component = "head"
         yield instance

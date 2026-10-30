@@ -128,6 +128,7 @@ def test_merge_all_scene_lods_and_switch_without_splitting(character):
 
 
 @pytest.mark.parametrize("character", ["all_lods"], indirect=True)
+@pytest.mark.rig_profile(compact=True)
 def test_lod_failure_rolls_back_and_late_lods_reuse_existing_surface(character, monkeypatch):
     instance = character
     pairs = scene_merge.surface_pairs(instance)
@@ -218,7 +219,7 @@ def test_raw_jaw_edit_keeps_merged_surface_and_canonical_target(character, commi
     editor.revert(bpy.context)
 
 
-@pytest.mark.rig_profile(document_mode="scene")
+@pytest.mark.rig_profile(document_mode="scene", compact=True)
 def test_failed_raw_publication_keeps_merged_sculpt_targets_for_retry(character, monkeypatch):
     from contextlib import contextmanager
 
@@ -289,7 +290,7 @@ def test_scene_merge_noop_preserves_sources_and_shape_keys(character):
 
 @pytest.mark.parametrize("kind", ["head", "body"])
 @pytest.mark.parametrize("commit", [False, True], ids=["revert", "commit"])
-@pytest.mark.rig_profile(document_mode="scene")
+@pytest.mark.rig_profile(document_mode="scene", compact=True)
 def test_raw_rest_sculpt_preserves_merge_and_writes_selected_component(character, kind, commit):
     from character_dna.editors.raw_control_editor.editor import RawControlEditor
 
@@ -543,6 +544,7 @@ def test_uv_reconstruction_is_scoped_and_requires_complete_unambiguous_coverage(
 
 
 @pytest.mark.parametrize("commit", [False, True], ids=["revert", "commit"])
+@pytest.mark.rig_profile(compact=True)
 def test_shape_editor_uses_welded_surface_and_restores_canonical_order(character, commit):
     from character_dna.dna_io.misc import create_shape_key
     from character_dna.editors.shape_key_editor.editor import ShapeKeyEditor
@@ -711,6 +713,7 @@ def test_combined_document_import_and_partition_edit(character, tmp_path):
     assert Path(restored.body_dna_file_path).read_bytes() == original_body
 
 
+@pytest.mark.rig_profile(compact=True)
 def test_scene_split_rolls_back_failed_bridge_publication(character, monkeypatch):
     instance = character
     add_keys(instance)
@@ -718,7 +721,7 @@ def test_scene_split_rolls_back_failed_bridge_publication(character, monkeypatch
     before = {kind: scene_merge._shape_signature(instance.component(kind).mesh) for kind in ("head", "body")}
     assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
     proxy = scene_merge.proxy_for(instance)
-    body_index = next(iter(json.loads(HEAD_TO_BODY_EDGE_LOOP_FILE_PATH.read_text())["0"].values()))
+    body_index = next(iter(json.loads(scene_merge.HEAD_TO_BODY_EDGE_LOOP_FILE_PATH.read_text())["0"].values()))
     proxy.data.shape_keys.key_blocks["head_lod0_mesh__custom"].data[body_index].co.x += 0.02
 
     def fail_publish(_instance):

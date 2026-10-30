@@ -343,7 +343,7 @@
       ],
       "after": [
         "__init__.py",
-        "\"version\": (0, 15, 3),"
+        "\"version\": (0, 15, 4),"
       ],
       "reason": "Required patch-version metadata update; no conditional behavior."
     },
@@ -434,6 +434,54 @@
         "from typing import Any, cast"
       ],
       "reason": "Add a type-only cast for the synchronous getter adapter; every original solver pose is compared with an uncached native reader."
+    },
+    {
+      "before": [
+        "rig_instance.py",
+        "for mesh, _, name in self.edit_target.shape_targets()"
+      ],
+      "after": [
+        "rig_instance.py",
+        "for mesh, _, name in component.shape_targets()"
+      ],
+      "function": "sync_shape_key_list",
+      "reason": "One synchronous mesh lookup per refresh; real empty-rig then loaded-key tests check recovery without a persistent cache."
+    },
+    {
+      "before": [
+        "rig_instance.py",
+        "if self.edit_target.get_shape_key_block(mesh, name) is not None"
+      ],
+      "after": [
+        "rig_instance.py",
+        "if component.get_shape_key_block(mesh, name, meshes=meshes) is not None"
+      ],
+      "function": "sync_shape_key_list",
+      "reason": "One synchronous mesh lookup per refresh; real empty-rig then loaded-key tests check recovery without a persistent cache."
+    },
+    {
+      "before": [
+        "rig_instance.py",
+        "self.data.pop(self.edit_target.cache_key(\"shape_key_has_deltas\"), None)"
+      ],
+      "after": [
+        "rig_instance.py",
+        "self.data.pop(component.cache_key(\"shape_key_has_deltas\"), None)"
+      ],
+      "function": "sync_shape_key_list",
+      "reason": "One synchronous mesh lookup per refresh; real empty-rig then loaded-key tests check recovery without a persistent cache."
+    },
+    {
+      "before": [
+        "runtime/bindings.py",
+        "curve = owner.animation_data.drivers.find(path, index=max(0, item[\"index\"]))"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "curve = owners[identity].get((path, max(0, item[\"index\"])))"
+      ],
+      "function": "mute_targets",
+      "reason": "Index each current owner once per call. Real removal, replacement, ownership and array-channel tests retain conditional behavior and prevent stale RNA reuse."
     }
   ]
 }

@@ -14,6 +14,7 @@ from scripts.test_suite_refactor.compare_runs import (
     compare_cases,
     compare_coverage,
     covered_path,
+    source_mapping,
 )
 from scripts.test_suite_refactor.run_benchmarks import cleanup_temporary, python_executable
 
@@ -130,6 +131,30 @@ def test_coverage_comparison_detects_lost_branch_after_line_shift(tmp_path):
     assert result["missing_lines"] == [["domain.py", 4, "domain.py", 5]]
     assert len(result["missing_arcs"]) == 2
     assert not result["unmapped_lines"] and not result["unmapped_arcs"]
+
+
+def test_statement_mapping_requires_the_named_function_scope(tmp_path):
+    roots = [tmp_path / name for name in ("before", "after")]
+    sources = [
+        "def first():\n    return old()\n\ndef second():\n    return old()\n",
+        "def first():\n    return new()\n\ndef second():\n    return old()\n",
+    ]
+    for root, source in zip(roots, sources, strict=True):
+        folder = root / SOURCE
+        folder.mkdir(parents=True)
+        (folder / "naming.py").write_text("")
+        (folder / "domain.py").write_text(source)
+    statement = {"before": ["domain.py", "return old()"], "after": ["domain.py", "return new()"]}
+    migration = {"functions": {}, "statements": [statement]}
+    with pytest.raises(ValueError, match="Ambiguous statement mapping"):
+        source_mapping(*roots, migration)
+    statement["function"] = "first"
+    mapped = source_mapping(*roots, migration)
+    assert mapped["domain.py", 2] == ("domain.py", 2)
+    assert mapped["domain.py", 5] == ("domain.py", 5)
+    statement["function"] = "second"
+    with pytest.raises(ValueError, match="Ambiguous statement mapping"):
+        source_mapping(*roots, migration)
 
 
 @pytest.mark.parametrize("candidate_hits_line", [True, False])
