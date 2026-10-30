@@ -1276,14 +1276,26 @@ def position_face_board(
         position_eye_aim(head_rig_object, face_board_object)
 
 
-def collection_to_list(collection: bpy.types.bpy_prop_collection) -> list:
+def collection_to_list(
+    collection: bpy.types.bpy_prop_collection, *, exclude_suffixes: tuple[str, ...] = (), _schemas: dict | None = None
+) -> list:
+    """Copy current RNA values; share only field descriptions within this call."""
+    if _schemas is None:
+        _schemas = {}
     item_list = []
     for item in collection:
         data = {"__property_group__": item.__class__.__name__}
-        for key, data_type in item.__annotations__.items():
-            if data_type.function.__name__ == "CollectionProperty":
-                data[key] = collection_to_list(getattr(item, key))
-            elif data_type.function.__name__ == "FloatVectorProperty":
+        cls = item.__class__
+        if cls not in _schemas:
+            _schemas[cls] = tuple(
+                (key, data_type.function.__name__)
+                for key, data_type in item.__annotations__.items()
+                if not key.endswith(exclude_suffixes)
+            )
+        for key, kind in _schemas[cls]:
+            if kind == "CollectionProperty":
+                data[key] = collection_to_list(getattr(item, key), exclude_suffixes=exclude_suffixes, _schemas=_schemas)
+            elif kind == "FloatVectorProperty":
                 data[key] = getattr(item, key)[:]
             else:
                 data[key] = getattr(item, key)

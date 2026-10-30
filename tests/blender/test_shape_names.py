@@ -9,7 +9,7 @@ import bpy
 import numpy as np
 import pytest
 
-from test_merge_split import character as _character, coordinates
+from test_merge_split import coordinates
 
 from character_dna import shape_names
 from character_dna.dna_io.misc import create_shape_key
@@ -20,7 +20,17 @@ from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile
 
 
-character = _character
+@pytest.fixture
+def character(request, rig_factory, tmp_path):
+    marker = request.node.get_closest_marker("rig_profile")
+    options = dict(marker.kwargs) if marker else {}
+    if options.pop("compact", False):
+        asset = request.getfixturevalue("compact_dna")
+        if options.pop("long_target", False):
+            asset = request.getfixturevalue("compact_two_target_asset")
+        options.update(asset=str(asset), pose_bones=STATE_BONES)
+    with rig_factory.lease(RigProfile(**options), tmp_path) as instance:
+        yield instance
 
 
 @pytest.fixture
@@ -205,6 +215,7 @@ def test_all_42_long_head_targets_import_recover_bind_and_split(character, monke
         assert instance.component("head").shape_key_apply_plan is plan
 
 
+@pytest.mark.rig_profile(compact=True, long_target=True)
 def test_legacy_surface_upgrade_preserves_uncommitted_sculpt(character):
     instance = character
     obj = instance.head_mesh
@@ -381,6 +392,7 @@ def test_alias_registry_survives_blend_reload(tmp_path):
         bpy.ops.wm.read_homefile(use_empty=True)
 
 
+@pytest.mark.rig_profile(compact=True, long_target=True)
 def test_long_surface_edits_use_logical_names_and_rollback(character):
     from character_dna.editors.converter import surface_session
 
@@ -419,6 +431,7 @@ def test_long_surface_edits_use_logical_names_and_rollback(character):
         assert full not in instance.component("head").shape_key_blocks_by_name
 
 
+@pytest.mark.rig_profile(compact=True)
 def test_new_surface_shape_uses_mesh_prefix_without_discarding_foreign_edits(character):
     instance = character
     with controller.authoring_operation(instance):

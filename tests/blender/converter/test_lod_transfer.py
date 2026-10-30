@@ -81,6 +81,21 @@ def test_mirror_deduplication_matches_dense_reference():
     np.testing.assert_array_equal(deduplicate_texture_coordinates(uv[:, 0], uv[:, 1]), expected)
 
 
+def test_scalar_cell_clamp_matches_original_numpy_rule():
+    uv = np.array(((0, 0), (1, 0), (0, 1)), dtype=float)
+    mapping = SourceUVMapping(uv, np.arange(3), [np.arange(3)])
+    samples = [*np.random.default_rng(407).uniform(-10, 10, (1000, 2)), mapping._grid_min]
+    for index in range(mapping._res + 1):
+        edge = mapping._grid_min + index * mapping._cell_size
+        samples.extend((edge, np.nextafter(edge, -np.inf), np.nextafter(edge, np.inf)))
+    for point in samples:
+        expected = tuple(
+            int(np.clip(int((point[axis] - mapping._grid_min[axis]) / mapping._cell_size[axis]), 0, mapping._res - 1))
+            for axis in range(2)
+        )
+        assert mapping.cell_of(point) == expected
+
+
 def test_reused_uv_index_produces_identical_transfer():
     uv = np.array(((0, 0), (1, 0), (0, 1)), dtype=float)
     indices = np.arange(3)

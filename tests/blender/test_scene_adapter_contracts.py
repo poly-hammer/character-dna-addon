@@ -16,6 +16,47 @@ from character_dna.utilities import constrain_face_board_to_head, get_topology_t
 from character_dna.utilities.action import flush_texture_mask_keyframes_to_action, get_channel_bag
 
 
+def test_collection_snapshot_filters_flags_without_caching_rna_values(minimal_character):
+    from character_dna.editors.rbf_editor.preview import _authored_data
+    from character_dna.utilities import collection_to_list
+
+    def original(collection):
+        rows = []
+        for item in collection:
+            row = {"__property_group__": item.__class__.__name__}
+            for name, prop in item.__annotations__.items():
+                value = getattr(item, name)
+                if prop.function.__name__ == "CollectionProperty":
+                    value = original(value)
+                elif prop.function.__name__ == "FloatVectorProperty":
+                    value = value[:]
+                row[name] = value
+            rows.append(row)
+        return rows
+
+    collection = minimal_character.rbf_editor.rbf_solver_list
+    for index in range(2):
+        solver = collection.add()
+        solver["name"] = f"Solver{index}"
+        pose = solver.poses.add()
+        pose["name"] = f"Pose{index}"
+        pose.drivers.add()["name"] = "calf_l"
+        driven = pose.driven.add()
+        driven["name"] = "calf_knee_l"
+        driven.location = (0.1, -0.2, 0.3)
+    for iteration in range(2):
+        expected = original(collection)
+        assert collection_to_list(collection) == expected
+        filtered = collection_to_list(collection, exclude_suffixes=("_active_index", "_edited"))
+        assert filtered == _authored_data(expected)
+        collection[0].poses[0]["drivers_active_index"] = iteration + 1
+        collection[0].poses[0].driven[0].location_edited = True
+        assert collection_to_list(collection, exclude_suffixes=("_active_index", "_edited")) == filtered
+        collection[0].poses[0].driven[0].location[0] += 0.25
+    collection.remove(0)
+    assert collection_to_list(collection) == original(collection)
+
+
 @pytest.mark.parametrize("kind", ["head", "body"])
 def test_skin_weight_import_matches_native_values_and_reuses_existing_groups(empty_character_scene, kind):
     from character_dna.dna_io import get_dna_reader, release_dna_handle

@@ -83,7 +83,7 @@ def compact_dna_asset(addon, tmp_path_factory):
 
 @pytest.fixture(scope="session")
 def compact_two_target_asset(compact_dna_asset, tmp_path_factory):
-    """A second real head channel for untouched-key transaction assertions."""
+    """A second, long-named real head channel for key identity and transactions."""
     from character_dna.dna_io import merged_graph
 
     folder = tmp_path_factory.mktemp("compact_two_targets")
@@ -95,7 +95,9 @@ def compact_two_target_asset(compact_dna_asset, tmp_path_factory):
     channel = next(
         channel
         for mesh, channel in zip(mapping["from"], mapping["to"], strict=True)
-        if mesh == 0 and channel != targets[0]["blendShapeChannelIndex"]
+        if mesh == 0
+        and channel != targets[0]["blendShapeChannelIndex"]
+        and len("head_lod0_mesh__" + original["defn1.1"]["blendShapeChannelNames"][channel]) > 63
     )
     targets.append(
         {"deltas": {"xs": [0.0], "ys": [0.2], "zs": [0.0]}, "vertexIndices": [0], "blendShapeChannelIndex": channel}

@@ -279,6 +279,16 @@
         "Both original test_calibrate_validation cases",
         "Pristine lease mutation and path-ownership canaries"
       ]
+    },
+    {
+      "case": "Key identity, legacy migration and rollback",
+      "before": "Three identity and rollback tests rebuilt dense surfaces while asserting naming, canonical source preservation, transaction rollback and cross-component rejection.",
+      "after": "Compact native meshes keep a real long-named head channel, source/merged coordinate comparisons, driver routing, legacy metadata migration and rejection assertions. All native outputs still match the original SDK at every LOD.",
+      "retained_integration": [
+        "test_all_42_long_head_targets_import_recover_bind_and_split",
+        "test_combined_neckline_shape_is_portable_and_backup_restores_document",
+        "Both full-geometry numerical and native compact-asset equivalence matrices"
+      ]
     }
   ],
   "measured_hot_path_contracts": [
@@ -305,6 +315,30 @@
       "retained_integration": [
         "Every original Unreal runtime/editor pose",
         "Every original Maya matrix and numerical tolerance"
+      ]
+    },
+    {
+      "case": "RNA preview serialization",
+      "change": "Cache only field descriptions within one recursive call, copying all current values and filtering preview-only suffixes during traversal.",
+      "retained_integration": [
+        "Independent original serializer and authored-data filter over real RNA, changed values and removed items",
+        "Every original Unreal editor pose and companion-preservation assertion"
+      ]
+    },
+    {
+      "case": "Native weight export and calibration",
+      "change": "Index Blender groups for one operation and preallocate native calibration rows. Keep original weight queries, order, root index and distinct zero-weight policies.",
+      "retained_integration": [
+        "Exact compact native head/body rows for both writers, including zero/root/unrelated/replaced groups",
+        "All original export, calibration, geometry and LOD assertions"
+      ]
+    },
+    {
+      "case": "UV grid cell calculation",
+      "change": "Use scalar integer clamps with the same truncation and bounds as the original NumPy operation.",
+      "retained_integration": [
+        "Original NumPy oracle at every grid boundary and adjacent floats",
+        "Dense fallback oracle and all original full geometry/LOD calibration"
       ]
     }
   ],

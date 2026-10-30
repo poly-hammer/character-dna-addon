@@ -343,7 +343,7 @@
       ],
       "after": [
         "__init__.py",
-        "\"version\": (0, 15, 8),"
+        "\"version\": (0, 15, 9),"
       ],
       "reason": "Required patch-version metadata update; no conditional behavior."
     },
@@ -686,6 +686,138 @@
         "candidate = candidate[overlap]"
       ],
       "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "get_mesh_vertex_groups",
+      "before": [
+        "dna_io/exporter.py",
+        "vertex_group = mesh_object.vertex_groups.get(vertex_group_name)"
+      ],
+      "after": [
+        "dna_io/exporter.py",
+        "vertex_group = groups_by_name.get(vertex_group_name)"
+      ],
+      "reason": "Operation-local RNA group lookup preserves every original weight call, influence order, root joint and zero-weight policy; compact native head/body output rows and removed/replaced groups are checked; all original full export/calibration oracles remain."
+    },
+    {
+      "function": "set_dna_vertex_groups",
+      "before": [
+        "dna_io/exporter.py",
+        "vertex_group = mesh_object.vertex_groups.get(vertex_group_name)"
+      ],
+      "after": [
+        "dna_io/exporter.py",
+        "vertex_group = groups_by_name.get(vertex_group_name)"
+      ],
+      "reason": "Operation-local RNA group lookup preserves every original weight call, influence order, root joint and zero-weight policy; compact native head/body output rows and removed/replaced groups are checked; all original full export/calibration oracles remain."
+    },
+    {
+      "function": "calibrate_vertex_groups",
+      "before": [
+        "dna_io/calibrator.py",
+        "vertex_group = mesh_object.vertex_groups.get(vertex_group_name)"
+      ],
+      "after": [
+        "dna_io/calibrator.py",
+        "vertex_group = groups_by_name.get(vertex_group_name)"
+      ],
+      "reason": "Operation-local RNA group lookup preserves every original weight call, influence order, root joint and zero-weight policy; compact native head/body output rows and removed/replaced groups are checked; all original full export/calibration oracles remain."
+    },
+    {
+      "function": "collection_to_list",
+      "before": [
+        "utilities/misc.py",
+        "def collection_to_list(collection: bpy.types.bpy_prop_collection) -> list:"
+      ],
+      "after": [
+        "utilities/misc.py",
+        "def collection_to_list("
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "collection_to_list",
+      "before": [
+        "utilities/misc.py",
+        "for key, data_type in item.__annotations__.items():"
+      ],
+      "after": [
+        "utilities/misc.py",
+        "for key, kind in _schemas[cls]:"
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "collection_to_list",
+      "before": [
+        "utilities/misc.py",
+        "if data_type.function.__name__ == \"CollectionProperty\":"
+      ],
+      "after": [
+        "utilities/misc.py",
+        "if kind == \"CollectionProperty\":"
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "collection_to_list",
+      "before": [
+        "utilities/misc.py",
+        "data[key] = collection_to_list(getattr(item, key))"
+      ],
+      "after": [
+        "utilities/misc.py",
+        "data[key] = collection_to_list(getattr(item, key), exclude_suffixes=exclude_suffixes, _schemas=_schemas)"
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "collection_to_list",
+      "before": [
+        "utilities/misc.py",
+        "elif data_type.function.__name__ == \"FloatVectorProperty\":"
+      ],
+      "after": [
+        "utilities/misc.py",
+        "elif kind == \"FloatVectorProperty\":"
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "show",
+      "before": [
+        "editors/rbf_editor/preview.py",
+        "data = _authored_data(collection_to_list(instance.rbf_editor.rbf_solver_list))"
+      ],
+      "after": [
+        "editors/rbf_editor/preview.py",
+        "data = collection_to_list(instance.rbf_editor.rbf_solver_list, exclude_suffixes=(\"_active_index\", \"_edited\"))"
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "cell_of",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "gx = int(np.clip(int((point[0] - self._grid_min[0]) / self._cell_size[0]), 0, self._res - 1))"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "gx = min(max(int((point[0] - self._grid_min[0]) / self._cell_size[0]), 0), self._res - 1)"
+      ],
+      "reason": "Scalar integer clamping preserves the original truncation and inclusive bounds; original NumPy rule checked at every grid boundary, neighboring floats and seeded outside points."
+    },
+    {
+      "function": "cell_of",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "gy = int(np.clip(int((point[1] - self._grid_min[1]) / self._cell_size[1]), 0, self._res - 1))"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "gy = min(max(int((point[1] - self._grid_min[1]) / self._cell_size[1]), 0), self._res - 1)"
+      ],
+      "reason": "Scalar integer clamping preserves the original truncation and inclusive bounds; original NumPy rule checked at every grid boundary, neighboring floats and seeded outside points."
     }
   ]
 }

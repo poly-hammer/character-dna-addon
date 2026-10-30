@@ -446,12 +446,13 @@ class DNAExporter:
         vertex_group_lookup = {vertex_group.index: vertex_group.name for vertex_group in mesh_object.vertex_groups}
         # Initialize the vertex groups dictionary
         vertex_groups = {vertex_group.name: [] for vertex_group in mesh_object.vertex_groups}
+        groups_by_name = {group.name: group for group in mesh_object.vertex_groups}
 
         # Loop through the vertices and get the vertex group names and the vertex and weights
         for vertex in mesh_object.data.vertices:
             vertex_group_names = [vertex_group_lookup.get(group.group, "") for group in vertex.groups]
             for vertex_group_name in vertex_group_names:
-                vertex_group = mesh_object.vertex_groups.get(vertex_group_name)
+                vertex_group = groups_by_name.get(vertex_group_name)
                 if vertex_group:
                     weight = vertex_group.weight(vertex.index)
                     if weight > 0:
@@ -524,6 +525,7 @@ class DNAExporter:
 
         # Allocate the indexed skin table before populating its variable-length
         # rows. This preserves every vertex, influence and weight unchanged.
+        groups_by_name = {group.name: group for group in mesh_object.vertex_groups}
         if mesh_object.data.vertices:
             self._dna_writer.setSkinWeightsValues(mesh_index, len(mesh_object.data.vertices) - 1, [])
         # Loop through the vertices and get the vertex group names and the vertex and weights
@@ -534,7 +536,7 @@ class DNAExporter:
 
             for vertex_group_name in vertex_group_names:
                 bone_index = self._bone_index_lookup.get(vertex_group_name)
-                vertex_group = mesh_object.vertex_groups.get(vertex_group_name)
+                vertex_group = groups_by_name.get(vertex_group_name)
                 # ``bone_index`` can be 0 (the root joint), so test against ``None``
                 # explicitly -- ``if bone_index`` would silently drop every weight
                 # painted onto joint index 0.

@@ -577,6 +577,9 @@ class DNACalibrator(DNAExporter, DNAImporter):
                     continue
 
                 self._dna_writer.clearSkinWeights(meshIndex=mesh_index)
+                if mesh_object.data.vertices:
+                    self._dna_writer.setSkinWeightsValues(mesh_index, len(mesh_object.data.vertices) - 1, [])
+                groups_by_name = {group.name: group for group in mesh_object.vertex_groups}
                 # Create a lookup table for the vertex group names by their index
                 vertex_group_lookup = {
                     vertex_group.index: vertex_group.name for vertex_group in mesh_object.vertex_groups
@@ -594,7 +597,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
 
                     for vertex_group_name in vertex_group_names:
                         bone_index = bone_index_lookup.get(vertex_group_name)
-                        vertex_group = mesh_object.vertex_groups.get(vertex_group_name)
+                        vertex_group = groups_by_name.get(vertex_group_name)
                         if bone_index is not None and vertex_group:
                             weight = vertex_group.weight(vertex.index)
                             bone_indices.append(bone_index)
