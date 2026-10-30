@@ -613,3 +613,59 @@ def test_native_eye_cache_includes_spatial_inputs(native_head):
     context["spatial"][32] += 0.005
     native.evaluate_frame(*args)
     assert native.session_statistics(session)["solves"] > before["solves"]
+
+
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
+def test_native_preview_preserves_disabled_output_ranges(native_head):
+    """A different real SDK preview must not overwrite disabled output categories."""
+    instance = native_head
+    for setting in ("evaluate_bones", "evaluate_shape_keys", "evaluate_texture_masks"):
+        setattr(instance, setting, False)
+    engine.sync_settings(instance)
+    bpy.context.view_layer.update()
+    record = engine._component_record(instance, "head")
+    graph = bpy.context.evaluated_depsgraph_get()
+    owner = record["carrier"].evaluated_get(graph)
+    assert engine.solve(owner, graph) > 0
+    before = array("d", owner["outputs"])
+
+    reader = instance.head_dna_reader
+    jaw = next(
+        index
+        for index in range(reader.getRawControlCount())
+        if reader.getRawControlName(index) == "CTRL_expressions.jawOpen"
+    )
+    state = instance.head_instance
+    state.setRawControl(jaw, 0.7)
+    instance.head_manager.calculate(state)
+    assert engine.preview_controls(instance, state)
+    bpy.context.view_layer.update()
+    graph = bpy.context.evaluated_depsgraph_get()
+    owner = record["carrier"].evaluated_get(graph)
+    # Invoke the real native path directly as well as through Blender's driver
+    # callbacks, so thread scheduling cannot hide these branches from coverage.
+    assert engine.solve(owner, graph) > 0
+    assert record["preview"] is not None
+    assert record["preview"]["outputs"] != before
+    assert array("d", owner["outputs"]) == before
+    assert record["last_context"]["preview_controls"] is record["preview"]
+
+
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
+def test_native_disabled_evaluation_preserves_published_buffer(native_head):
+    """Disabling evaluation stops publication without erasing the graph's last pose."""
+    native_head.face_board.pose.bones["CTRL_C_jaw"].location.y = 0.4
+    native_head.face_board.update_tag()
+    bpy.context.view_layer.update()
+    record = engine._component_record(native_head, "head")
+    graph = bpy.context.evaluated_depsgraph_get()
+    owner = record["carrier"].evaluated_get(graph)
+    assert engine.solve(owner, graph) > 0
+    before = array("d", owner["outputs"])
+    calls = record["calls"]
+
+    native_head.auto_evaluate = False
+    engine.sync_settings(native_head)
+    assert engine.solve(owner, graph) == 0.0
+    assert record["calls"] == calls
+    assert array("d", owner["outputs"]) == before
