@@ -1,5 +1,17 @@
 # Character DNA test suite refactor plan
 
+## Correctness completion (2026-10-30)
+
+The user accepted the current runtime and ended further timing qualification. The remaining goal is a passing complete test suite on every supported CI configuration.
+
+The 42 remaining comparisons used Unreal 5.8.3 references against newer bindings. Epic changed the `TwistAngle` distance metric in Unreal 5.8.4 / RigLogic 13.2.9 to fix finger half rotations (MH-19527, engine commit `aea6fe51b7ad8fa7b1f7e6a70cb657eb8fadbc83`); OpenRigLogic 13.5.2 includes that correction. Both runtime and editor mismatches came from the intermediate half bones, while their corrective children retained the correct local transforms.
+
+References were recaptured in Unreal 5.8.4, using the unchanged DNA and driver manifest. Two complete independent bakes reproduced all 215 pose snapshots exactly. The extracted animation still passes the separate Unreal raw-pose audit at the original 0.01 mm bound; maximum error is 0.00115 mm. The existing 1 mm assertions remain unchanged. Only finger poses change materially: 73 joint samples in 37 poses exceed 0.01 mm difference from the old capture. The remaining changed decimals reflect the complete new capture, rather than selective golden editing.
+
+The reference generator now explicitly reads canonical Maya coordinates, and provenance includes the capture's RigLogic version and RBF source hashes. Four additional regression cases check manifest generation and independently assert positive finger twist interpolation at 30, 60 and 90 degrees. All **619 Maya/Unreal body cases pass on both Blender 4.5 and 5.2**. The complete platform CI result is recorded on PR #380; no new performance campaign is required. Historical measurements and failure counts below describe their named revisions, before this correctness follow-up.
+
+## Refactor evidence
+
 Reduce complete test execution to at most **25% of the matched baseline**, while preserving every existing behavioral contract and improving failure-path coverage. Implementation is published on `rbf-shape-keys` and the editors submodule's `main` branch. **The complete frozen `f2a6995` candidate meets the runtime target at 21.47% of the retained original cold baseline and preserves every original case and covered line/branch. All five supported CI lanes also preserve cases and coverage, with the same 42 original numerical failures. Supplemental fault, execution-order and repeated lease checks pass locally on both Blender versions, and all four additional regression cases pass across the supported CI matrix. Repeated cross-platform timing qualification remains deferred at the user's request to free shared Mac runners.**
 
 The implementation separates Python domain tests from Blender tests, leases private scene/DNA fixtures from process-local pristine artifacts, narrows component profiles, and retains the original numerical matrices. The assertion-boundary ledger is `scripts/test_suite_refactor/contracts.json`; exact case and source mappings are in `migration-map.json`. Measurements retain incomplete phase records and compare every original case, covered line and arc. Numerical references, tolerances and existing skips remain unchanged.

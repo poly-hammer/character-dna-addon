@@ -19,9 +19,15 @@ def prepare(dna_path: Path, output: Path) -> None:
 
     from mathutils import Euler, Quaternion, Vector
 
-    from character_dna.dna_io import get_dna_reader
+    from character_dna.bindings import dna
+    from character_dna.dna_io.coordinates import configuration
 
-    reader = get_dna_reader(dna_path)
+    # This manifest crosses into Unreal in Maya coordinates. The addon's reader
+    # returns Blender coordinates, which would convert these inputs twice.
+    stream = dna.FileStream(str(dna_path), dna.AccessMode_Read, dna.OpenMode_Binary, None)
+    reader = dna.BinaryStreamReader(stream, configuration(blender=False), None)
+    reader.read()
+    assert dna.Status.isOk(), dna.Status.get().message
     joints = []
     for index in range(reader.getJointCount()):
         rotation = Euler([math.radians(v) for v in reader.getNeutralJointRotation(index)], "XYZ").to_quaternion()

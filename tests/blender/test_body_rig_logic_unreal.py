@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 
 import bpy
 import pytest
@@ -38,6 +39,8 @@ def unreal_body(rig_factory, tmp_path_factory, import_lods, import_shape_keys):
 def test_unreal_snapshot_provenance():
     """Reject stale inputs, missing poses, or an FBX from a different capture."""
     provenance = json.loads((SNAPSHOTS / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["riglogic_version"] == "13.2.9"
+    assert set(provenance["riglogic_source_sha256"]) == {"RBFSolver.cpp", "InterpolativeRBFSolver.cpp"}
     assert hashlib.sha256(DNA.read_bytes()).hexdigest() == INPUTS["dna_sha256"] == provenance["dna_sha256"]
     manifest = (SNAPSHOTS / "inputs.json").read_text(encoding="utf-8").encode("utf-8")
     assert hashlib.sha256(manifest).hexdigest() == provenance["inputs_sha256"]
@@ -51,6 +54,60 @@ def test_unreal_snapshot_provenance():
     assert actual == legacy  # Explicitly retains all previously excluded finger targets.
     assert len(actual) + 1 == provenance["frames"] == len(INPUTS["frames"])
     assert len(INPUTS["joints"]) == provenance["joints_per_frame"]
+
+
+def test_capture_inputs_use_canonical_coordinates(tmp_path):
+    """The generator must reproduce Maya inputs even though the addon reads Z-up DNA."""
+    from snapshot_tools.unreal_body.prepare_inputs import prepare
+
+    path = tmp_path / "inputs.json"
+    prepare(DNA, path)
+    generated = json.loads(path.read_text(encoding="utf-8"))
+    assert generated.keys() == INPUTS.keys()
+    assert {key: value for key, value in generated.items() if key != "joints"} == {
+        key: value for key, value in INPUTS.items() if key != "joints"
+    }
+    for actual, expected in zip(generated["joints"], INPUTS["joints"], strict=True):
+        assert actual["name"] == expected["name"]
+        assert actual["parent"] == expected["parent"]
+        assert actual["unreal_translation_cm"] == expected["unreal_translation_cm"]
+        # mathutils' float32 trigonometry can differ by an ULP across platforms.
+        assert actual["unreal_rotation_xyzw"] == pytest.approx(expected["unreal_rotation_xyzw"], abs=1e-6)
+
+
+@pytest.mark.parametrize("angle", [30, 60, 90])
+def test_finger_half_solver_uses_unwrapped_twist_distance(unreal_body, angle):
+    """Positive twists interpolate toward +120, without wrapping to the -120 target."""
+    from character_dna.bindings import riglogic
+    from character_dna.dna_io import release_dna_handle
+
+    reader = unreal_body.body_dna_reader
+    manager = unreal_body.body_manager
+    state = riglogic.RigInstance(rigLogic=manager, memRes=None)
+    try:
+        rotation = Quaternion((0, -1, 0), math.radians(angle))
+        for index in range(reader.getRawControlCount()):
+            name, axis = reader.getRawControlName(index).rsplit(".", 1)
+            value = rotation["wxyz".index(axis[-1])] if name == "index_01_l" else float(axis == "qw")
+            state.setRawControl(index, value)
+        manager.calculate(state)
+        solver = next(
+            index
+            for index in range(reader.getRBFSolverCount())
+            if reader.getRBFSolverName(index) == "index_l_01_half_UERBFSolver"
+        )
+        control_offset = state.getRawControlCount() + state.getPSDControlCount()
+        weights = {
+            reader.getRBFPoseName(pose): [
+                state.getRBFControl(index - control_offset) for index in reader.getRBFPoseOutputControlIndices(pose)
+            ]
+            for pose in reader.getRBFSolverPoseIndices(solver)
+        }
+        assert weights["index_l_01_half_curl_120"] == pytest.approx([angle / 120], abs=2e-5)
+        assert weights["index_l_01_half_push_120"] == pytest.approx([0], abs=2e-5)
+        assert weights["index_l_01_half_caps_020"] == pytest.approx([0], abs=2e-5)
+    finally:
+        release_dna_handle(state)
 
 
 @pytest.mark.parametrize("editing", [False, True], ids=["runtime", "editor"])

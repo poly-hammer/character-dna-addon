@@ -6,11 +6,17 @@ The new references contain 215 frames at 30 fps: neutral plus 214 solver targets
 
 ## Matching character data
 
-`tests/test_files/dna/ada_unreal/body.dna` was exported using **Export DNA** on `/Game/MetaHumans/Ada/Body/SKM_Ada_BodyMesh_DNA` in Unreal 5.8.3. The original Ada fixture was exported with Unreal 5.6. Its neutral joints differ from this assembled mesh by up to 0.226112 cm, so using that older DNA for the new references would create unrelated failures. The legacy fixture remains unchanged.
+`tests/test_files/dna/ada_unreal/body.dna` was exported using **Export DNA** on `/Game/MetaHumans/Ada/Body/SKM_Ada_BodyMesh_DNA` in Unreal 5.8.3. The current capture uses that same DNA and mesh in Unreal 5.8.4. The original Ada fixture was exported with Unreal 5.6. Its neutral joints differ from this assembled mesh by up to 0.226112 cm, so using that older DNA for the new references would create unrelated failures. The legacy fixture remains unchanged.
 
 `inputs.json` records the exact DNA hash, frame-to-solver mapping, neutral transforms, and driver quaternions. Targets come from the DNA's stored quaternion controls, not an interpretation of pose-name Euler suffixes. Driver deltas retain their Maya-local meaning and are composed as `neutral * delta` after reflection into Unreal coordinates. This does not change the addon's coordinate handling.
 
-`provenance.json` records Unreal version, source asset paths, capture hashes, and audit errors. The original baked FBX is retained at `tests/test_files/fbx/ada_unreal_rbf.fbx` under Git LFS. All translation, rotation, and scale tracks remain in that FBX; the JSON assertions use joint origins at the existing 1 mm tolerance.
+`provenance.json` records Unreal and RigLogic versions, RBF evaluator source hashes, source asset paths, capture hashes, and audit errors. The baked FBX is retained at `tests/test_files/fbx/ada_unreal_rbf.fbx` under Git LFS. All translation, rotation, and scale tracks remain in that FBX; the JSON assertions use joint origins at the existing 1 mm tolerance.
+
+## Evaluator compatibility
+
+The original September capture used Unreal 5.8.3 and the wrapped quaternion distance for `TwistAngle` solvers. Epic fixed finger half rotations in Unreal 5.8.4 / RigLogic 13.2.9 (MH-19527, engine commit `aea6fe51b7ad8fa7b1f7e6a70cb657eb8fadbc83`). The corrected metric uses the difference between signed, unwound twist angles: +120 and -120 degrees are 240 degrees apart. The addon's OpenRigLogic 13.5.2 bindings include this behavior. Comparing them with the older capture produced 42 failures: 21 finger poses in both runtime and editor modes.
+
+The October capture was regenerated in Unreal 5.8.4, independently of the addon. It changes 73 joint samples across 37 finger poses by more than 0.01 mm; no non-finger pose changes by that amount. The DNA, input manifest, assertion coverage, and 1 mm tolerance are unchanged. An additional analytic regression verifies that the finger half solver interpolates positive rotations toward its +120-degree target without activating its negative target.
 
 ## Regeneration
 
@@ -30,10 +36,11 @@ The new references contain 215 frames at 30 fps: neutral plus 214 solver targets
    bake_unreal.bake(
        r"E:\repos\character-dna-addon\tests\test_files\json\poses_unreal\ada_body_rig\inputs.json",
        r"E:\repos\character-dna-addon\scratches\unreal-body-capture",
+       package="/Game/CharacterDNATests/AdaRBFCurrent",
    )
    ```
 
-   This updates assets only under `/Game/CharacterDNATests/AdaRBF`: the driver clip, baked clip, compression settings, and review Level Sequence. It creates/reuses its tagged Ada preview actor in the current level. It does not save the user's level. The AnimSequences are self-contained; rerun the capture to rebind the review Level Sequence after reopening an unsaved level.
+   This updates assets only under the supplied package: the driver clip, baked clip, compression settings, and review Level Sequence. It creates/reuses its tagged Ada preview actor in the current level. It does not save the user's level. The AnimSequences are self-contained; rerun the capture to rebind the review Level Sequence after reopening an unsaved level. The capture requires the engine's RigLogic source headers so its evaluator version and source hashes can be recorded.
 
    The input clip contains one extra terminal guard key to prevent Sequencer wrapping the final pose to neutral. Linear interpolation avoids stepped-key frame-boundary errors. Both clips use the actual Ada mesh as retarget source and bitwise compression, avoiding shared-skeleton proportion offsets and ACL key approximation. The bake includes the actual Blueprint post-process; viewing the already-baked clip should disable post-process evaluation to avoid applying correctives twice.
 
@@ -48,14 +55,14 @@ The new references contain 215 frames at 30 fps: neutral plus 214 solver targets
 5. Run both baselines:
 
    ```powershell
-   .venv\Scripts\python.exe -m pytest tests/test_body_rig_logic.py tests/test_body_rig_logic_unreal.py -o addopts="" -q
+   .venv\Scripts\python.exe -m pytest tests/blender/test_body_rig_logic.py tests/blender/test_body_rig_logic_unreal.py -o addopts="" -q
    ```
 
-The new suite sets only driver bone quaternions and evaluates the runtime. It deliberately avoids the RBF editor's isolated-pose preview, which is a different test subject. The existing Maya runtime and editor tests remain in place.
+The suite replays authored driver quaternions through both the runtime and the RBF editor's contextual preview. The existing Maya runtime and editor tests remain in place.
 
-## Capture validation (2026-09-25)
+## Capture validation (2026-10-30)
 
-- Combined Maya and Unreal suites: **400 passed** (184 Maya cases, 215 Unreal poses, one provenance check).
+- All **430 Unreal pose cases** pass (215 poses through both runtime and editor paths).
 - All 92 non-finger and 122 finger poses pass without changing production code or the 1 mm tolerance.
 - Maximum UFBX extraction difference from Unreal's raw pose audit: **0.00000114754 m** (0.00115 mm).
 - Maximum baked driver rotation difference from the authored input: **0.003495 degrees**.
