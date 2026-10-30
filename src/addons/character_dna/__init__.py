@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 bl_info = {
     "name": "Character DNA",
     "author": "Poly Hammer",
-    "version": (0, 15, 9),
+    "version": (0, 15, 10),
     "blender": (4, 5, 0),
     "location": "File > Import > MetaHuman DNA",
     "description": (

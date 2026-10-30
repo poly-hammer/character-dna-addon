@@ -343,7 +343,7 @@
       ],
       "after": [
         "__init__.py",
-        "\"version\": (0, 15, 9),"
+        "\"version\": (0, 15, 10),"
       ],
       "reason": "Required patch-version metadata update; no conditional behavior."
     },
@@ -818,6 +818,30 @@
         "gy = min(max(int((point[1] - self._grid_min[1]) / self._cell_size[1]), 0), self._res - 1)"
       ],
       "reason": "Scalar integer clamping preserves the original truncation and inclusive bounds; original NumPy rule checked at every grid boundary, neighboring floats and seeded outside points."
+    },
+    {
+      "function": "install_targets_iter",
+      "before": [
+        "runtime/bindings.py",
+        "for target, _curve in reversed(installed):"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "for target, curve in reversed(installed):"
+      ],
+      "reason": "Rollback removes the exact newly created RNA curves, including an intermediate clone, rather than searching a channel that may temporarily have two curves. Real invalid-index, append cancellation, already-removed output and unrelated-driver contracts cover cleanup; every original ownership and import failure assertion remains."
+    },
+    {
+      "function": "install_targets_iter",
+      "before": [
+        "runtime/bindings.py",
+        "_remove_driver(target.owner, target.path, target.index)"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "animation.drivers.remove(curve)"
+      ],
+      "reason": "Rollback removes the exact newly created RNA curves, including an intermediate clone, rather than searching a channel that may temporarily have two curves. Real invalid-index, append cancellation, already-removed output and unrelated-driver contracts cover cleanup; every original ownership and import failure assertion remains."
     }
   ]
 }

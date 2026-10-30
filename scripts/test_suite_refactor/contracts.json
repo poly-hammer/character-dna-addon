@@ -360,6 +360,16 @@
         "Disabled auto evaluation preserves the published graph buffer and solve count",
         "Original full-pose, shape slider and playback release checks remain unchanged"
       ]
+    },
+    {
+      "case": "Native output driver construction",
+      "change": "Copy immutable private driver templates using Blender RNA after normal property/index validation; preserve exact carrier dependencies, output slots and transactional cleanup.",
+      "retained_integration": [
+        "Exact scalar/array and multiple-owner evaluated values on both Blender versions",
+        "Yielded-curve mutations cannot contaminate later copies",
+        "Invalid-index and canceled-install rollback preserve existing bindings and remove private templates",
+        "Original complete native pose, shape, undo, retention, reference and document integration checks remain unchanged"
+      ]
     }
   ],
   "fault_checks": {

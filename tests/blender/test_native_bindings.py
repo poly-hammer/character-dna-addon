@@ -177,3 +177,126 @@ def test_validation_rechecks_current_driver_ownership(native_objects, change):
     else:
         curve.driver.variables[0].targets[0].id = target
     assert len(engine.carrier_issues(carrier)) == 1
+
+
+@pytest.mark.parametrize("scalar_first", [True, False])
+def test_copied_outputs_resolve_scalar_array_and_distinct_owners(native_objects, scalar_first):
+    """Copied drivers retain independent variables and the original evaluated values."""
+    from character_dna.runtime.bindings import owned_curve
+
+    carrier, target = native_objects.carrier, native_objects.target
+    carrier["outputs"] = [0.125, 0.5, 0.875]
+    target["native_scalar"] = 0.0
+    other = bpy.data.objects.new("NativeCopyOther", None)
+    bpy.context.scene.collection.objects.link(other)
+    before = {obj.as_pointer() for obj in bpy.data.objects}
+    plans = [Target(target, '["native_scalar"]', -1, 0), Target(target, "location", 0, 1)]
+    if not scalar_first:
+        plans.reverse()
+    plans.append(Target(other, "scale", 2, 2))
+    try:
+        install_targets(carrier, plans)
+        assert {obj.as_pointer() for obj in bpy.data.objects} == before
+        pointers = set()
+        for plan in plans:
+            curve = plan.owner.animation_data.drivers.find(plan.path, index=max(0, plan.index))
+            assert owned_curve(curve, carrier)
+            assert not curve.keyframe_points and not curve.modifiers
+            variable = curve.driver.variables["output"]
+            assert variable.targets[0].data_path == f'["outputs"][{plan.channel}]'
+            pointers.add(variable.as_pointer())
+        assert len(pointers) == len(plans)
+        bpy.context.view_layer.update()
+        graph = bpy.context.evaluated_depsgraph_get()
+        assert target.evaluated_get(graph)["native_scalar"] == 0.125
+        assert target.evaluated_get(graph).location.x == 0.5
+        assert other.evaluated_get(graph).scale.z == 0.875
+        remove_targets(carrier)
+        assert not target.animation_data.drivers and not other.animation_data.drivers
+    finally:
+        bpy.data.objects.remove(other, do_unlink=True)
+
+
+def test_yielded_output_changes_cannot_modify_later_copies(native_objects):
+    """The resumable installer must not use a caller's mutable curve as its template."""
+    from character_dna.runtime.bindings import DRIVER_EXPRESSION, install_targets_iter, owned_curve
+
+    carrier, target = native_objects.carrier, native_objects.target
+    before = {obj.as_pointer() for obj in bpy.data.objects}
+    pending = install_targets_iter(carrier, [Target(target, "location", axis, 0) for axis in range(3)])
+    _owner, first = next(pending)
+    first.driver.expression = "99"
+    first.driver.variables["epoch"].targets[0].id = target
+    first.mute = True
+    copies = list(pending)
+    assert {obj.as_pointer() for obj in bpy.data.objects} == before
+    for _owner, curve in copies:
+        assert curve.driver.expression == DRIVER_EXPRESSION
+        assert owned_curve(curve, carrier) and not curve.mute
+    bpy.context.view_layer.update()
+    evaluated = target.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    assert tuple(evaluated.location) == (0.0, 0.25, 0.25)
+    remove_targets(carrier)
+    assert len(target.animation_data.drivers) == 1
+    assert target.animation_data.drivers[0] == first
+
+
+def test_late_invalid_index_rolls_back_copies_and_template(native_objects):
+    """Retain Blender's index validation and remove every partial native write."""
+    carrier, target = native_objects.carrier, native_objects.target
+    external = target.driver_add("rotation_euler", 2)
+    external.driver.expression = "3"
+    before = {obj.as_pointer() for obj in bpy.data.objects}
+    with pytest.raises((TypeError, RuntimeError), match="index"):
+        install_targets(carrier, [Target(target, "location", axis, 0) for axis in (0, 1, 9)])
+    assert {obj.as_pointer() for obj in bpy.data.objects} == before
+    assert list(target.animation_data.drivers) == [external]
+    assert not carrier["targets"]
+
+
+@pytest.mark.parametrize("append", [True, False])
+@pytest.mark.parametrize("steps", [1, 2])
+def test_cancelled_install_restores_prior_targets_without_template_leaks(native_objects, append, steps):
+    from character_dna.runtime.bindings import install_targets_iter
+
+    carrier, target = native_objects.carrier, native_objects.target
+    if append:
+        install_targets(carrier, [Target(target, "location", 0, 0)])
+    previous = [dict(item) for item in carrier.get("targets", [])]
+    before = {obj.as_pointer() for obj in bpy.data.objects}
+    pending = install_targets_iter(carrier, [Target(target, "location", axis, 0) for axis in (1, 2)], append=append)
+    for _step in range(steps):
+        next(pending)
+    # A caller can remove an already yielded curve before canceling the rest.
+    target.driver_remove("location", 1)
+    pending.close()
+    assert {obj.as_pointer() for obj in bpy.data.objects} == before
+    assert [dict(item) for item in carrier["targets"]] == previous
+    assert len(target.animation_data.drivers) == int(append)
+
+
+@pytest.mark.parametrize("change", ["clear_animation", "remove_owner"])
+def test_cancelled_install_tolerates_removed_output_storage(native_objects, change):
+    """Cancellation remains safe when a caller has already released the output ID or curves."""
+    from character_dna.runtime.bindings import install_targets_iter
+
+    carrier = native_objects.carrier
+    before = {obj.as_pointer() for obj in bpy.data.objects}
+    owner = bpy.data.objects.new("NativeCancelledOwner", None)
+    bpy.context.scene.collection.objects.link(owner)
+    pending = install_targets_iter(carrier, [Target(owner, "location", axis, 0) for axis in (0, 1)])
+    alive = True
+    try:
+        next(pending)
+        if change == "clear_animation":
+            owner.animation_data_clear()
+        else:
+            bpy.data.objects.remove(owner, do_unlink=True)
+            alive = False
+        pending.close()
+        assert not carrier["targets"]
+    finally:
+        pending.close()
+        if alive:
+            bpy.data.objects.remove(owner, do_unlink=True)
+    assert {obj.as_pointer() for obj in bpy.data.objects} == before
