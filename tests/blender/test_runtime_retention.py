@@ -10,16 +10,18 @@ from character_dna.dna_io import release_dna_handle
 from character_dna.editors.converter import scene_merge
 from character_dna.editors.shape_key_editor.editor import ShapeKeyEditor
 from character_dna.runtime import controller, engine, retention
+from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile
 
 
 @pytest.fixture
-def character(request, rig_factory, tmp_path):
+def character(request, rig_factory, tmp_path, compact_dna):
     parameters = getattr(request.node, "callspec", None)
     mode = parameters.params.get("mode", "separate") if parameters else "separate"
     if marker := request.node.get_closest_marker("rig_profile"):
         mode = marker.kwargs.get("document_mode", mode)
-    with rig_factory.lease(RigProfile(document_mode=mode, head_targets=(0,)), tmp_path) as instance:
+    profile = RigProfile(asset=str(compact_dna), pose_bones=STATE_BONES, document_mode=mode, head_targets=(0,))
+    with rig_factory.lease(profile, tmp_path) as instance:
         yield instance
 
 

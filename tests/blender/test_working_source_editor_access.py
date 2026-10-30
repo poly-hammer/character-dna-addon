@@ -96,6 +96,7 @@ def test_shape_mode_scope_unlinks_sources_after_failure(working_source):
 
 
 @pytest.mark.parametrize("commit", [False, True], ids=["revert", "commit"])
+@pytest.mark.rig_profile(compact=True)
 def test_dna_shape_edit_keeps_sources_out_of_scene(character, commit):
     instance = character
     reader = instance.head_dna_reader

@@ -52,6 +52,20 @@ animation and document mode. Default imports contain LOD0 head and body geometry
 An importer regression must use `fresh=True` or call the importer directly.
 Do not turn off native evaluation in a test whose assertion depends on it.
 
+For transaction and lifecycle checks, `compact_dna` retains Ada's complete native
+joint/control/solver definitions and every LOD, with one triangle per mesh and
+one existing target per mapped mesh. The fixture supplies its matching seam map.
+The native behavior canary compares every joint, shape and animated-map output
+against the original DNA at every LOD. Leases still use the real importer,
+RigLogic, bindings, file writes, reload and rollback operations.
+
+`RigProfile(pose_bones=...)` can further limit scene bones to observed outputs,
+all native input bones, the head attachment and their ancestors. It leaves the
+DNA and evaluated native output arrays complete. Use this only for ownership or
+transaction checks; full skeleton and deformation comparisons retain the original
+scene. Geometry goldens, full skinning, UV reconstruction, all 42 long-name
+targets and the calf-back-90 preview regression use the original full-size DNA.
+
 ## State ownership
 
 The factory caches pristine files within one pytest process. Every lease owns

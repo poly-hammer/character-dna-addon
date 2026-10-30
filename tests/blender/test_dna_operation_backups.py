@@ -9,16 +9,23 @@ import bpy
 import numpy as np
 import pytest
 
-from test_merge_split import character as character_fixture, coordinates
+from test_merge_split import coordinates
 
 from character_dna.dna_io import document
 from character_dna.editors.backup_manager import core as backups
 from character_dna.editors.converter import merge_split, scene_merge
 from character_dna.runtime import controller, engine
 from character_dna.utilities import get_addon_preferences
+from fixtures.rigs import RigProfile
 
 
-character = character_fixture
+@pytest.fixture
+def character(compact_dna, rig_factory, tmp_path):
+    # File history, rollback and binding ownership need real native documents,
+    # but no assertion here depends on the production mesh's vertex count.
+    profile = RigProfile(asset=str(compact_dna), pose_bones=("FACIAL_C_Jaw", "calf_l"))
+    with rig_factory.lease(profile, tmp_path) as instance:
+        yield instance
 
 
 @pytest.mark.parametrize("case", ["common", "different", "explicit", "combined"])

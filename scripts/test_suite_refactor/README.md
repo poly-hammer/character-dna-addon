@@ -115,6 +115,14 @@ and requires both declarations to remain covered. Function branches and unknown 
 are never silently waived. An existing assertion failure also cannot hide a new setup
 or teardown failure on that case.
 
+Raw tracing can record an exceptional function exit at a statement that has no
+source exit branch (for example, a stale RNA access in an originally failing
+test). The comparator uses coverage.py's source parser to distinguish those
+unwinds from its actual branch possibilities and lists them explicitly under
+`non_branch_exception_exits`. The originating statement must still execute in
+the candidate. Explicit raises, conditional exits, returns and unmapped
+statements remain required; fixing an old crash does not require recreating it.
+
 ## Historical snapshot limitations
 
 The snapshot prototypes use a private per-run DNA directory, reset their DNA files before reload, and reacquire the rig instance after every load. They do not give each test its usual DNA paths. Do not use them on path-ownership, backup, combined-document, cross-process, or reference-file tests. A production fixture needs per-test path remapping, native carrier path verification, output cleanup, data fingerprints, and state-leak checks before expansion.

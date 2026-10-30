@@ -126,12 +126,16 @@ def test_coupled_axes_and_canonical_roundtrip(reader, tmp_path, axis):
 
 
 @pytest.fixture
-def character(tmp_path, request, rig_factory):
+def character(tmp_path, request, rig_factory, compact_dna):
     from fixtures.rigs import RigProfile
 
     combined = getattr(request, "param", None) == "combined"
+    marker = request.node.get_closest_marker("rig_profile")
+    full_geometry = marker is not None and marker.kwargs.get("full_geometry", False)
     profile = RigProfile(
-        components=("head", "body") if combined else ("body",), document_mode="combined" if combined else "separate"
+        components=("head", "body") if combined else ("body",),
+        document_mode="combined" if combined else "separate",
+        asset="ada" if full_geometry else str(compact_dna),
     )
     with rig_factory.lease(profile, tmp_path) as instance:
         instance.editor_component = "body"
@@ -336,6 +340,7 @@ def test_preview_matches_committed_native_runtime(character, rbfs):
         np.testing.assert_allclose(evaluated.pose.bones[name].matrix, expected[name], atol=2e-5, err_msg=name)
 
 
+@pytest.mark.rig_profile(full_geometry=True)
 def test_calf_back_90_preview_matches_complete_rbf_pose(character):
     properties = character.swing_twist_editor
     rig = character.body_rig

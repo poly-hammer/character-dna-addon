@@ -13,6 +13,7 @@ from character_dna.editors.converter import scene_merge
 
 
 character = character_fixture
+pytestmark = pytest.mark.rig_profile(compact=True)
 
 
 def visibility(instance):

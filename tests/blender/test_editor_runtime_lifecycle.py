@@ -13,6 +13,7 @@ from character_dna.utilities import (
     detect_runtime_migration,
     get_active_head,
 )
+from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile
 
 
@@ -20,8 +21,9 @@ shape_operators = pytest.importorskip("character_dna.editors.shape_key_editor.op
 
 
 @pytest.fixture
-def character(tmp_path, rig_factory):
-    with rig_factory.lease(RigProfile(face_board=True), tmp_path) as instance:
+def character(tmp_path, rig_factory, compact_dna):
+    profile = RigProfile(asset=str(compact_dna), pose_bones=STATE_BONES, face_board=True)
+    with rig_factory.lease(profile, tmp_path) as instance:
         yield instance
 
 

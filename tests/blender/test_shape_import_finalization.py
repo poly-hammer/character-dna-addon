@@ -15,6 +15,7 @@ from character_dna.editors.converter import scene_merge
 from character_dna.editors.shape_key_editor import utilities
 from character_dna.editors.shape_key_editor.operators import ImportShapeKeys
 from character_dna.runtime import controller, engine, retention
+from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile
 
 
@@ -23,11 +24,19 @@ def character(request, rig_factory, tmp_path):
     mode = getattr(request.node, "callspec", None)
     mode = mode.params.get("mode", "separate") if mode else "separate"
     lods = tuple(range(8)) if getattr(request, "param", None) == "all_lods" else (0,)
-    with rig_factory.lease(RigProfile(document_mode=mode, lods=lods), tmp_path) as instance:
+    marker = request.node.get_closest_marker("rig_profile")
+    options = (
+        {}
+        if marker and marker.kwargs.get("full_geometry")
+        else {"asset": str(request.getfixturevalue("compact_dna")), "pose_bones": STATE_BONES}
+    )
+    with rig_factory.lease(RigProfile(document_mode=mode, lods=lods, **options), tmp_path) as instance:
         yield instance
 
 
-@pytest.mark.parametrize("mode", ["separate", "scene", "combined"])
+@pytest.mark.parametrize(
+    "mode", [pytest.param("separate", marks=pytest.mark.rig_profile(full_geometry=True)), "scene", "combined"]
+)
 def test_import_reuses_bones_and_evaluates_shapes(character, mode, monkeypatch):
     instance = character
     assert instance.components_merged == (mode != "separate")
@@ -102,6 +111,7 @@ def test_modal_cancel_finishes_partial_import_before_unlocking(character):
     assert not engine.binding_issues(instance)
 
 
+@pytest.mark.rig_profile(full_geometry=True)
 def test_surface_uv_fallback_rejects_ambiguous_islands(character):
     instance = character
     assert bpy.ops.character_dna.merge_components() == {"FINISHED"}

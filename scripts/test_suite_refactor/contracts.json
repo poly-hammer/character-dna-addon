@@ -51,7 +51,7 @@
     {
       "fixture": "native_character / animated_character",
       "owner": "One test",
-      "shared": "Pristine real head/body armatures and face board",
+      "shared": "Pristine real head/body native input bones, observed jaw/knee outputs, ancestor chains and face board; complete original DNA behavior",
       "mutable": "Actual native drivers, actions, ownership toggles and save/reload",
       "checks": [
         "All original native baking and evaluation ownership cases"
@@ -61,7 +61,7 @@
       "fixture": "head_character (shape-name frame cost)",
       "owner": "One test",
       "shared": "Pristine real head-only DNA and scene",
-      "mutable": "Own head mesh, keys and native bindings; unchanged 42 targets, four name-mode rounds and 85 frames per round",
+      "mutable": "Own full head mesh, all 42 targets and native bindings; four name-mode rounds with three distinct frame/control samples, each checked against all 42 native SDK channel outputs",
       "checks": [
         "test_frame_cost_uses_same_numeric_bindings_for_compact_and_hashed_names"
       ]
@@ -85,9 +85,32 @@
         "All original runtime retention, shape-import finalization and combined swing/twist cases",
         "Dedicated merge construction and cold portability tests remain unchanged"
       ]
+    },
+    {
+      "fixture": "compact_dna / RigProfile.pose_bones",
+      "owner": "Session immutable SDK asset; private files and Blender scene per lease",
+      "shared": "All original native controls, joint definitions, solvers and LODs; three vertices per mesh and one original mapped shape channel",
+      "mutable": "Real import, native bindings, mesh/key edits, commit/revert, save/load and backups. Scene bone subset keeps observed outputs, every native quaternion input, head attachment and ancestors.",
+      "checks": [
+        "test_compact_fixture_keeps_all_behavior_at_every_lod (exact complete SDK arrays, head/body)",
+        "test_compact_leases_preserve_complete_native_data_and_private_scene_state",
+        "Original lifecycle, retention, backup, visibility and editor transaction assertions",
+        "Original full geometry, UV, long-key, calf-back-90 deformation, native graph and export/calibration anchors remain"
+      ]
     }
   ],
   "changed_assertion_boundaries": [
+    {
+      "case": "Merged raw jaw/rest editing, publication retry, RBF editing and export presentation",
+      "before": "Thirteen editor/export cases repeated the scene merge as preparation for testing an already merged surface.",
+      "after": "The real profile builder constructs that surface once; each case acquires private files and scene state, asserts merged presentation, and retains every original editor, geometry, publication and identity assertion.",
+      "retained_integration": [
+        "test_scene_merge_noop_preserves_sources_and_shape_keys",
+        "test_merge_all_scene_lods_and_switch_without_splitting",
+        "test_merged_masks_match_posed_components_with_object_transforms",
+        "test_merged_leases_own_document_and_partition_paths"
+      ]
+    },
     {
       "case": "test_retention_keeps_pairs_and_unique_ids",
       "before": "Real merge and split were performed to create paired backup records.",
@@ -142,6 +165,33 @@
       "after": "Asserts the existing production confirmation sentence with the same exact generated count; read-only file and key checks remain unchanged.",
       "retained_integration": [
         "test_body_generate_routes_keys_once_and_restores_pre_post_backups"
+      ]
+    },
+    {
+      "case": "test_frame_cost_uses_same_numeric_bindings_for_compact_and_hashed_names",
+      "before": "Four 85-frame timing loops verified binding count but never asserted frame outputs or a runtime threshold.",
+      "after": "All 42 original targets and four name-mode transitions remain. Three distinct frame/control samples per mode compare every evaluated channel to the real SDK. Complete-suite performance is measured separately.",
+      "retained_integration": [
+        "test_all_42_long_head_targets_import_recover_bind_and_split",
+        "Full head/body numerical pose matrices"
+      ]
+    },
+    {
+      "case": "Native graph copy and equality helpers",
+      "before": "Python deepcopy recursively visited every scalar; exact equality recursively revisited large equal scalar arrays.",
+      "after": "Trusted in-memory graphs are independently copied with pickle; scalar-list equality short-circuits in C with explicit nested-container and NaN safeguards. Exact comparisons and mismatch paths are unchanged.",
+      "retained_integration": [
+        "test_graph_fixture.py ownership, tiny float differences, metadata and NaN checks",
+        "All original native graph, projection and round-trip tests"
+      ]
+    },
+    {
+      "case": "native_head runtime fixture",
+      "before": "Every head runtime case loaded full mesh data and materials.",
+      "after": "All original native joints and face-board inputs remain. Meshes are loaded only for native_shape consumers; unused materials are omitted.",
+      "retained_integration": [
+        "test_import_uses_runtime_without_opt_in (both original fresh imports)",
+        "Original full-mesh native_shape matrix and deformation assertions"
       ]
     }
   ],

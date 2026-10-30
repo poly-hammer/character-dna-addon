@@ -12,6 +12,7 @@ from character_dna.ui import callbacks
 
 
 character = character_fixture
+pytestmark = pytest.mark.rig_profile(compact=True)
 
 
 @pytest.mark.parametrize("character", ["all_lods"], indirect=True)

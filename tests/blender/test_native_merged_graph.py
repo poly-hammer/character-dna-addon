@@ -1,13 +1,13 @@
 """Native merged DNA retains every component and LOD without external files."""
 
 import base64
-import copy
 
 import numpy as np
 import pytest
 
 from character_dna.dna_io import merged_graph, partitions
 from constants import TEST_DNA_FOLDER
+from fixtures.graphs import copy_graph, first_difference
 
 
 @pytest.fixture(scope="module")
@@ -54,27 +54,9 @@ def test_native_inverse_without_edits(graphs, combined):
         )
 
 
-def first_difference(left, right, path=""):
-    if isinstance(left, dict):
-        for key in left:
-            if key not in {"index", "size", "offset"} and (
-                result := first_difference(left[key], right[key], path + "/" + key)
-            ):
-                return result
-    elif isinstance(left, list):
-        if len(left) != len(right):
-            return path, len(left), len(right)
-        for index, (a, b) in enumerate(zip(left, right, strict=True)):
-            if result := first_difference(a, b, path + "/" + str(index)):
-                return result
-    elif left != right:
-        return path, left, right
-    return None
-
-
 def test_native_inverse_uses_current_edits(graphs, combined):
     native, info = combined
-    edited = copy.deepcopy(native)
+    edited = copy_graph(native)
     surface = info["surfaces"][0]
     vertex = next(index for index in range(len(surface["vertices"]["head"])) if index not in surface["seam"])
     native_vertex = surface["vertices"]["head"][vertex]
@@ -98,7 +80,7 @@ def test_document_split_projects_edits_from_native_graph_without_cache(graphs, c
     from character_dna.dna_io import document, get_dna_reader, metadata, release_dna_handle
     from character_dna.dna_io.coordinates import configuration
 
-    native, indices = combined
+    native, _indices = combined
     source = tmp_path / "source.dna"
     source.write_bytes(merged_graph.to_bytes(native))
     output = tmp_path / "edited.dna"
@@ -229,12 +211,10 @@ def test_split_corrective_dependency_evaluates_without_the_other_component(graph
 
 
 def test_split_rbf_corrective_copies_solver_closure(graphs, tmp_path):
-    from copy import deepcopy
-
     from character_dna.bindings import riglogic
     from character_dna.dna_io import get_dna_reader, release_dna_handle, shape_dependencies
 
-    originals = deepcopy(graphs)
+    originals = copy_graph(graphs)
     source = originals["head"]
     solver = source["rbfb1.0"]["solvers"][0]
     pose = source["rbfe1.0"]["poses"][solver["poseIndices"][1]]

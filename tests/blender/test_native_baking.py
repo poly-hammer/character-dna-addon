@@ -8,12 +8,13 @@ from mathutils import Quaternion
 from character_dna.runtime import controller, engine
 from character_dna.utilities import get_active_rig_instance
 from character_dna.utilities.action import bake_body_to_action, bake_face_board_to_action
+from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile
 
 
 @pytest.fixture
 def native_character(rig_factory, tmp_path):
-    with rig_factory.lease(RigProfile(meshes=False, face_board=True), tmp_path) as instance:
+    with rig_factory.lease(RigProfile(meshes=False, face_board=True, pose_bones=STATE_BONES), tmp_path) as instance:
         yield instance
 
 
@@ -50,15 +51,15 @@ def test_bake_hands_outputs_to_action_and_keeps_other_component_live(animated_ch
     assert expected[1][component] != pytest.approx(expected[2][component], abs=1e-5)
     bpy.context.scene.frame_set(1)
 
-    options = dict(
-        action_name="Baked",
-        replace_action=False,
-        start_frame=1,
-        end_frame=2,
-        clean_curves=False,
-        masks=False,
-        shape_keys=False,
-    )
+    options = {
+        "action_name": "Baked",
+        "replace_action": False,
+        "start_frame": 1,
+        "end_frame": 2,
+        "clean_curves": False,
+        "masks": False,
+        "shape_keys": False,
+    }
     if use_operator:
         if component == "head":
             result = bpy.ops.character_dna.bake_face_board_animation(**options)
@@ -103,6 +104,44 @@ def test_bake_without_source_keeps_live_evaluation(animated_character, component
     assert engine.binding_issues(instance) == []
     assert not controller.is_suspended(instance)
     assert bpy.data.actions.get("NoSource") is None
+
+
+@pytest.mark.parametrize("component", ["head", "body"])
+def test_rebake_replaces_existing_action_and_stale_driven_curves(animated_character, component):
+    from character_dna.utilities.action import get_channel_bag
+
+    instance = animated_character
+    rig = getattr(instance, f"{component}_rig")
+    if component == "body":
+        # An imported animation can contain obsolete corrective curves. Baking
+        # must replace those with RigLogic's result, not retain the old keys.
+        bag = get_channel_bag(rig.animation_data.action, rig.name)
+        curve = bag.fcurves.new(data_path='pose.bones["calf_knee_l"].location', index=0)
+        curve.keyframe_points.insert(1, 99.0)
+    expected = {}
+    for frame in (1, 2):
+        bpy.context.scene.frame_set(frame)
+        expected[frame] = _pose(instance, component)
+    bpy.context.scene.frame_set(1)
+    previous = bpy.data.actions.new("Rebaked")
+    previous["obsolete"] = True
+    bake = bake_face_board_to_action if component == "head" else bake_body_to_action
+    bake(
+        instance=instance,
+        armature_object=rig,
+        action_name="Rebaked",
+        replace_action=True,
+        start_frame=1,
+        end_frame=2,
+        clean_curves=False,
+        masks=False,
+        shape_keys=False,
+    )
+    assert rig.animation_data.action == bpy.data.actions["Rebaked"]
+    assert not any(action.get("obsolete") for action in bpy.data.actions)
+    for frame in (2, 1):
+        bpy.context.scene.frame_set(frame)
+        assert _pose(instance, component) == pytest.approx(expected[frame], abs=1e-5)
 
 
 @pytest.mark.parametrize("component", ["head", "body"])

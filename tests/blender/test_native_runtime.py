@@ -156,11 +156,14 @@ def test_import_uses_runtime_without_opt_in(include_body: bool) -> None:
 
 
 @pytest.fixture
-def native_head(load_head_only_dna):
-    """Use the runtime installed by ordinary DNA import."""
-    instance = get_active_rig_instance()
-    assert engine.active(instance), controller.status()
-    return instance
+def native_head(rig_factory, tmp_path, request):
+    """Keep the complete native skeleton; geometry is needed by shape tests only."""
+    from fixtures.rigs import RigProfile
+
+    profile = RigProfile(components=("head",), face_board=True, meshes="native_shape" in request.fixturenames)
+    with rig_factory.lease(profile, tmp_path) as instance:
+        assert engine.active(instance), controller.status()
+        yield instance
 
 
 def test_native_head_only(native_head):

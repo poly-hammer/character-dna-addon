@@ -4,13 +4,52 @@ import hashlib
 import tempfile
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import bpy
 import numpy as np
 import pytest
 
 from character_dna.runtime import engine
+from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile, release_partitions
+
+
+@pytest.mark.parametrize("query", ["shape_key_blocks", "shape_key_blocks_by_name", "shape_key_apply_plan"])
+def test_bone_only_shape_queries_resolve_scene_once(empty_character_scene, query):
+    from character_dna.dna_io import get_dna_reader, release_dna_handle
+    from character_dna.rig_component import RigComponent
+    from constants import TEST_DNA_FOLDER
+
+    reader = get_dna_reader(TEST_DNA_FOLDER / "ada/head.dna")
+    instance = SimpleNamespace(
+        name="ShapeLookup",
+        head_dna_reader=reader,
+        head_rig=None,
+        data={},
+        cache_key=lambda kind, descriptor: (kind, descriptor),
+    )
+    component = RigComponent(instance, "head")
+    try:
+        # A head defines thousands of targets even when only its bones are
+        # imported. Querying that empty scene must perform one lookup per batch.
+        original = RigComponent.meshes_for_reader
+        with patch.object(RigComponent, "meshes_for_reader", autospec=True, side_effect=original) as lookup:
+            assert not getattr(component, query)
+            assert lookup.call_count == 1
+        # The optimization is local to the batch. A later mesh remains visible
+        # through the public lookup without persisting an empty scene cache.
+        mesh = bpy.data.meshes.new("LateHead")
+        mesh.from_pydata([(0, 0, 0)], [], [])
+        obj = bpy.data.objects.new(f"ShapeLookup_{reader.getMeshName(0)}", mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        obj.shape_key_add(name="Basis")
+        name = f"{reader.getMeshName(0)}__{reader.getBlendShapeChannelName(reader.getBlendShapeChannelIndex(0, 0))}"
+        key = obj.shape_key_add(name=name)
+        assert component.get_shape_key_block(0, name) == key
+    finally:
+        release_dna_handle(reader)
 
 
 def test_partition_cleanup_preserves_preexisting_working_directories(monkeypatch):
@@ -35,11 +74,11 @@ def test_partition_cleanup_preserves_preexisting_working_directories(monkeypatch
 
 @pytest.mark.parametrize("mode", ["scene", "combined"])
 @pytest.mark.parametrize("head_targets", [(), (0,)])
-def test_merged_leases_own_document_and_partition_paths(rig_factory, tmp_path, mode, head_targets):
+def test_merged_leases_own_document_and_partition_paths(rig_factory, tmp_path, mode, head_targets, compact_dna):
     from character_dna import shape_names
     from character_dna.editors.converter import scene_merge
 
-    profile = RigProfile(document_mode=mode, head_targets=head_targets)
+    profile = RigProfile(asset=str(compact_dna), pose_bones=STATE_BONES, document_mode=mode, head_targets=head_targets)
     partitions = []
     original = None
     previous = None

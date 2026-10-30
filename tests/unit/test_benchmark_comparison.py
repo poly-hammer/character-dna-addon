@@ -132,6 +132,64 @@ def test_coverage_comparison_detects_lost_branch_after_line_shift(tmp_path):
     assert not result["unmapped_lines"] and not result["unmapped_arcs"]
 
 
+@pytest.mark.parametrize("candidate_hits_line", [True, False])
+def test_exception_unwind_is_not_a_branch_but_its_source_line_is_required(tmp_path, candidate_hits_line):
+    roots = [tmp_path / name for name in ("before", "after")]
+    paths = []
+    source = "def run(callback):\n    callback()\n    return 1\n"
+    for index, root in enumerate(roots):
+        folder = root / SOURCE
+        folder.mkdir(parents=True)
+        (folder / "naming.py").write_text("")
+        module = folder / "domain.py"
+        module.write_text(source)
+        data = CoverageData(basename=str(tmp_path / f".coverage.{index}"))
+        arcs = {(-1, 2), (2, 3), (3, -1)} if not index or candidate_hits_line else {(-1, 1), (1, -1)}
+        if not index:
+            arcs.add((2, -1))  # The collaborator raised; this is not a source branch.
+        data.add_arcs({str(module): arcs})
+        data.write()
+        paths.append(tmp_path / f".coverage.{index}")
+    result = compare_coverage(*paths, *roots, {"tests": {}, "functions": {}})
+    if candidate_hits_line:
+        assert not result["missing_lines"] and not result["missing_arcs"]
+        assert result["non_branch_exception_exits"] == [["domain.py", 2, -1, "domain.py", 2, -1]]
+    else:
+        assert result["missing_lines"] and result["missing_arcs"]
+        assert not result["non_branch_exception_exits"]
+
+
+@pytest.mark.parametrize(
+    "source,before,after,missing",
+    [
+        ("def reject():\n    raise ValueError()\n", {(-1, 2), (2, -1)}, {(-1, 2)}, (2, -1)),
+        (
+            "def conditional(value):\n    if value:\n        return 1\n",
+            {(-1, 2), (2, 3), (3, -1), (2, -1)},
+            {(-1, 2), (2, 3), (3, -1)},
+            (2, -1),
+        ),
+    ],
+    ids=["explicit-raise", "implicit-conditional-exit"],
+)
+def test_source_exit_remains_a_required_branch(tmp_path, source, before, after, missing):
+    roots = [tmp_path / name for name in ("before", "after")]
+    paths = []
+    for index, root in enumerate(roots):
+        folder = root / SOURCE
+        folder.mkdir(parents=True)
+        (folder / "naming.py").write_text("")
+        module = folder / "domain.py"
+        module.write_text(source)
+        data = CoverageData(basename=str(tmp_path / f".coverage.{index}"))
+        data.add_arcs({str(module): before if not index else after})
+        data.write()
+        paths.append(tmp_path / f".coverage.{index}")
+    result = compare_coverage(*paths, *roots, {"tests": {}, "functions": {}})
+    assert result["missing_arcs"] == [["domain.py", *missing, "domain.py", *missing]]
+    assert not result["non_branch_exception_exits"]
+
+
 def test_deferred_import_mapping_requires_the_import_to_execute(tmp_path):
     roots = [tmp_path / name for name in ("before", "after")]
     sources = [

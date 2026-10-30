@@ -68,6 +68,7 @@ class RigProfile:
     face_board_animation: bool = False
     document_mode: Literal["separate", "scene", "combined"] = "separate"
     head_targets: tuple[int, ...] = ()
+    pose_bones: tuple[str, ...] = ()
 
 
 class RigFactory:
@@ -116,6 +117,35 @@ class RigFactory:
             )
             assert result == {"FINISHED"}
         instance = get_active_rig_instance()
+        if profile.pose_bones:
+            from character_dna.runtime import controller
+            from character_dna.utilities import switch_to_bone_edit_mode
+
+            # Lifecycle and transaction contracts only need their observed
+            # bones. Retain native input bones and all ancestors so local/world
+            # transforms have the same meaning; DNA/evaluator outputs stay complete.
+            with controller.authoring_operation(instance):
+                for kind in profile.components:
+                    rig = instance.component(kind).rig
+                    reader = instance.component(kind).dna_reader
+                    inputs = {
+                        reader.getRawControlName(index).rsplit(".", 1)[0]
+                        for index in range(reader.getRawControlCount())
+                        if reader.getRawControlName(index).endswith((".qx", ".qy", ".qz", ".qw"))
+                    }
+                    keep = set()
+                    for name in (*profile.pose_bones, *inputs, "head"):
+                        bone = rig.data.bones.get(name)
+                        while bone is not None:
+                            keep.add(bone.name)
+                            bone = bone.parent
+                    assert keep, (kind, profile.pose_bones)
+                    switch_to_bone_edit_mode(rig)
+                    for bone in tuple(rig.data.edit_bones):
+                        if bone.name not in keep:
+                            rig.data.edit_bones.remove(bone)
+                    bpy.ops.object.mode_set(mode="OBJECT")
+                instance.destroy()
         if profile.head_targets:
             from character_dna.dna_io.misc import create_shape_key
             from character_dna.editors.shape_key_editor.core import linear_modifier_for

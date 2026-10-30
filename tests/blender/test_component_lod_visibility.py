@@ -7,6 +7,7 @@ from test_merge_split import character as character_fixture
 
 
 character = character_fixture
+pytestmark = pytest.mark.rig_profile(compact=True)
 
 
 def presentation():

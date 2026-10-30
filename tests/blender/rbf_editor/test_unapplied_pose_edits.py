@@ -19,14 +19,14 @@ paired_character = character_fixture
 
 
 @pytest.fixture
-def character(rig_factory, tmp_path):
-    with rig_factory.lease(RigProfile(components=("body",)), tmp_path) as instance:
+def character(rig_factory, tmp_path, compact_dna):
+    with rig_factory.lease(RigProfile(components=("body",), asset=str(compact_dna)), tmp_path) as instance:
         yield instance
 
 
 @pytest.fixture
-def component_character(rig_factory, tmp_path, kind):
-    with rig_factory.lease(RigProfile(components=(kind,)), tmp_path) as instance:
+def component_character(rig_factory, tmp_path, kind, compact_dna):
+    with rig_factory.lease(RigProfile(components=(kind,), asset=str(compact_dna)), tmp_path) as instance:
         yield instance
 
 
@@ -128,6 +128,7 @@ def test_commit_respects_explicit_pose_choice(character, apply):
 
 
 @pytest.mark.parametrize("mode", ["separate", "scene", "combined"])
+@pytest.mark.rig_profile(compact=True)
 def test_shape_value_commit_applies_scaled_pose_coefficient(paired_character, mode):
     instance = paired_character
     if mode != "separate":

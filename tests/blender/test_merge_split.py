@@ -1,6 +1,7 @@
 """Reversible welded editing and standalone component DNA documents."""
 
 import json
+import logging
 import shutil
 
 from pathlib import Path
@@ -16,12 +17,20 @@ from character_dna.editors.converter import scene_merge
 from character_dna.runtime import controller, engine
 from character_dna.utilities import get_active_rig_instance
 from constants import TEST_DNA_FOLDER
+from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile
 
 
 @pytest.fixture
 def character(tmp_path, request, rig_factory):
-    profile = RigProfile(lods=tuple(range(8)) if getattr(request, "param", None) == "all_lods" else (0,))
+    marker = request.node.get_closest_marker("rig_profile")
+    options = dict(marker.kwargs) if marker else {}
+    if options.pop("compact", False):
+        options.update(asset=str(request.getfixturevalue("compact_dna")), pose_bones=STATE_BONES)
+    profile = RigProfile(
+        lods=tuple(range(8)) if getattr(request, "param", None) == "all_lods" else (0,),
+        **options,
+    )
     with rig_factory.lease(profile, tmp_path) as instance:
         yield instance
 
@@ -146,7 +155,8 @@ def test_lod_failure_rolls_back_and_late_lods_reuse_existing_surface(character, 
 
 
 @pytest.mark.parametrize("commit", [False, True], ids=["revert", "commit"])
-def test_raw_jaw_edit_keeps_merged_surface_and_canonical_target(character, commit):
+@pytest.mark.rig_profile(document_mode="scene")
+def test_raw_jaw_edit_keeps_merged_surface_and_canonical_target(character, commit, caplog):
     from character_dna.editors.raw_control_editor import utilities
     from character_dna.editors.raw_control_editor.editor import RawControlEditor
 
@@ -155,7 +165,7 @@ def test_raw_jaw_edit_keeps_merged_surface_and_canonical_target(character, commi
     instance.raw_control_editor.raw_controls_active_index = instance.raw_control_editor.raw_controls.find(
         "CTRL_expressions.jawOpen"
     )
-    assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
+    assert instance.components_merged
     proxy = scene_merge.proxy_for(instance)
     identity = (proxy.as_pointer(), proxy.data.as_pointer(), proxy.data.shape_keys.as_pointer())
     posed = evaluated_coordinates(proxy)
@@ -188,7 +198,8 @@ def test_raw_jaw_edit_keeps_merged_surface_and_canonical_target(character, commi
     utilities._flush_sculpt_to_mesh(target)
     np.testing.assert_allclose(coordinates(target.data.vertices)[0], before[0] + [0.01, 0, 0], atol=1e-6)
     if commit:
-        editor.commit(bpy.context)
+        with caplog.at_level(logging.DEBUG, logger="character_dna.editors.raw_control_editor.core"):
+            editor.commit(bpy.context)
     else:
         editor.revert(bpy.context)
     assert scene_merge.proxy_for(instance) == proxy
@@ -207,6 +218,7 @@ def test_raw_jaw_edit_keeps_merged_surface_and_canonical_target(character, commi
     editor.revert(bpy.context)
 
 
+@pytest.mark.rig_profile(document_mode="scene")
 def test_failed_raw_publication_keeps_merged_sculpt_targets_for_retry(character, monkeypatch):
     from contextlib import contextmanager
 
@@ -216,7 +228,7 @@ def test_failed_raw_publication_keeps_merged_sculpt_targets_for_retry(character,
     instance.raw_control_editor.raw_controls_active_index = instance.raw_control_editor.raw_controls.find(
         "CTRL_expressions.jawOpen"
     )
-    assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
+    assert instance.components_merged
     proxy = scene_merge.proxy_for(instance)
     editor = RawControlEditor.for_instance(instance)
     editor.enter(bpy.context)
@@ -277,6 +289,7 @@ def test_scene_merge_noop_preserves_sources_and_shape_keys(character):
 
 @pytest.mark.parametrize("kind", ["head", "body"])
 @pytest.mark.parametrize("commit", [False, True], ids=["revert", "commit"])
+@pytest.mark.rig_profile(document_mode="scene")
 def test_raw_rest_sculpt_preserves_merge_and_writes_selected_component(character, kind, commit):
     from character_dna.editors.raw_control_editor.editor import RawControlEditor
 
@@ -286,7 +299,7 @@ def test_raw_rest_sculpt_preserves_merge_and_writes_selected_component(character
     paths = {name: Path(instance.component(name).dna_file_path) for name in ("head", "body")}
     originals = {name: path.read_bytes() for name, path in paths.items()}
     before = coordinates(instance.component(kind).mesh.data.vertices).copy()
-    assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
+    assert instance.components_merged
     proxy = scene_merge.proxy_for(instance)
     identity = proxy.as_pointer(), proxy.data.as_pointer(), proxy.data.shape_keys.as_pointer()
     editor = RawControlEditor.for_instance(instance)
@@ -315,13 +328,14 @@ def test_raw_rest_sculpt_preserves_merge_and_writes_selected_component(character
 
 
 @pytest.mark.parametrize("method", ["calibrate", "overwrite"])
+@pytest.mark.rig_profile(document_mode="scene")
 def test_export_merged_surface_keeps_presentation_and_source_files(character, tmp_path, method):
     from character_dna.dna_io.calibrator import DNACalibrator
     from character_dna.dna_io.exporter import DNAExporter
 
     instance = character
     originals = {kind: Path(instance.component(kind).dna_file_path).read_bytes() for kind in ("head", "body")}
-    assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
+    assert instance.components_merged
     proxy = scene_merge.proxy_for(instance)
     vertex = next(index for index, item in enumerate(proxy.data.attributes["DNA_head_vertex"].data) if item.value == 0)
     proxy.data.shape_keys.reference_key.data[vertex].co.x += 0.01
@@ -353,12 +367,13 @@ def test_export_merged_surface_keeps_presentation_and_source_files(character, tm
 
 @pytest.mark.parametrize("kind", ["head", "body"])
 @pytest.mark.parametrize("commit", [False, True], ids=["revert", "commit"])
+@pytest.mark.rig_profile(document_mode="scene", compact=True)
 def test_rbf_keeps_merged_surface(character, kind, commit):
     from character_dna.editors.rbf_editor.editor import RBFEditor
 
     instance = character
     instance.editor_component = kind
-    assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
+    assert instance.components_merged
     proxy = scene_merge.proxy_for(instance)
     identity = proxy.as_pointer(), proxy.data.as_pointer(), proxy.data.shape_keys.as_pointer()
     editor = RBFEditor.for_instance(instance)
@@ -590,6 +605,7 @@ def test_document_merge_requires_shared_output_folder(minimal_character, tmp_pat
         _output_directory(instance)
 
 
+@pytest.mark.rig_profile(compact=True)
 def test_merged_surface_and_document_recover_after_blend_reload(character, tmp_path, monkeypatch):
     from character_dna.editors.backup_manager import core as backups
 
@@ -628,6 +644,7 @@ def test_merged_surface_and_document_recover_after_blend_reload(character, tmp_p
     assert engine.binding_issues(restored) == []
 
 
+@pytest.mark.rig_profile(compact=True)
 def test_combined_document_import_and_partition_edit(character, tmp_path):
     instance = character
     instance.converter_merge_mode = "DNA"
@@ -717,6 +734,7 @@ def test_scene_split_rolls_back_failed_bridge_publication(character, monkeypatch
     assert bpy.ops.character_dna.split_components() == {"FINISHED"}
 
 
+@pytest.mark.rig_profile(compact=True)
 def test_failed_split_rebinding_keeps_merged_scene_and_file_ownership(character, tmp_path, monkeypatch):
     from types import SimpleNamespace
 

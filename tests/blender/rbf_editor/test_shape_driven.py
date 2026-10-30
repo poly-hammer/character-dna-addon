@@ -22,8 +22,8 @@ paired_character = _character
 
 
 @pytest.fixture
-def character(rig_factory, tmp_path):
-    with rig_factory.lease(RigProfile(components=("body",)), tmp_path) as instance:
+def character(rig_factory, tmp_path, compact_dna):
+    with rig_factory.lease(RigProfile(components=("body",), asset=str(compact_dna)), tmp_path) as instance:
         yield instance
 
 
@@ -316,6 +316,7 @@ def test_apply_shape_value_and_mirror_membership(character):
 
 @pytest.mark.parametrize("paired_character", ["all_lods"], indirect=True)
 @pytest.mark.parametrize("mode", ["SCENE", "DNA"])
+@pytest.mark.rig_profile(compact=True)
 def test_merged_shape_commit_and_split(paired_character, mode, tmp_path):
     character = paired_character
     from character_dna.dna_io import document, get_dna_reader

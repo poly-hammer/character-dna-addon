@@ -89,7 +89,14 @@ def assert_body_keys(instance, names):
             np.testing.assert_array_equal(coordinates(key.data), basis)
 
 
-@pytest.mark.parametrize("mode", ["SEPARATE", "SCENE", "DNA"])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "SEPARATE",
+        pytest.param("SCENE", marks=pytest.mark.rig_profile(compact=True)),
+        pytest.param("DNA", marks=pytest.mark.rig_profile(compact=True)),
+    ],
+)
 def test_body_generate_routes_keys_once_and_restores_pre_post_backups(character, tmp_path, monkeypatch, mode):
     instance = character
     configure_backups(monkeypatch, tmp_path)
@@ -134,6 +141,7 @@ def test_body_generate_routes_keys_once_and_restores_pre_post_backups(character,
     assert not engine.binding_issues(instance)
 
 
+@pytest.mark.rig_profile(compact=True)
 def test_generation_confirmation_is_read_only_and_reports_exact_count(character):
     instance = character
     instance.editor_component = "body"
@@ -157,6 +165,7 @@ def test_generation_confirmation_is_read_only_and_reports_exact_count(character)
 
 
 @pytest.mark.parametrize("phase", ["write", "post_backup"])
+@pytest.mark.rig_profile(compact=True)
 def test_body_generation_failure_restores_files_and_keys(character, tmp_path, monkeypatch, phase):
     instance = character
     instance.editor_component = "body"

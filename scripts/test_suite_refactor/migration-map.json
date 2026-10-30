@@ -343,7 +343,7 @@
       ],
       "after": [
         "__init__.py",
-        "\"version\": (0, 15, 2),"
+        "\"version\": (0, 15, 3),"
       ],
       "reason": "Required patch-version metadata update; no conditional behavior."
     },
@@ -368,6 +368,72 @@
         "return False, f\"Poses '{name}' and '{other_name}' have duplicate complete driver rotation vectors.\""
       ],
       "reason": "Diagnostic wording retains the same rejection branch; existing duplicate-driver validation asserts rejection."
+    },
+    {
+      "before": [
+        "rig_component.py",
+        "def get_shape_key_block(self, mesh_index: int, name: str) -> bpy.types.ShapeKey | None:"
+      ],
+      "after": [
+        "rig_component.py",
+        "def get_shape_key_block("
+      ],
+      "reason": "Resolve the scene mesh map once per synchronous batch. Real bone-only and subsequently loaded mesh tests preserve empty lookup recovery and the existing binding/shape output contracts."
+    },
+    {
+      "before": [
+        "rig_component.py",
+        "obj = self.mesh_index_lookup.get(mesh_index)"
+      ],
+      "after": [
+        "rig_component.py",
+        "obj = (self.mesh_index_lookup if meshes is None else meshes).get(mesh_index)"
+      ],
+      "reason": "Resolve the scene mesh map once per synchronous batch. Real bone-only and subsequently loaded mesh tests preserve empty lookup recovery and the existing binding/shape output contracts."
+    },
+    {
+      "before": [
+        "rig_component.py",
+        "if (block := self.get_shape_key_block(mesh, name)) is not None"
+      ],
+      "after": [
+        "rig_component.py",
+        "if (block := self.get_shape_key_block(mesh, name, meshes=meshes)) is not None"
+      ],
+      "reason": "Resolve the scene mesh map once per synchronous batch. Real bone-only and subsequently loaded mesh tests preserve empty lookup recovery and the existing binding/shape output contracts."
+    },
+    {
+      "before": [
+        "rig_component.py",
+        "block = self.get_shape_key_block(mesh, name)"
+      ],
+      "after": [
+        "rig_component.py",
+        "block = self.get_shape_key_block(mesh, name, meshes=meshes)"
+      ],
+      "reason": "Resolve the scene mesh map once per synchronous batch. Real bone-only and subsequently loaded mesh tests preserve empty lookup recovery and the existing binding/shape output contracts."
+    },
+    {
+      "before": [
+        "rig_component.py",
+        "obj = self.mesh_index_lookup.get(mesh)"
+      ],
+      "after": [
+        "rig_component.py",
+        "obj = meshes.get(mesh)"
+      ],
+      "reason": "Resolve the scene mesh map once per synchronous batch. Real bone-only and subsequently loaded mesh tests preserve empty lookup recovery and the existing binding/shape output contracts."
+    },
+    {
+      "before": [
+        "editors/rbf_editor/core.py",
+        "from typing import Any"
+      ],
+      "after": [
+        "editors/rbf_editor/core.py",
+        "from typing import Any, cast"
+      ],
+      "reason": "Add a type-only cast for the synchronous getter adapter; every original solver pose is compared with an uncached native reader."
     }
   ]
 }

@@ -7,12 +7,13 @@ from mathutils import Quaternion
 
 from character_dna.runtime import controller, engine
 from character_dna.utilities import get_active_rig_instance
+from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile
 
 
 @pytest.fixture
 def native_character(rig_factory, tmp_path):
-    with rig_factory.lease(RigProfile(meshes=False, face_board=True), tmp_path) as instance:
+    with rig_factory.lease(RigProfile(meshes=False, face_board=True, pose_bones=STATE_BONES), tmp_path) as instance:
         yield instance
 
 

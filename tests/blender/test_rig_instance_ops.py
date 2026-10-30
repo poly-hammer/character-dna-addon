@@ -50,8 +50,16 @@ def test_rig_instance_entry_move(
     empty_character_scene, direction: str, name: str, initial_index: int, expected_index: int
 ):
     names = ["ada", "ada_copy"] if initial_index == 0 else ["ada_copy", "ada"]
-    for item_name in names:
-        empty_character_scene.character_dna.rig_instance_list.add()["name"] = item_name
+    objects = {}
+    for index, item_name in enumerate(names):
+        instance = empty_character_scene.character_dna.rig_instance_list.add()
+        instance["name"] = item_name
+        for component in ("head_rig", "body_rig", "face_board"):
+            obj = bpy.data.objects.new(f"{item_name}_{component}", bpy.data.armatures.new(component))
+            empty_character_scene.collection.objects.link(obj)
+            instance[component] = obj
+            obj.location.x = index * 3.0 + (0.75 if component == "face_board" else 0.0)
+            objects[item_name, component] = obj
     instance_names = [instance.name for instance in bpy.context.scene.character_dna.rig_instance_list]  # type: ignore
     assert instance_names.index(name) == initial_index, (
         f"Rig instance {name} should be at index {initial_index} before move"
@@ -61,6 +69,10 @@ def test_rig_instance_entry_move(
     assert instance_names.index(name) == expected_index, (
         f"Rig instance {name} should be at index {expected_index} after move"
     )
+    for index, item_name in enumerate(names):
+        for component in ("head_rig", "body_rig", "face_board"):
+            expected_x = (1 - index) * 3.0 + (0.75 if component == "face_board" else 0.0)
+            assert objects[item_name, component].location.x == pytest.approx(expected_x)
 
 
 def test_rig_instance_entry_add(empty_character_scene):

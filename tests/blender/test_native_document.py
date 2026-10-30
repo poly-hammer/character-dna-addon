@@ -1,13 +1,12 @@
 """Exercise SDK projection validation and parity against the Python reference."""
 
-import copy
-
 import pytest
 
 from test_native_merged_graph import combined as combined_fixture, first_difference, graphs as graphs_fixture
 
 from character_dna.bindings import load_native_runtime
 from character_dna.dna_io import merged_graph, native_projection, partitions
+from fixtures.graphs import copy_graph
 
 
 graphs = graphs_fixture
@@ -31,7 +30,7 @@ def test_native_projector_matches_reference(graphs, projection):
 @pytest.mark.parametrize("field", ["vertex", "slice", "joint", "channel", "definition", "negative", "empty"])
 def test_invalid_projection_is_rejected(projection, field):
     data, original = projection
-    plans = copy.deepcopy(original)
+    plans = copy_graph(original)
     mesh = plans[0]["meshes"][0]
     if field == "vertex":
         mesh["variants"][0]["vertices"][0] = 0xFFFFFFFF
@@ -53,9 +52,9 @@ def test_invalid_projection_is_rejected(projection, field):
 
 def test_shared_lod_conflicts_are_rejected(combined, projection):
     native, indices = combined
-    data, plans = projection
+    _data, plans = projection
     duplicate = next(values for values in indices["meshes"]["body"].values() if len(values) > 1)
-    edited = copy.deepcopy(native)
+    edited = copy_graph(native)
     surface = next(item for item in indices["surfaces"] if item["mesh"] == duplicate[1])
     vertex = surface["vertices"]["body"][0]
     edited["geom1.1"]["meshes"][duplicate[1]]["positions"]["xs"][vertex] += 0.125
@@ -66,7 +65,7 @@ def test_shared_lod_conflicts_are_rejected(combined, projection):
 def test_runtime_definition_excludes_only_geometry(graphs):
     sdk = load_native_runtime()
     original = merged_graph.to_bytes(graphs["head"])
-    edited = copy.deepcopy(graphs["head"])
+    edited = copy_graph(graphs["head"])
     target = next(
         target for mesh in edited["geom1.1"]["meshes"] for target in mesh["blendShapeTargets"] if target["deltas"]["xs"]
     )

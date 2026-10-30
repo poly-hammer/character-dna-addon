@@ -202,8 +202,10 @@ class RigComponent:
     def channel_index_to_mesh_index_lookup(self) -> dict[int, int]:
         return {channel: mesh for mesh, channel, _ in self.shape_targets()}
 
-    def get_shape_key_block(self, mesh_index: int, name: str) -> bpy.types.ShapeKey | None:
-        obj = self.mesh_index_lookup.get(mesh_index)
+    def get_shape_key_block(
+        self, mesh_index: int, name: str, *, meshes: dict[int, bpy.types.Object] | None = None
+    ) -> bpy.types.ShapeKey | None:
+        obj = (self.mesh_index_lookup if meshes is None else meshes).get(mesh_index)
         keys = obj.data.shape_keys if obj and isinstance(obj.data, bpy.types.Mesh) else None
         return shape_names.find_key(keys, name)
 
@@ -212,10 +214,11 @@ class RigComponent:
         """Resolve logical UI identities once, outside value/preview callbacks."""
         key = self.cache_key("shape_key_blocks_by_name")
         if key not in self.instance.data:
+            meshes = self.mesh_index_lookup
             self.instance.data[key] = {
                 name: block
                 for mesh, _channel, name in self.shape_targets()
-                if (block := self.get_shape_key_block(mesh, name)) is not None
+                if (block := self.get_shape_key_block(mesh, name, meshes=meshes)) is not None
             }
         return self.instance.data[key]
 
@@ -225,8 +228,9 @@ class RigComponent:
         if key in self.instance.data:
             return self.instance.data[key]
         result = {}
+        meshes = self.mesh_index_lookup
         for mesh, channel, name in self.shape_targets():
-            block = self.get_shape_key_block(mesh, name)
+            block = self.get_shape_key_block(mesh, name, meshes=meshes)
             if block is not None:
                 result.setdefault(channel, []).append(block)
         if result:
@@ -251,8 +255,9 @@ class RigComponent:
                 name = f"{reader.getMeshName(mesh)}__{reader.getBlendShapeChannelName(channel)}"
                 targets.setdefault(mesh, []).append((channel, name))
         plan = []
+        meshes = self.mesh_index_lookup
         for mesh, channels_and_names in targets.items():
-            obj = self.mesh_index_lookup.get(mesh)
+            obj = meshes.get(mesh)
             if obj is None or not obj.data.shape_keys:
                 continue
             blocks = obj.data.shape_keys.key_blocks

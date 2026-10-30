@@ -9,6 +9,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from coverage import CoverageData
+from coverage.parser import PythonParser
 
 
 HERE = Path(__file__).resolve().parent
@@ -227,9 +228,12 @@ def compare_coverage(
     for file, line in mapping.values():
         mapped_lines.setdefault(file, set()).add(line)
     missing_lines, missing_arcs, unmapped_lines, unmapped_arcs = [], [], [], []
-    structural_arcs, inserted_paths = [], []
+    structural_arcs, inserted_paths, exception_exits = [], [], []
     for file, values in before.items():
         declarations = module_declarations(baseline_root / SOURCE / file)
+        parser = PythonParser(filename=str(baseline_root / SOURCE / file))
+        parser.parse_source()
+        possible_arcs = parser.arcs()
         for line in sorted(values["lines"]):
             target = mapping.get((file, line))
             if target is None:
@@ -253,7 +257,18 @@ def compare_coverage(
             target_file = endpoints[0][0]
             executed = after.get(target_file, {}).get("arcs", set())
             if new_arc not in executed:
-                if all(point in declarations for point in arc) and all(
+                if (
+                    arc[0] > 0 > arc[1]
+                    and arc not in possible_arcs
+                    and endpoints[0][1] in after.get(target_file, {}).get("lines", set())
+                ):
+                    # The tracer records exceptional unwinds even when they
+                    # are not source branches counted by coverage.py. Fixed
+                    # baseline crashes must not require recreating the crash.
+                    # Keep an audit trail; explicit raises, returns and all
+                    # real conditional exits still require coverage below.
+                    exception_exits.append([file, *arc, target_file, *new_arc])
+                elif all(point in declarations for point in arc) and all(
                     target[1] in after.get(target[0], {}).get("lines", set()) for target in endpoints
                 ):
                     # A deferred import no longer executes beside adjacent
@@ -272,6 +287,7 @@ def compare_coverage(
         "unmapped_arcs": unmapped_arcs,
         "structural_declaration_arcs": structural_arcs,
         "executed_inserted_paths": inserted_paths,
+        "non_branch_exception_exits": exception_exits,
     }
 
 

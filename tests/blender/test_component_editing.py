@@ -2,6 +2,7 @@
 
 from dataclasses import asdict
 from pathlib import Path
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -9,7 +10,12 @@ import pytest
 from character_dna.bindings import dna
 from character_dna.dna_io import get_dna_reader, release_dna_handle
 from character_dna.dna_io.coordinates import configuration
-from character_dna.editors.rbf_editor.core import commit_rbf_data_to_dna, get_rbf_driven_data, get_rbf_solver_data
+from character_dna.editors.rbf_editor.core import (
+    commit_rbf_data_to_dna,
+    get_rbf_driven_data,
+    get_rbf_pose_data,
+    get_rbf_solver_data,
+)
 
 
 RESOURCES = Path(__file__).parents[1] / "test_files/dna/default"
@@ -25,6 +31,20 @@ def component_reader(request):
 
 def solver_data(reader):
     return [{**asdict(solver), "__property_group__": "RBFSolverData"} for solver in get_rbf_solver_data(reader)]
+
+
+def test_batched_solver_reads_match_every_uncached_native_pose(component_reader):
+    _, reader = component_reader
+    observed = Mock(spec=type(reader), wraps=reader)
+    data = get_rbf_solver_data(observed)
+    joint_reads = observed.getJointName.call_count
+    assert joint_reads <= reader.getJointCount()
+    for solver in data:
+        expected = get_rbf_pose_data(reader, solver.solver_index)
+        assert [asdict(pose) for pose in solver.poses] == [asdict(pose) for pose in expected]
+    # A subsequent refresh must read the current native document again.
+    assert [asdict(solver) for solver in get_rbf_solver_data(observed)] == [asdict(solver) for solver in data]
+    assert observed.getJointName.call_count == 2 * joint_reads
 
 
 def roundtrip(reader, data):

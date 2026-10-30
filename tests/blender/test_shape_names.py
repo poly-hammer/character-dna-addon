@@ -2,9 +2,7 @@
 
 import hashlib
 import json
-import time
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import bpy
@@ -18,7 +16,6 @@ from character_dna.dna_io.misc import create_shape_key
 from character_dna.dna_io.shape_migration import recover_mesh
 from character_dna.editors.converter import scene_merge
 from character_dna.runtime import controller, engine
-from constants import REPO_ROOT
 from fixtures.rigs import RigProfile
 
 
@@ -308,7 +305,7 @@ def test_long_shape_written_with_full_channel_identity(mesh, method, kind):
 
 
 def test_frame_cost_uses_same_numeric_bindings_for_compact_and_hashed_names(head_character):
-    """Record full depsgraph timings with equal target counts; avoid noisy timing assertions."""
+    """Name storage must preserve every native channel at distinct sampled frames."""
     instance = head_character
     obj = instance.head_mesh
     reader = instance.head_dna_reader
@@ -322,7 +319,14 @@ def test_frame_cost_uses_same_numeric_bindings_for_compact_and_hashed_names(head
     keys = obj.data.shape_keys
     originals = [(block, shape_names.logical_name(keys, block.name), block.name) for block in list(keys.key_blocks)[1:]]
     assert len(originals) == 42
-    timings = {"compact": [], "hashed": []}
+    channels = [
+        instance.component("head").channel_name_to_index_lookup[logical] for _block, logical, _name in originals
+    ]
+    raw_control = next(
+        index
+        for index in range(reader.getRawControlCount())
+        if reader.getRawControlName(index) == "CTRL_expressions.jawOpen"
+    )
     for mode in ("hashed", "compact", "compact", "hashed"):
         with controller.authoring_operation(instance):
             mapping = {}
@@ -332,21 +336,21 @@ def test_frame_cost_uses_same_numeric_bindings_for_compact_and_hashed_names(head
             keys[shape_names.PROPERTY] = json.dumps(mapping)
             instance.destroy_references()
         assert sum(len(plan[1]) for plan in instance.component("head").shape_key_apply_plan) == 42
-        for frame in range(85):
-            start = time.perf_counter_ns()
-            bpy.context.scene.frame_set(frame + 1)
+        # The old loop timed 340 frames but asserted no frame outputs. Keep
+        # both transitions and idempotent renaming, with an actual SDK oracle
+        # for all 42 channels at each sample. Complete-suite timing lives in
+        # the dedicated benchmark runner rather than this correctness test.
+        for frame, value in ((1, 0.0), (17, 0.35), (42, 0.8)):
+            state = instance.head_instance
+            state.setRawControl(raw_control, value)
+            instance.head_manager.calculate(state)
+            expected = np.asarray(state.getBlendShapeOutputs())[channels]
+            bpy.context.scene.frame_set(frame)
+            assert engine.preview_controls(instance, state)
             bpy.context.view_layer.update()
-            elapsed = (time.perf_counter_ns() - start) / 1e6
-            if frame >= 5:
-                timings[mode].append(elapsed)
-    report = {
-        mode: {"median_ms": float(np.median(values)), "p95_ms": float(np.percentile(values, 95)), "frames": len(values)}
-        for mode, values in timings.items()
-    }
-    report["shape_targets_per_run"] = 42
-    output = Path(REPO_ROOT, "reports", "shape_name_frame_cost.json")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, indent=2))
+            evaluated = keys.evaluated_get(bpy.context.view_layer.depsgraph)
+            actual = [shape_names.find_key(evaluated, logical).value for _block, logical, _name in originals]
+            np.testing.assert_allclose(actual, expected, atol=1e-6, rtol=0)
 
 
 def test_alias_registry_survives_blend_reload(tmp_path):
