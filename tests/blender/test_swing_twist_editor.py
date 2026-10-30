@@ -125,17 +125,33 @@ def test_coupled_axes_and_canonical_roundtrip(reader, tmp_path, axis):
         release_dna_handle(saved)
 
 
+@pytest.fixture(scope="module")
+def swing_twist_state_bones(compact_dna_asset):
+    """Keep every swing/twist output for contracts that observe named bones only."""
+    from fixtures.compact_dna import STATE_BONES
+
+    reader = get_dna_reader(compact_dna_asset / "body.dna")
+    try:
+        return tuple(
+            sorted({*STATE_BONES, *(name for setup in core.read_setups(reader) for name in setup.output_names)})
+        )
+    finally:
+        release_dna_handle(reader)
+
+
 @pytest.fixture
-def character(tmp_path, request, rig_factory, compact_dna):
+def character(tmp_path, request, rig_factory, compact_dna, swing_twist_state_bones):
     from fixtures.rigs import RigProfile
 
     combined = getattr(request, "param", None) == "combined"
     marker = request.node.get_closest_marker("rig_profile")
     full_geometry = marker is not None and marker.kwargs.get("full_geometry", False)
+    state_only = marker is not None and marker.kwargs.get("state_only", False)
     profile = RigProfile(
         components=("head", "body") if combined else ("body",),
         document_mode="combined" if combined else "separate",
         asset="ada" if full_geometry else str(compact_dna),
+        pose_bones=swing_twist_state_bones if state_only else (),
     )
     with rig_factory.lease(profile, tmp_path) as instance:
         instance.editor_component = "body"
@@ -143,6 +159,7 @@ def character(tmp_path, request, rig_factory, compact_dna):
 
 
 @pytest.mark.parametrize("finish", ["commit", "revert", "noop"])
+@pytest.mark.rig_profile(state_only=True)
 def test_editor_preview_and_lifecycle(character, finish):
     instance = character
     editor = SwingTwistEditor.for_instance(instance)
@@ -186,6 +203,7 @@ def test_editor_preview_and_lifecycle(character, finish):
         assert path.read_bytes() == before
 
 
+@pytest.mark.rig_profile(state_only=True)
 def test_shared_axis_blend_reset_and_cache_recovery(character):
     editor = SwingTwistEditor.for_instance(character)
     character.swing_twist_editor.active_index = 6
@@ -208,6 +226,7 @@ def test_shared_axis_blend_reset_and_cache_recovery(character):
     editor.revert(bpy.context)
 
 
+@pytest.mark.rig_profile(state_only=True)
 def test_failed_commit_retains_draft_and_rolls_back(character, monkeypatch):
     from character_dna.dna_io.coordinates import CanonicalDNAWriter
 
@@ -233,6 +252,7 @@ def test_failed_commit_retains_draft_and_rolls_back(character, monkeypatch):
     assert not editor.is_editing
 
 
+@pytest.mark.rig_profile(state_only=True)
 def test_external_edit_is_rejected(character):
     editor = SwingTwistEditor.for_instance(character)
     editor.enter(bpy.context)
@@ -246,6 +266,7 @@ def test_external_edit_is_rejected(character):
 
 @pytest.mark.parametrize("character", ["combined"], indirect=True)
 @pytest.mark.parametrize("fail_first", [False, True])
+@pytest.mark.rig_profile(state_only=True)
 def test_combined_commit_preserves_head_and_surface(character, monkeypatch, fail_first):
     from character_dna.dna_io import document
     from character_dna.editors.converter import scene_merge
@@ -281,6 +302,7 @@ def test_combined_commit_preserves_head_and_surface(character, monkeypatch, fail
 
 
 @pytest.mark.parametrize("finish", ["commit", "revert"])
+@pytest.mark.rig_profile(state_only=True)
 def test_saved_session_recovers_draft_and_context(character, tmp_path, finish):
     path = Path(character.edit_target.dna_file_path)
     before = path.read_bytes()
@@ -381,6 +403,7 @@ def test_calf_back_90_preview_matches_complete_rbf_pose(character):
 
 
 @pytest.mark.parametrize("finish", ["commit", "revert"])
+@pytest.mark.rig_profile(state_only=True)
 def test_preview_updates_rbf_shape_keys_and_restores_values(character, finish):
     from character_dna.editors.rbf_editor import shapes
     from character_dna.editors.rbf_editor.editor import RBFEditor
@@ -422,6 +445,7 @@ def test_preview_updates_rbf_shape_keys_and_restores_values(character, finish):
     assert key.value == pytest.approx(0.37, abs=1e-5)
 
 
+@pytest.mark.rig_profile(state_only=True)
 def test_read_only_records_survive_ui_roundtrip(character):
     baseline = core.read_setups(character.edit_target.dna_reader)
     baseline[0] = replace(baseline[0], axis=9, weights=(0.25, 0.75))
@@ -468,6 +492,7 @@ def test_parameter_undo_redo_restores_scene_values(character):
     SwingTwistEditor.for_instance(get_active_rig_instance()).revert(bpy.context)
 
 
+@pytest.mark.rig_profile(state_only=True)
 def test_multiple_character_drafts_and_auto_key_are_independent(character, tmp_path):
     from character_dna.constants import ToolInfo
 
@@ -506,6 +531,7 @@ def test_multiple_character_drafts_and_auto_key_are_independent(character, tmp_p
     assert engine.binding_issues(first) == engine.binding_issues(second) == []
 
 
+@pytest.mark.rig_profile(state_only=True)
 def test_editor_adds_no_app_handlers_and_shutdown_restores_scene(character):
     from character_dna import editors
 
@@ -530,6 +556,7 @@ def test_editor_adds_no_app_handlers_and_shutdown_restores_scene(character):
         editors.register_runtime()
 
 
+@pytest.mark.rig_profile(state_only=True)
 def test_selection_and_writeback_are_scoped_to_one_setup(character):
     properties = character.swing_twist_editor
     properties.active_index = 8
@@ -551,6 +578,7 @@ def test_selection_and_writeback_are_scoped_to_one_setup(character):
 
 
 @pytest.mark.parametrize("index", [0, 8, 6, 14])
+@pytest.mark.rig_profile(state_only=True)
 def test_blend_and_axis_callbacks_update_bones_immediately(character, index):
     properties = character.swing_twist_editor
     properties.active_index = index
@@ -584,6 +612,7 @@ def test_blend_and_axis_callbacks_update_bones_immediately(character, index):
 
 @pytest.mark.parametrize("index,collection_name", [(0, "Swings"), (8, "Twists")])
 @pytest.mark.parametrize("finish", ["commit", "revert"])
+@pytest.mark.rig_profile(state_only=True)
 def test_collection_visibility_is_revealed_then_restored(character, index, collection_name, finish):
     properties = character.swing_twist_editor
     properties.active_index = index
@@ -612,6 +641,7 @@ def test_collection_visibility_is_revealed_then_restored(character, index, colle
     assert bone.hide
 
 
+@pytest.mark.rig_profile(state_only=True)
 def test_failed_entry_restores_collection_visibility(character, monkeypatch):
     from character_dna.editors.swing_twist_editor import editor as editor_module
 
@@ -694,6 +724,7 @@ def test_offset_is_absolute_preview_only_and_restores_pose(character, index, fin
     assert core.read_setups(character.edit_target.dna_reader) == baseline
 
 
+@pytest.mark.rig_profile(state_only=True)
 def test_preview_offset_makes_every_setup_blend_visible(character):
     properties = character.swing_twist_editor
     for index in range(len(properties.setups)):

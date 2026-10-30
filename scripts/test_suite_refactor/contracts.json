@@ -289,6 +289,17 @@
         "test_combined_neckline_shape_is_portable_and_backup_restores_document",
         "Both full-geometry numerical and native compact-asset equivalence matrices"
       ]
+    },
+    {
+      "case": "Named-bone Swing/Twist transactions and native ownership",
+      "before": "Transaction, UI, visibility and named-output tests rebuilt full scene output skeletons; a multi-character preview ownership test also imported an unobserved mesh.",
+      "after": "Owned compact-geometry leases retain every swing/twist output, all native input bones, observed state bones and all ancestors. The complete DNA, evaluator arrays, individual matrix assertions, file round trips and surface checks stay unchanged. The second character is still imported fresh with its complete skeleton. Invalid native buffer/index contracts use the established state profile.",
+      "retained_integration": [
+        "Full-skeleton test_preview_matches_committed_native_runtime with and without RBFs",
+        "Complete knee deformation in test_calf_back_90_preview_matches_complete_rbf_pose",
+        "Every-bone rest/offset restoration and real undo/redo",
+        "All native head shape, spatial, matrix and fresh-import oracles"
+      ]
     }
   ],
   "measured_hot_path_contracts": [

@@ -416,7 +416,7 @@ def test_native_previews_are_instance_local(native_head):
     name = native_head.name
     assert bpy.ops.character_dna.import_dna(
         filepath=str(TEST_DNA_FOLDER / "default" / "head.dna"),
-        import_mesh=True,
+        import_mesh=False,
         import_bones=True,
         import_shape_keys=False,
         import_vertex_groups=True,
@@ -482,6 +482,7 @@ def test_native_auto_evaluate_off_releases_channels(native_head):
     assert bone.location.x == pytest.approx(0.125)
 
 
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
 def test_native_frame_rejects_invalid_buffers(native_head):
     """Frame validation cannot mutate published output or solver state on bad buffers."""
     from character_dna.runtime.frame import buffers, capture
@@ -554,6 +555,7 @@ def test_excluded_character_does_not_solve(native_head):
         scene.frame_set(original_frame)
 
 
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
 def test_native_frame_plan_rejects_invalid_indices(native_head):
     """Reject out-of-range controls and cyclic eye chains before publishing a plan."""
     record = next(record for record in engine._records.values() if record["component"] == "head")
