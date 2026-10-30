@@ -27,11 +27,11 @@ The final cold candidate-only follow-up at frozen parent `2f9ee12` with editors 
 
 | Lane | Original median seconds | Earlier candidate median seconds | Median ratio | Individual pair ratios |
 | --- | ---: | ---: | ---: | ---: |
-| macOS 4.5 | 8,186.34 | 4,443.83 | 54.28% | 52.45â€“56.44% |
-| macOS 5.2 | 9,583.16 | 5,161.09 | 53.86% | 52.17â€“56.39% |
-| Ubuntu 5.2 | 9,249.04 | 4,631.79 | 50.08% | 49.97â€“52.53% |
-| Windows 4.5 | 10,169.25 | 5,481.01 | 53.90% | 52.59â€“56.01% |
-| Windows 5.2 | 13,379.94 | 6,763.59 | 50.55% | 50.45â€“53.23% |
+| macOS 4.5 | 8,186.34 | 4,443.83 | 54.28% | 52.45–56.44% |
+| macOS 5.2 | 9,583.16 | 5,161.09 | 53.86% | 52.17–56.39% |
+| Ubuntu 5.2 | 9,249.04 | 4,631.79 | 50.08% | 49.97–52.53% |
+| Windows 4.5 | 10,169.25 | 5,481.01 | 53.90% | 52.59–56.01% |
+| Windows 5.2 | 13,379.94 | 6,763.59 | 50.55% | 50.45–53.23% |
 
 All 15 comparisons reject that earlier candidate. The downloaded case/coverage reports retain all original cases with no new failures or skips, but fail the runtime and older coverage gates. These establish complete platform baselines; they do not qualify later local revisions. Downloaded artifacts are under `reports/test-suite-refactor/ci-0695-*/`; the complete timing extraction from GitHub CLI logs is `ci-0695-complete-matrix-timing.json` in the same report directory. Runner speed varies substantially, so the local warm result must not be divided by these CI baselines. With explicit publication approval, editors `c6a0574` is now on `main` and parent `bec53f5` is on `rbf-shape-keys`. [Qualification run 41052817113](https://github.com/poly-hammer/character-dna-addon/actions/runs/41052817113) was canceled at the user's request because its five running Mac jobs and one queued Mac job blocked other repositories. Completed candidate reports and partial baseline records were retained. The superseded normal PR run was canceled after its replacement started, avoiding duplicate Mac jobs. [Normal PR checks 41064031879](https://github.com/poly-hammer/character-dna-addon/actions/runs/41064031879) subsequently completed all five supported lanes. Each retains every original case with no new failures or skips. All original covered lines remain; Windows and Mac retain every covered arc, while Linux misses two callback-dependent evaluation-flag arcs addressed by the added direct native tests. The existing 42 numerical failures remain visible, so these jobs correctly report failure.
 
@@ -105,7 +105,7 @@ Initial measurements use Windows, Python 3.13.11, bpy 5.2.0 LTS, coverage 7.13.5
 | Three body RBF shape workflows | 94.32 s | 35.36 s | **37.5%**, all three pass unchanged. Keep complete body DNA, native evaluation, commit/revert, file publication, and weight/mirroring assertions; omit the unused head. |
 | Same RBF workflows with body snapshots | 94.32 s | 24.79 s | **26.3%** including collection/reporting; setup/call/teardown totals fall from 86.47 s to 18.02 s (**20.8%**). All three pass unchanged, including commit followed by restored pristine state. |
 | Four behavior-only native cases | 8.74 s | 11.15 s | Both runs: three pass, one existing single-solver skip. Smaller DNA reads did **not** improve this test group; exclude this from projected savings. |
-| Twelve new lifecycle contracts | â€” | 0.048 s of call time | Actual `Editor.enter` with spec-constrained suspend/resume and surface-session collaborators. All pass; all twelve detect an intentionally omitted resume call. Retain real binding tests alongside them. |
+| Twelve new lifecycle contracts | — | 0.048 s of call time | Actual `Editor.enter` with spec-constrained suspend/resume and surface-session collaborators. All pass; all twelve detect an intentionally omitted resume call. Retain real binding tests alongside them. |
 
 The native reader microbenchmark alternated full/smaller reads five times. Median head read improved from 102 ms to 44 ms; body from 13.8 ms to 1.12 ms. It compared finite joint, blend-shape, and animated-map outputs over 24 head and 12 body evaluations at all LODs, plus setup/count equivalence. The lack of end-to-end improvement demonstrates why microbenchmark ratios must not be applied to whole modules.
 
@@ -186,7 +186,7 @@ The following is an **implementation budget, not a measured prediction**. It int
 | Cold profile construction, teardown, coverage/reporting and variance allowance | 4 minutes |
 | **Complete lane** | **22 minutes** |
 
-Track measured time by layer/profile after each migration. Model total time from measured case costs: `new total = fixed cost + sum(old bucket cost Ã— measured retained ratio) + new setup cost`. Do not double-count overlapping savings from body-only imports and snapshots. The initial pilots show roughly 11% retained time for the selection group, 26% for RBF with body snapshots, and 50% for paired-character cold snapshots; a blanket snapshot rollout cannot justify a 25% whole-suite claim. Only the combined RBF measurement supports the combined optimization; multiplying its separate microbenchmark ratios would overstate the saving.
+Track measured time by layer/profile after each migration. Model total time from measured case costs: `new total = fixed cost + sum(old bucket cost × measured retained ratio) + new setup cost`. Do not double-count overlapping savings from body-only imports and snapshots. The initial pilots show roughly 11% retained time for the selection group, 26% for RBF with body snapshots, and 50% for paired-character cold snapshots; a blanket snapshot rollout cannot justify a 25% whole-suite claim. Only the combined RBF measurement supports the combined optimization; multiplying its separate microbenchmark ratios would overstate the saving.
 
 If a bucket exceeds budget, profile its remaining setup/call/teardown costs, split another repeated orchestration/adapter contract out of full-character setup, and benchmark again. Keep numerical and process contracts intact. If retained mandatory integration alone exceeds the ceiling, report that measured floor and revise the fixture/production boundary before expanding the migration; do not hide it with scheduling or extra machines.
 
@@ -202,4 +202,4 @@ If a bucket exceeds budget, profile its remaining setup/call/teardown costs, spl
 
 During iteration, preserve incremental per-case timing/result records so cancellation does not erase diagnostic evidence. In the reusable workflow, keep pytest's true exit code, publish existing diagnostics on failure, and treat absent reports as absent rather than uploading empty JUnit files. Pin the workflow revision during performance comparisons; a floating `@main` can otherwise change the benchmark conditions.
 
-The first implementation change should be instrumentation, baseline capture, and the fixture contractâ€”not a broad rewrite of every test. The next changes should apply the measured minimal-RNA and component-specific patterns. Full-suite adoption is gated by the coverage ledger and complete timings above.
+The first implementation change should be instrumentation, baseline capture, and the fixture contract—not a broad rewrite of every test. The next changes should apply the measured minimal-RNA and component-specific patterns. Full-suite adoption is gated by the coverage ledger and complete timings above.
