@@ -12,6 +12,7 @@ import pytest
 
 from character_dna.runtime import controller, engine
 from character_dna.utilities import get_active_rig_instance, get_addon_preferences
+from fixtures.compact_dna import STATE_BONES
 
 
 @pytest.mark.parametrize("schema", [1, 2, engine.SCHEMA_VERSION])
@@ -157,15 +158,22 @@ def test_import_uses_runtime_without_opt_in(include_body: bool) -> None:
 
 @pytest.fixture
 def native_head(rig_factory, tmp_path, request):
-    """Keep the complete native skeleton; geometry is needed by shape tests only."""
+    """Full matrix/shape oracles retain the complete original scene skeleton."""
     from fixtures.rigs import RigProfile
 
-    profile = RigProfile(components=("head",), face_board=True, meshes="native_shape" in request.fixturenames)
+    marker = request.node.get_closest_marker("rig_profile")
+    profile = RigProfile(
+        components=("head",),
+        face_board=True,
+        meshes="native_shape" in request.fixturenames,
+        **(marker.kwargs if marker else {}),
+    )
     with rig_factory.lease(profile, tmp_path) as instance:
         assert engine.active(instance), controller.status()
         yield instance
 
 
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
 def test_native_head_only(native_head):
     """Head-only rigs retain their driver inputs and update without a body."""
     assert native_head.body_rig is None
@@ -190,6 +198,7 @@ def test_native_head_only(native_head):
 
 
 @pytest.mark.parametrize("layout", ["legacy_carriers", "handler"])
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
 def test_reconcile_legacy_runtime_reports_warning(native_head, monkeypatch, caplog, layout):
     """Opening older rigs must not escalate expected migration to an operator error."""
     if layout == "legacy_carriers":
@@ -216,6 +225,7 @@ def test_reconcile_legacy_runtime_reports_warning(native_head, monkeypatch, capl
     assert engine.status(native_head) == engine.MIGRATION_WARNING
 
 
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
 def test_native_without_face_board(native_head):
     """No-face-board bindings can still consume constrained/raw joint inputs."""
     engine.discard(native_head)
@@ -235,6 +245,7 @@ def pro_editors():
 
 
 @pytest.mark.usefixtures("pro_editors")
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
 def test_native_raw_slider_preview(native_head):
     """A manual raw preview must survive evaluation of the native output drivers."""
     from character_dna.editors.raw_control_editor.callbacks import (
@@ -266,6 +277,7 @@ def test_native_raw_slider_preview(native_head):
 
 @pytest.mark.usefixtures("pro_editors")
 @pytest.mark.parametrize("release", ["frame", "face_board"])
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
 def test_native_raw_preview_returns_to_live_inputs(native_head, release):
     """Successive slider edits persist, but playback and face-board posing take over."""
     from character_dna.editors.raw_control_editor.callbacks import update_head_raw_control_list
@@ -435,6 +447,7 @@ def test_native_operator_has_undo():
     assert "UNDO" in controller.CHARACTER_DNA_OT_sync_native_runtime.bl_options
 
 
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
 def test_native_raw_input_sampling_preserves_authored_expressions(native_head):
     """Sampling neck quaternions must not erase a tool's manually set expression."""
     from character_dna.runtime.authoring import raw_inputs
@@ -457,6 +470,7 @@ def test_native_raw_input_sampling_preserves_authored_expressions(native_head):
         assert native_head.cache_key("head", "runtime_plan") not in native_head.data
 
 
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
 def test_native_auto_evaluate_off_releases_channels(native_head):
     """Manual posing remains possible after disabling automatic rig evaluation."""
     native_head.auto_evaluate = False
@@ -518,6 +532,7 @@ def test_native_frame_rejects_invalid_buffers(native_head):
     assert native.session_statistics(session) == {"solves": 1, "cache_hits": 1}
 
 
+@pytest.mark.rig_profile(pose_bones=STATE_BONES)
 def test_excluded_character_does_not_solve(native_head):
     """Scene references must not run native evaluation for an excluded character."""
     scene = bpy.context.scene

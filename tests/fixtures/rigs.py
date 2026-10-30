@@ -7,10 +7,11 @@ import shutil
 import sys
 import tempfile
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
+from unittest.mock import patch
 
 import bpy
 import pytest
@@ -95,79 +96,93 @@ class RigFactory:
 
     @staticmethod
     def _import(profile: RigProfile, folder: Path):
+        from character_dna.runtime import engine
         from character_dna.utilities import get_active_rig_instance
 
         bpy.ops.wm.read_homefile(use_empty=True)
         RigFactory._copy_inputs(profile, folder)
-        result = bpy.ops.character_dna.import_dna(
-            filepath=str(folder / f"{profile.components[0]}.dna"),
-            include_body=len(profile.components) > 1,
-            import_face_board=profile.face_board,
-            import_mesh=profile.meshes,
-            import_bones=profile.bones,
-            import_shape_keys=profile.shape_keys,
-            import_materials=profile.materials,
-            import_vertex_groups=True,
-            **{f"import_lod{index}": index in profile.lods for index in range(8)},
-        )
-        assert result == {"FINISHED"}
-        if profile.face_board_animation:
-            result = bpy.ops.character_dna.import_face_board_animation(
-                filepath=str(TEST_ANIMATION_FOLDER / "head/MHC_FaceBoardROM.fbx")
+
+        # These profiles discard unobserved scene bones before use. Defer native
+        # output construction until that final skeleton and its keys exist,
+        # instead of installing thousands of drivers only to delete them.
+        # Ordinary profiles and every importer contract keep the normal path.
+        deferred = patch.object(engine, "install", autospec=True) if profile.pose_bones else nullcontext()
+        with deferred:
+            result = bpy.ops.character_dna.import_dna(
+                filepath=str(folder / f"{profile.components[0]}.dna"),
+                include_body=len(profile.components) > 1,
+                import_face_board=profile.face_board,
+                import_mesh=profile.meshes,
+                import_bones=profile.bones,
+                import_shape_keys=profile.shape_keys,
+                import_materials=profile.materials,
+                import_vertex_groups=True,
+                **{f"import_lod{index}": index in profile.lods for index in range(8)},
             )
             assert result == {"FINISHED"}
-        instance = get_active_rig_instance()
+            if profile.face_board_animation:
+                result = bpy.ops.character_dna.import_face_board_animation(
+                    filepath=str(TEST_ANIMATION_FOLDER / "head/MHC_FaceBoardROM.fbx")
+                )
+                assert result == {"FINISHED"}
+            instance = get_active_rig_instance()
+            if profile.pose_bones:
+                from character_dna.runtime import controller
+                from character_dna.utilities import switch_to_bone_edit_mode
+
+                # Lifecycle and transaction contracts only need their observed
+                # bones. Retain native input bones and all ancestors so local/world
+                # transforms have the same meaning; DNA/evaluator outputs stay complete.
+                with controller.authoring_operation(instance):
+                    for kind in profile.components:
+                        rig = instance.component(kind).rig
+                        reader = instance.component(kind).dna_reader
+                        inputs = {
+                            reader.getRawControlName(index).rsplit(".", 1)[0]
+                            for index in range(reader.getRawControlCount())
+                            if reader.getRawControlName(index).endswith((".qx", ".qy", ".qz", ".qw"))
+                        }
+                        keep = set()
+                        for name in (*profile.pose_bones, *inputs, "head"):
+                            bone = rig.data.bones.get(name)
+                            while bone is not None:
+                                keep.add(bone.name)
+                                bone = bone.parent
+                        assert keep, (kind, profile.pose_bones)
+                        switch_to_bone_edit_mode(rig)
+                        for bone in tuple(rig.data.edit_bones):
+                            if bone.name not in keep:
+                                rig.data.edit_bones.remove(bone)
+                        bpy.ops.object.mode_set(mode="OBJECT")
+                    instance.destroy()
+                if "head" in profile.components:
+                    instance.head_initialize(update_raw_control_list=False)
+                if "body" in profile.components:
+                    instance.body_initialize(update_rbf_solver_list=False)
+            if profile.head_targets:
+                from character_dna.dna_io.misc import create_shape_key
+                from character_dna.editors.shape_key_editor.core import linear_modifier_for
+                from character_dna.runtime import controller
+
+                assert "head" in profile.components and profile.meshes and not profile.shape_keys
+                with controller.authoring_operation(instance):
+                    head = instance.component("head")
+                    reader = head.dna_reader
+                    for target in profile.head_targets:
+                        channel = reader.getBlendShapeChannelName(reader.getBlendShapeChannelIndex(0, target))
+                        create_shape_key(
+                            target,
+                            0,
+                            head.mesh,
+                            reader,
+                            channel,
+                            prefix=reader.getMeshName(0) + "__",
+                            linear_modifier=linear_modifier_for(reader),
+                        )
+                    instance.destroy_references()
+                    instance.sync_shape_key_list()
         if profile.pose_bones:
-            from character_dna.runtime import controller
-            from character_dna.utilities import switch_to_bone_edit_mode
-
-            # Lifecycle and transaction contracts only need their observed
-            # bones. Retain native input bones and all ancestors so local/world
-            # transforms have the same meaning; DNA/evaluator outputs stay complete.
-            with controller.authoring_operation(instance):
-                for kind in profile.components:
-                    rig = instance.component(kind).rig
-                    reader = instance.component(kind).dna_reader
-                    inputs = {
-                        reader.getRawControlName(index).rsplit(".", 1)[0]
-                        for index in range(reader.getRawControlCount())
-                        if reader.getRawControlName(index).endswith((".qx", ".qy", ".qz", ".qw"))
-                    }
-                    keep = set()
-                    for name in (*profile.pose_bones, *inputs, "head"):
-                        bone = rig.data.bones.get(name)
-                        while bone is not None:
-                            keep.add(bone.name)
-                            bone = bone.parent
-                    assert keep, (kind, profile.pose_bones)
-                    switch_to_bone_edit_mode(rig)
-                    for bone in tuple(rig.data.edit_bones):
-                        if bone.name not in keep:
-                            rig.data.edit_bones.remove(bone)
-                    bpy.ops.object.mode_set(mode="OBJECT")
-                instance.destroy()
-        if profile.head_targets:
-            from character_dna.dna_io.misc import create_shape_key
-            from character_dna.editors.shape_key_editor.core import linear_modifier_for
-            from character_dna.runtime import controller
-
-            assert "head" in profile.components and profile.meshes and not profile.shape_keys
-            with controller.authoring_operation(instance):
-                head = instance.component("head")
-                reader = head.dna_reader
-                for target in profile.head_targets:
-                    channel = reader.getBlendShapeChannelName(reader.getBlendShapeChannelIndex(0, target))
-                    create_shape_key(
-                        target,
-                        0,
-                        head.mesh,
-                        reader,
-                        channel,
-                        prefix=reader.getMeshName(0) + "__",
-                        linear_modifier=linear_modifier_for(reader),
-                    )
-                instance.destroy_references()
-                instance.sync_shape_key_list()
+            instance.evaluate()
         if profile.document_mode != "separate":
             assert profile.components == ("head", "body")
             instance.converter_merge_mode = "DNA" if profile.document_mode == "combined" else "SCENE"

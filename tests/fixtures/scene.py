@@ -120,9 +120,11 @@ def load_body_dna_for_pose_roundtrip(load_body_dna_for_pose_editing):
 
 
 @pytest.fixture
-def load_full_dna_for_animation(rig_factory, tmp_path, dna_folder_name, import_shape_keys, import_lods):
+def load_full_dna_for_animation(rig_factory, tmp_path, compact_dna, import_shape_keys, import_lods):
+    # Animation routing and baking need the complete skeleton, native behavior,
+    # face board and material nodes, but do not inspect dense surface geometry.
     profile = RigProfile(
-        asset=dna_folder_name,
+        asset=str(compact_dna),
         lods=tuple(int(lod[-1]) for lod in import_lods),
         shape_keys=import_shape_keys,
         face_board=True,

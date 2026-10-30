@@ -22,8 +22,9 @@ def animated_body(load_full_dna_for_animation):
 
 
 @pytest.fixture
-def animated_face_board(rig_factory, tmp_path):
-    with rig_factory.lease(RigProfile(face_board=True, materials=True, face_board_animation=True), tmp_path):
+def animated_face_board(rig_factory, tmp_path, compact_dna):
+    profile = RigProfile(asset=str(compact_dna), face_board=True, materials=True, face_board_animation=True)
+    with rig_factory.lease(profile, tmp_path):
         yield
 
 
@@ -112,7 +113,6 @@ def test_validation_can_be_overridden(load_full_dna_for_animation):
     [
         ("body", "test", True, True, False),
         ("body", "test", True, True, True),
-        # ('head', 'test', True, True, False),
     ],
 )
 def test_bake_component_animation(

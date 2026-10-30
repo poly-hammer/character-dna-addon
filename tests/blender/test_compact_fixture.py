@@ -14,7 +14,23 @@ from fixtures.rigs import RigProfile
 
 @pytest.mark.parametrize("kind", ["head", "body"])
 def test_compact_fixture_keeps_all_behavior_at_every_lod(compact_dna, kind):
-    paths = [TEST_DNA_FOLDER / "ada" / f"{kind}.dna", compact_dna / f"{kind}.dna"]
+    assert_behavior_at_every_lod(compact_dna, kind)
+
+
+@pytest.mark.parametrize("kind", ["head", "body"])
+def test_two_target_fixture_keeps_all_native_behavior(compact_two_target_asset, kind):
+    assert_behavior_at_every_lod(compact_two_target_asset, kind)
+    if kind == "head":
+        reader = get_dna_reader(compact_two_target_asset / "head.dna")
+        try:
+            assert reader.getBlendShapeTargetCount(0) == 2
+            assert reader.getBlendShapeChannelIndex(0, 0) != reader.getBlendShapeChannelIndex(0, 1)
+        finally:
+            release_dna_handle(reader)
+
+
+def assert_behavior_at_every_lod(folder, kind):
+    paths = [TEST_DNA_FOLDER / "ada" / f"{kind}.dna", folder / f"{kind}.dna"]
     readers = [get_dna_reader(path) for path in paths]
     managers, states = [], []
     try:

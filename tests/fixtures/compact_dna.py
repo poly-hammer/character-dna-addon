@@ -81,6 +81,32 @@ def compact_dna_asset(addon, tmp_path_factory):
     return folder
 
 
+@pytest.fixture(scope="session")
+def compact_two_target_asset(compact_dna_asset, tmp_path_factory):
+    """A second real head channel for untouched-key transaction assertions."""
+    from character_dna.dna_io import merged_graph
+
+    folder = tmp_path_factory.mktemp("compact_two_targets")
+    shutil.copytree(compact_dna_asset, folder, dirs_exist_ok=True)
+    graph = merged_graph.from_bytes((folder / "head.dna").read_bytes())
+    original = merged_graph.from_bytes((TEST_DNA_FOLDER / "ada/head.dna").read_bytes(), geometry=False)
+    mapping = original["defn1.1"]["meshBlendShapeChannelMapping"]
+    targets = graph["geom1.1"]["meshes"][0]["blendShapeTargets"]
+    channel = next(
+        channel
+        for mesh, channel in zip(mapping["from"], mapping["to"], strict=True)
+        if mesh == 0 and channel != targets[0]["blendShapeChannelIndex"]
+    )
+    targets.append(
+        {"deltas": {"xs": [0.0], "ys": [0.2], "zs": [0.0]}, "vertexIndices": [0], "blendShapeChannelIndex": channel}
+    )
+    mapping = graph["defn1.1"]["meshBlendShapeChannelMapping"]
+    mapping["from"].append(0)
+    mapping["to"].append(channel)
+    (folder / "head.dna").write_bytes(merged_graph.to_bytes(graph))
+    return folder
+
+
 @pytest.fixture
 def compact_dna(compact_dna_asset, monkeypatch):
     """Use the matching seam only within a test leasing the compact asset."""

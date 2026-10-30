@@ -26,7 +26,8 @@ def character(tmp_path, request, rig_factory):
     marker = request.node.get_closest_marker("rig_profile")
     options = dict(marker.kwargs) if marker else {}
     if options.pop("compact", False):
-        options.update(asset=str(request.getfixturevalue("compact_dna")), pose_bones=STATE_BONES)
+        options["asset"] = str(request.getfixturevalue("compact_dna"))
+        options.setdefault("pose_bones", STATE_BONES)
     profile = RigProfile(
         lods=tuple(range(8)) if getattr(request, "param", None) == "all_lods" else (0,),
         **options,
@@ -936,6 +937,7 @@ def test_document_rejects_corruption_before_materializing(tmp_path):
         document.materialize(invalid)
 
 
+@pytest.mark.rig_profile(compact=True)
 def test_scene_corrective_metadata_belongs_to_author_and_survives_import(character, tmp_path):
     from character_dna.dna_io.misc import create_shape_key
     from character_dna.editors.shape_key_editor.editor import ShapeKeyEditor
@@ -964,7 +966,8 @@ def test_scene_corrective_metadata_belongs_to_author_and_survives_import(charact
     editor = ShapeKeyEditor.for_instance(instance)
     editor.enter(bpy.context)
     bpy.ops.object.mode_set(mode="OBJECT")
-    proxy.active_shape_key.data[0].co.x += 0.01
+    seam_vertex = next(iter(json.loads(scene_merge.HEAD_TO_BODY_EDGE_LOOP_FILE_PATH.read_text())["0"].values()))
+    proxy.active_shape_key.data[seam_vertex].co.x += 0.01
     editor.commit(bpy.context)
     assert scene_merge.proxy_for(instance) == proxy
     assert (tmp_path / "body.dna").read_bytes() == original_body

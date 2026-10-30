@@ -129,6 +129,7 @@ def test_commit_respects_explicit_pose_choice(character, apply):
 
 @pytest.mark.parametrize("mode", ["separate", "scene", "combined"])
 @pytest.mark.rig_profile(compact=True)
+@pytest.mark.rig_profile(compact=True, pose_bones=())
 def test_shape_value_commit_applies_scaled_pose_coefficient(paired_character, mode):
     instance = paired_character
     if mode != "separate":

@@ -12,8 +12,10 @@ from fixtures.rigs import RigProfile
 
 
 @pytest.fixture
-def character(tmp_path, rig_factory):
-    with rig_factory.lease(RigProfile(), tmp_path) as instance:
+def character(tmp_path, rig_factory, compact_dna):
+    # Keep every original joint for the body publication oracle; the routing
+    # matrix does not require the original dense meshes.
+    with rig_factory.lease(RigProfile(asset=str(compact_dna)), tmp_path) as instance:
         (tmp_path / "output").mkdir()
         instance.output.auto_update_lods = False
         instance.output.align_head_and_body = False

@@ -13,7 +13,34 @@ import pytest
 
 from character_dna.runtime import engine
 from fixtures.compact_dna import STATE_BONES
-from fixtures.rigs import RigProfile, release_partitions
+from fixtures.rigs import RigFactory, RigProfile, release_partitions, reset_scene
+
+
+def test_narrow_profile_constructs_final_bindings_once(compact_dna, tmp_path):
+    profile = RigProfile(asset=str(compact_dna), pose_bones=STATE_BONES, head_targets=(0,))
+    installed = []
+    install = engine.install
+
+    def record(instance):
+        installed.append(instance)
+        return install(instance)
+
+    try:
+        with patch.object(engine, "install", record):
+            instance = RigFactory._import(profile, tmp_path)
+            assert installed == [instance]
+        assert engine.active(instance) and not engine.binding_issues(instance)
+        assert len(instance.head_rig.pose.bones) < instance.head_dna_reader.getJointCount() // 2
+        assert len(instance.head_mesh.data.shape_keys.key_blocks) == 2
+        # The final bindings must include the key created while installation
+        # was deferred, not just the skeleton that existed at import time.
+        assert sum(len(plan[1]) for plan in instance.component("head").shape_key_apply_plan) == 1
+        assert engine.preview_shape(instance, 0, 0.6)
+        bpy.context.view_layer.update()
+        keys = instance.head_mesh.data.shape_keys.evaluated_get(bpy.context.view_layer.depsgraph)
+        assert keys.key_blocks[1].value == pytest.approx(0.6)
+    finally:
+        reset_scene()
 
 
 @pytest.mark.parametrize(

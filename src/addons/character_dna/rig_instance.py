@@ -568,11 +568,14 @@ class RigInstance(bpy.types.PropertyGroup):
 
         # get the head rbf driven bone names
         reader = self.head_dna_reader
+        joints = set()
         for solver_index in range(reader.getRBFSolverCount()):
             for pose_index in reader.getRBFSolverPoseIndices(solver_index):
                 for attr_index in reader.getRBFPoseJointOutputIndices(pose_index):
                     joint_index = attr_index // ATTR_COUNT_PER_EULER_JOINT
-                    driven_bone_names.append(reader.getJointName(joint_index))
+                    if joint_index not in joints:
+                        joints.add(joint_index)
+                        driven_bone_names.append(reader.getJointName(joint_index))
 
         # save the driven bone names so we don't have to query them again
         self.data[self.cache_key("head", "driven_bone_names")] = list(set(driven_bone_names))
@@ -760,11 +763,14 @@ class RigInstance(bpy.types.PropertyGroup):
 
         # get the body rbf driven bone names
         reader = self.body_dna_reader
+        joints = set()
         for solver_index in range(reader.getRBFSolverCount()):
             for pose_index in reader.getRBFSolverPoseIndices(solver_index):
                 for attr_index in reader.getRBFPoseJointOutputIndices(pose_index):
                     joint_index = attr_index // ATTR_COUNT_PER_EULER_JOINT
-                    driven_bone_names.append(reader.getJointName(joint_index))
+                    if joint_index not in joints:
+                        joints.add(joint_index)
+                        driven_bone_names.append(reader.getJointName(joint_index))
 
         # save the driven bone names so we don't have to query them again
         self.data[self.cache_key("body", "driven_bone_names")] = list(set(driven_bone_names))

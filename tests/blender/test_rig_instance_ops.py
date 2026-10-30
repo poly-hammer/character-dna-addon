@@ -7,6 +7,19 @@ from typing import Any
 import bpy
 import pytest
 
+from fixtures.compact_dna import STATE_BONES
+from fixtures.rigs import RigProfile
+
+
+@pytest.fixture
+def load_head_only_dna(rig_factory, tmp_path, compact_dna):
+    """Duplicate real native ownership and meshes without dense geometry."""
+    profile = RigProfile(
+        components=("head",), asset=str(compact_dna), pose_bones=STATE_BONES, face_board=True, materials=True
+    )
+    with rig_factory.lease(profile, tmp_path):
+        yield
+
 
 @pytest.mark.parametrize(
     ("metahuman_name",),
@@ -372,53 +385,61 @@ def test_duplicate_preserves_unrelated_native_records_and_appended_source(  # no
         rebuild_names.append(instance.name)
         original_rebuild(instance)
 
-    monkeypatch.setattr(controller, "rebuild", rebuild)
-    monkeypatch.setattr(controller, "reconcile", lambda: pytest.fail("Duplicate must not reconcile other rigs"))
-    monkeypatch.setattr(engine, "invalidate", lambda: pytest.fail("Duplicate must not invalidate other records"))
-    window_properties = utilities.get_addon_window_manager_properties(bpy.context)
-    previous_evaluation = window_properties.evaluate_dependency_graph
-    window_properties.evaluate_dependency_graph = False
-    try:
-        assert duplicate("UnrelatedCopy") == {"FINISHED"}
-        assert rebuild_names == [source_name, "UnrelatedCopy"]
-        assert not window_properties.evaluate_dependency_graph
-        instances = properties.rig_instance_list
-        assert engine.active(instances[source_name])
-        assert engine.active(instances["UnrelatedCopy"])
-        unrelated_pointers = {carrier.as_pointer() for carrier in engine.carriers(instances["UnrelatedCopy"])}
-        unrelated_records = {pointer: engine._records[pointer] for pointer in unrelated_pointers}
-        with controller.preserve_bindings():
-            older = instances.add()
-            older["name"] = "OlderWithoutChannels"
-            instances.move(len(instances) - 1, 0)
-        properties.rig_instance_list_active_index = instances.find(source_name)
-        rebuild_names.clear()
+    # Restore the operation guards before the owned rig fixture releases native state.
+    with monkeypatch.context() as operation_patches:
+        operation_patches.setattr(controller, "rebuild", rebuild)
+        operation_patches.setattr(
+            controller, "reconcile", lambda: pytest.fail("Duplicate must not reconcile other rigs")
+        )
+        operation_patches.setattr(
+            engine, "invalidate", lambda: pytest.fail("Duplicate must not invalidate other records")
+        )
+        window_properties = utilities.get_addon_window_manager_properties(bpy.context)
+        previous_evaluation = window_properties.evaluate_dependency_graph
+        window_properties.evaluate_dependency_graph = False
+        try:
+            assert duplicate("UnrelatedCopy") == {"FINISHED"}
+            assert rebuild_names == [source_name, "UnrelatedCopy"]
+            assert not window_properties.evaluate_dependency_graph
+            instances = properties.rig_instance_list
+            assert engine.active(instances[source_name])
+            assert engine.active(instances["UnrelatedCopy"])
+            unrelated_pointers = {carrier.as_pointer() for carrier in engine.carriers(instances["UnrelatedCopy"])}
+            unrelated_records = {pointer: engine._records[pointer] for pointer in unrelated_pointers}
+            with controller.preserve_bindings():
+                older = instances.add()
+                older["name"] = "OlderWithoutChannels"
+                instances.move(len(instances) - 1, 0)
+            properties.rig_instance_list_active_index = instances.find(source_name)
+            rebuild_names.clear()
 
-        assert duplicate("TargetedCopy") == {"FINISHED"}
+            assert duplicate("TargetedCopy") == {"FINISHED"}
 
-        assert {carrier.as_pointer() for carrier in engine.carriers(instances["UnrelatedCopy"])} == unrelated_pointers
-        assert all(engine._records[pointer] is record for pointer, record in unrelated_records.items())
-        assert rebuild_names == [source_name, "TargetedCopy"]
-        assert not engine.carriers(instances["OlderWithoutChannels"])
-        assert not window_properties.evaluate_dependency_graph
-        assert engine.active(instances[source_name])
-        assert engine.active(instances["TargetedCopy"])
-        assert engine.instance_id(instances[source_name]) != engine.instance_id(instances["TargetedCopy"])
+            assert {
+                carrier.as_pointer() for carrier in engine.carriers(instances["UnrelatedCopy"])
+            } == unrelated_pointers
+            assert all(engine._records[pointer] is record for pointer, record in unrelated_records.items())
+            assert rebuild_names == [source_name, "TargetedCopy"]
+            assert not engine.carriers(instances["OlderWithoutChannels"])
+            assert not window_properties.evaluate_dependency_graph
+            assert engine.active(instances[source_name])
+            assert engine.active(instances["TargetedCopy"])
+            assert engine.instance_id(instances[source_name]) != engine.instance_id(instances["TargetedCopy"])
 
-        for name, value in ((source_name, 0.8), ("TargetedCopy", 0.2)):
-            instance = instances[name]
-            instance.face_board.pose.bones["CTRL_C_jaw"].location.y = value
-            instance.face_board.update_tag()
-        bpy.context.view_layer.update()
-        for name, value in ((source_name, 0.8), ("TargetedCopy", 0.2)):
-            instance = instances[name]
-            reader = instance.head_dna_reader
-            index = next(
-                index
-                for index in range(reader.getRawControlCount())
-                if reader.getRawControlName(index) == "CTRL_expressions.jawOpen"
-            )
-            native_value = engine.ui_raw_control_value(instance, index, bpy.context.view_layer.depsgraph)
-            assert native_value == pytest.approx(value)
-    finally:
-        window_properties.evaluate_dependency_graph = previous_evaluation
+            for name, value in ((source_name, 0.8), ("TargetedCopy", 0.2)):
+                instance = instances[name]
+                instance.face_board.pose.bones["CTRL_C_jaw"].location.y = value
+                instance.face_board.update_tag()
+            bpy.context.view_layer.update()
+            for name, value in ((source_name, 0.8), ("TargetedCopy", 0.2)):
+                instance = instances[name]
+                reader = instance.head_dna_reader
+                index = next(
+                    index
+                    for index in range(reader.getRawControlCount())
+                    if reader.getRawControlName(index) == "CTRL_expressions.jawOpen"
+                )
+                native_value = engine.ui_raw_control_value(instance, index, bpy.context.view_layer.depsgraph)
+                assert native_value == pytest.approx(value)
+        finally:
+            window_properties.evaluate_dependency_graph = previous_evaluation

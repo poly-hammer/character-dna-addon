@@ -157,7 +157,7 @@ def remove_shape_targets(carrier: Any) -> set[int]:
 
 def mute_targets(carrier: Any, muted: bool) -> None:
     """Release output channels immediately without deleting their portable bindings."""
-    owners, changed = {}, {}
+    owners = {}
     for item in carrier.get("targets", []):
         owner, path = resolve_output_target(carrier, item)
         if owner is None or owner.animation_data is None:
@@ -168,9 +168,7 @@ def mute_targets(carrier: Any, muted: bool) -> None:
         curve = owners[identity].get((path, max(0, item["index"])))
         if curve and owned_curve(curve, carrier) and curve.mute != muted:
             curve.mute = muted
-            changed[identity] = owner
-    for owner in changed.values():
-        owner.update_tag()
+            owner.update_tag()
 
 
 def remove_targets(carrier: Any) -> None:

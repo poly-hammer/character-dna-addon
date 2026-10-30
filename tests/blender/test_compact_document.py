@@ -4,13 +4,18 @@ import bpy
 import numpy as np
 import pytest
 
-from test_merge_split import character as character_fixture
-
 from character_dna.dna_io import document, merged_graph, partitions
 from constants import TEST_DNA_FOLDER
+from fixtures.compact_dna import STATE_BONES
+from fixtures.rigs import RigProfile
 
 
-character = character_fixture
+@pytest.fixture
+def character(rig_factory, tmp_path, request, compact_dna, compact_two_target_asset):
+    assert request.param == "all_lods"
+    profile = RigProfile(asset=str(compact_two_target_asset), pose_bones=STATE_BONES, lods=tuple(range(8)))
+    with rig_factory.lease(profile, tmp_path) as instance:
+        yield instance
 
 
 def test_compact_projection(tmp_path):
@@ -21,8 +26,8 @@ def test_compact_projection(tmp_path):
     projected = partitions.project(native, info, records)
     from test_native_merged_graph import first_difference
 
-    for kind in graphs:
-        assert first_difference(projected[kind], graphs[kind]) is None
+    for kind, graph in graphs.items():
+        assert first_difference(projected[kind], graph) is None
     output = tmp_path / "Compact.dna"
     document.merge_files(paths, output, "Compact")
     assert output.stat().st_size < sum(path.stat().st_size for path in paths.values()) * 1.25

@@ -17,7 +17,8 @@
       "checks": [
         "test_rig_leases_restore_pristine_state_and_own_paths",
         "test_failed_edit_does_not_leave_suspended_runtime_or_editor_cache",
-        "test_partition_cleanup_preserves_preexisting_working_directories"
+        "test_partition_cleanup_preserves_preexisting_working_directories",
+        "test_narrow_profile_constructs_final_bindings_once"
       ]
     },
     {
@@ -200,10 +201,34 @@
     {
       "case": "native_head runtime fixture",
       "before": "Every head runtime case loaded full mesh data and materials.",
-      "after": "All original native joints and face-board inputs remain. Meshes are loaded only for native_shape consumers; unused materials are omitted.",
+      "after": "Full matrix and shape-deformation cases retain every original scene joint. Explicit state-only cases keep observed outputs, native quaternion inputs and ancestors. Meshes are loaded only for native_shape consumers; unused materials are omitted. Native input/output arrays remain complete in every case.",
       "retained_integration": [
         "test_import_uses_runtime_without_opt_in (both original fresh imports)",
         "Original full-mesh native_shape matrix and deformation assertions"
+      ]
+    },
+    {
+      "case": "Animation, duplicate ownership, component routing and scoped-key transactions",
+      "before": "Dense geometry and unobserved output bones were repeatedly restored for action routing, ownership, material-node action creation, coefficient and untouched-key checks.",
+      "after": "Animation and body-publication fixtures retain the full native skeleton with compact geometry. Duplicate ownership and UI-only runtime cases keep observed outputs and input ancestors. A two-channel compact asset supports independent-key commits at all eight LODs; complete native arrays are compared with the original SDK at every LOD. Real FBX import, baking, render callbacks, reference modes, commit/split and byte-preservation assertions remain.",
+      "retained_integration": [
+        "Full Maya/Unreal pose and deformation matrices",
+        "test_combined_neckline_shape_is_portable_and_backup_restores_document",
+        "test_target_commit_uses_native_arrays_and_survives_cold_reopen",
+        "test_compact_projection",
+        "Full source-reference transport matrix",
+        "All original exporter and calibrator geometry assertions"
+      ]
+    },
+    {
+      "case": "Narrow-profile native driver construction",
+      "before": "The profile importer installed full native output bindings and immediately deleted them while trimming unobserved bones, then installed the smaller plan.",
+      "after": "An autospecced native-install boundary is deferred only during narrow-profile preparation. Real readers, mesh and skeleton import, final native installation, shape preview and ownership validation remain. The canary requires exactly one final installation including keys created during preparation. Full importer profiles keep the original path.",
+      "retained_integration": [
+        "test_narrow_profile_constructs_final_bindings_once",
+        "test_compact_leases_preserve_complete_native_data_and_private_scene_state",
+        "test_merged_leases_own_document_and_partition_paths",
+        "test_import_uses_runtime_without_opt_in"
       ]
     }
   ],

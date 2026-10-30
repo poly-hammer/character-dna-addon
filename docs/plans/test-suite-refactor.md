@@ -24,6 +24,27 @@ scene lookups and driver scans, reference-data construction, and unnecessary
 geometry in transaction tests. This shared-cache diagnostic does not replace
 the repeated cold-cache matrix qualification.
 
+The fourth frozen candidate (`bb9b05a`, editors `05963c4`) completed in
+**1,960.00 seconds** (32m 40s), **32.91%** of the same local baseline. It retained
+all 4,101 original cases and collected 4,186: 4,120 passed, the same 42 Unreal
+numerical failures remained, and 24 existing cases skipped. There were no new
+failures, skips, missing cases or unfinished cases. Coverage had one missing
+line and six missing arcs, with zero unmapped lines/arcs. The fifth iteration
+adds direct cache-eviction, deferred-channel and body-import checks and retains
+original mutation-notification ordering; its complete acceptance is pending.
+The fourth iteration's focused validation passed 73 cases on Blender 4.5 with
+three existing version skips; repaired native/archive and adapter checks passed
+34 cases on Blender 5.2. Both Python versions passed all 2,286 pure contracts.
+Evidence: `comparison-v4.json` and `matched-windows52-candidate-v4-r1/runs.json`.
+
+The first completed cold CI pair on macOS 4.5 measured the earlier published
+candidate (`0695efe`) at **3,329.01 seconds** versus **5,985.79 seconds** for the
+original suite (55.62%). All 4,101 original cases remained, with zero new
+failures or skips and 11 fixed cases. Its older coverage gaps and runtime failed
+the acceptance gate; this is baseline/platform evidence, not qualification of
+the later local revisions. Evidence is retained under
+`reports/test-suite-refactor/ci-0695-macos45-r2/`.
+
 ## Baseline and success criteria
 
 The audit targets parent revision `f5f204b34673b0717404741b964f8de885ba9990` on `rbf-shape-keys`. [GitHub Actions run 40935964822](https://github.com/poly-hammer/character-dna-addon/actions/runs/40935964822) collected **4,101 cases**. All five test jobs reached the 90-minute execution limit. That is a censored baseline: elapsed time before cancellation does not tell us the complete suite duration, and the remaining test cases need not have average cost.

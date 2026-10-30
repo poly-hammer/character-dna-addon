@@ -82,7 +82,7 @@ def pytest_configure():
 
 
 from fixtures.addon import addon, disable_auto_save  # pyright: ignore[reportUnusedImport] # noqa: E402, F401
-from fixtures.compact_dna import compact_dna, compact_dna_asset  # noqa: E402, F401
+from fixtures.compact_dna import compact_dna, compact_dna_asset, compact_two_target_asset  # noqa: E402, F401
 from fixtures.dna_data import (  # noqa: E402, F401
     calibrated_head_and_body_dna_json_data,  #  pyright: ignore[reportUnusedImport]
     calibrated_head_dna_json_data,  #  pyright: ignore[reportUnusedImport]

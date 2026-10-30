@@ -3,6 +3,7 @@
 import json
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import bpy
 import pytest
@@ -15,12 +16,105 @@ from character_dna.utilities import constrain_face_board_to_head, get_topology_t
 from character_dna.utilities.action import flush_texture_mask_keyframes_to_action, get_channel_bag
 
 
+@pytest.mark.parametrize("kind", ["head", "body"])
+def test_driven_names_match_native_outputs_with_one_name_lookup_per_joint(kind):
+    from character_dna.dna_io import get_dna_reader, release_dna_handle
+    from character_dna.rig_instance import ATTR_COUNT_PER_EULER_JOINT, RigInstance
+    from constants import TEST_DNA_FOLDER
+
+    reader = get_dna_reader(TEST_DNA_FOLDER / "ada" / f"{kind}.dna")
+    try:
+        expected = {
+            reader.getJointName(attribute // ATTR_COUNT_PER_EULER_JOINT)
+            for solver in range(reader.getRBFSolverCount())
+            for pose in reader.getRBFSolverPoseIndices(solver)
+            for attribute in reader.getRBFPoseJointOutputIndices(pose)
+        }
+        observed = Mock(spec=type(reader), wraps=reader)
+        instance = SimpleNamespace(
+            data={}, cache_key=lambda component, name: (component, name), **{f"{kind}_dna_reader": observed}
+        )
+        query = getattr(RigInstance, f"{kind}_driven_bone_names").fget
+        assert set(query(instance)) == expected
+        assert observed.getJointName.call_count <= reader.getJointCount()
+        calls = observed.getJointName.call_count
+        assert set(query(instance)) == expected
+        assert observed.getJointName.call_count == calls
+        instance.data.clear()
+        assert set(query(instance)) == expected
+        assert observed.getJointName.call_count == 2 * calls
+    finally:
+        release_dna_handle(reader)
+
+
 def armature(name, bone_name):
     bpy.ops.object.armature_add()
     obj = bpy.context.object
     obj.name = name
     obj.data.bones[0].name = bone_name
     return obj
+
+
+def test_document_view_cache_evicts_oldest_and_retains_one_oversized_document(monkeypatch):
+    from collections import OrderedDict
+
+    from character_dna.dna_io import document
+
+    monkeypatch.setattr(document, "_read_cache", OrderedDict())
+    monkeypatch.setattr(document, "MAX_VIEW_CACHE_BYTES", 5)
+    document._cache_read("first", {"id": "A"}, {"head": b"123"})
+    document._cache_read("second", {"id": "B"}, {"body": b"456"})
+    assert list(document._read_cache) == ["second"]
+    manifest, parts = {"id": "B", "values": [1]}, {"head": b"123456"}
+    document._cache_read("replacement", manifest, parts)
+    manifest["values"].append(2)
+    parts["head"] = b"changed"
+    assert list(document._read_cache) == ["replacement"]
+    assert document._read_cache["replacement"] == ({"id": "B", "values": [1]}, {"head": b"123456"})
+
+
+def test_source_reload_preserves_deferred_channels(empty_character_scene, compact_two_target_asset):
+    from character_dna.dna_io import get_dna_reader, release_dna_handle
+    from character_dna.dna_io.misc import create_shape_key
+    from character_dna.editors.converter import source_views
+
+    objects = []
+    for name in ("BeforeReload", "AfterReload"):
+        mesh = bpy.data.meshes.new(name)
+        mesh.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+        obj = bpy.data.objects.new(name, mesh)
+        empty_character_scene.collection.objects.link(obj)
+        objects.append(obj)
+    old, new = objects
+    reader = get_dna_reader(compact_two_target_asset / "head.dna")
+    try:
+        channel = reader.getBlendShapeChannelName(reader.getBlendShapeChannelIndex(0, 0))
+        key = create_shape_key(0, 0, old, reader, channel, prefix="head_lod0_mesh__", linear_modifier=0.01)
+        expected = [tuple(vertex.co) for vertex in key.data]
+        source_views._restore_keys(old, new, reader, 0)
+        assert list(new.data.shape_keys.key_blocks.keys()) == ["Basis", key.name]
+        assert [tuple(vertex.co) for vertex in new.data.shape_keys.key_blocks[key.name].data] == expected
+        assert reader.getBlendShapeTargetCount(0) == 2
+    finally:
+        release_dna_handle(reader)
+
+
+def test_body_import_ignores_include_body_option(empty_character_scene, compact_dna_asset):
+    from character_dna.utilities import get_active_rig_instance
+
+    source = compact_dna_asset / "body.dna"
+    assert bpy.ops.character_dna.import_dna(
+        filepath=str(source),
+        include_body=True,
+        import_bones=False,
+        import_mesh=False,
+        import_face_board=False,
+        import_shape_keys=False,
+        import_materials=False,
+    ) == {"FINISHED"}
+    instance = get_active_rig_instance()
+    assert source.samefile(bpy.path.abspath(instance.body_dna_file_path))
+    assert instance.head_rig is None and instance.head_dna_reader is None
 
 
 def test_head_only_pose_presets_and_absent_body_are_safe(minimal_character, tmp_path):
