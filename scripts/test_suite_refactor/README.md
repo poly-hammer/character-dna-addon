@@ -90,15 +90,26 @@ timing, JUnit, logs and coverage evidence are retained regardless.
 .venv/Scripts/python.exe scripts/test_suite_refactor/summarize_benchmarks.py reports/test-suite-refactor/complete-cold/runs.json
 ```
 
-The dedicated CI workflow runs three separate matched-pair jobs on each of the five
-existing supported lanes. Each pair is sequential on one runner; repetitions alternate
-which suite runs first. This avoids putting six complete suites into one job timeout.
-`combine_benchmarks.py` requires all fifteen artifacts, consistent source fingerprints
-and versions within each lane, and passing case, coverage and runtime comparisons.
-This expensive qualification runs automatically only for refactor PR #380, or by
-manual dispatch. Later PRs retain the ordinary supported test matrix rather than
-repeatedly executing the original slow suite. A new revision cancels obsolete
-qualification runs and preserves their partial artifacts.
+The dedicated CI workflow is **manual-only**. It defaults to one matched pair on
+Ubuntu 5.2; select another supported platform/version or three repetitions when
+needed. Each pair is sequential on one runner, and repetitions alternate which suite
+runs first. Workflow-wide concurrency and `max-parallel: 1` permit only one benchmark
+job at a time, including at most one Mac job across branches and manual dispatches.
+Normal PRs retain the ordinary supported test matrix and never launch this comparison.
+
+```powershell
+gh workflow run test-suite-refactor-benchmark.yaml --ref rbf-shape-keys -f 'lane=ubuntu-latest / 5.2' -f repetitions=1
+```
+
+A selected-lane run does not establish complete-matrix acceptance. For a deliberately
+scheduled full qualification, collect three pairs on each of the five supported lanes
+at the same frozen revision, dispatching each lane after the previous run finishes.
+Download their artifacts into separate `test-refactor-<os>-<blender>-<repeat>` folders.
+`combine_benchmarks.py` still requires all fifteen artifacts, consistent source
+fingerprints and versions within each lane, and passing case, coverage and runtime
+comparisons. Missing or canceled pairs cannot satisfy it. Manual cancellation retains
+completed and partial evidence; this expensive qualification is no longer automatic
+on refactor pushes because it competes with other repositories for Mac capacity.
 `prepare_ci.py` installs the same bindings before source fingerprinting. It preserves
 the full numerical corpus, subprocess contracts and existing failures. A known baseline
 failure is reported separately from a new regression; no case becomes an xfail or skip.
