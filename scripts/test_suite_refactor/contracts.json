@@ -17,6 +17,7 @@
       "checks": [
         "test_rig_leases_restore_pristine_state_and_own_paths",
         "test_failed_edit_does_not_leave_suspended_runtime_or_editor_cache",
+        "Opt-in lifetime_plugin repeats both lease canaries with private paths, stable Blender ID/handler counts and resident-memory samples",
         "test_partition_cleanup_preserves_preexisting_working_directories",
         "test_narrow_profile_constructs_final_bindings_once"
       ]
@@ -300,6 +301,17 @@
         "Every-bone rest/offset restoration and real undo/redo",
         "All native head shape, spatial, matrix and fresh-import oracles"
       ]
+    },
+    {
+      "case": "Supplemental document revision and publication guards",
+      "before": "The original integration checks retained document bytes and component behavior, but the planned stale-view and duplicate-publication mutations were not explicitly measured.",
+      "after": "An additional small cache contract uses real files and spec-constrained projection collaborators. A separate real SDK round trip verifies the same revision behavior. Native writes and the existing combined Swing/Twist commit count actual authoritative-file publications while preserving all previous byte, weight, geometry, identity and binding assertions.",
+      "retained_integration": [
+        "test_native_document_read_refreshes_after_publication",
+        "test_native_document_write_publishes_once",
+        "test_combined_commit_preserves_head_and_surface",
+        "test_failed_merged_entry_restores_surface_and_removes_snapshots"
+      ]
     }
   ],
   "measured_hot_path_contracts": [
@@ -374,13 +386,21 @@
     }
   ],
   "fault_checks": {
-    "target": "Editor.enter",
+    "target": "Shared editor recovery, component routing, swing/twist evaluation, collection restoration and native document publication",
     "mutations": [
       "omit resume",
       "omit surface rollback",
-      "omit abort cleanup"
+      "omit abort cleanup",
+      "write to the other component",
+      "reverse preview rotation",
+      "use degrees where the preview quaternion requires radians",
+      "omit RBF contribution",
+      "omit shape coefficient publication",
+      "omit collection visibility restoration",
+      "publish a native document twice",
+      "reuse the first document view after its bytes change"
     ],
-    "method": "In-memory AST mutation; no source-file edits",
-    "integration": "Real per-editor failure, binding recovery and merged-surface tests remain enabled."
+    "method": "Passing unmodified controls, then in-memory mutations only during test bodies; original function code is restored before teardown. Record source hashes, invocation counts, exceptions and exact expected detection counts. No production source-file edits.",
+    "integration": "Real per-editor failure and bone-lock recovery, merged-surface geometry rollback, full knee pose/RBF deformation, live shape output, collection restoration and native document commit/read tests accompany the cheap boundary contracts."
   }
 }

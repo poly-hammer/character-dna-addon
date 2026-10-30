@@ -124,6 +124,38 @@ def test_failed_editor_entry_restores_runtime(character, monkeypatch, editor_nam
     assert_faceboard_live(character)
 
 
+def test_failed_merged_entry_restores_surface_and_removes_snapshots(character, monkeypatch):
+    from character_dna.editors.converter import scene_merge
+    from character_dna.editors.rbf_editor.editor import RBFEditor
+
+    proxy = scene_merge.merge(character)
+    objects = (proxy, proxy["dna_merge_head"], proxy["dna_merge_body"])
+    positions = {obj.name: [tuple(vertex.co) for vertex in obj.data.vertices] for obj in objects}
+    meshes = {mesh.as_pointer() for mesh in bpy.data.meshes}
+    editor = RBFEditor.for_instance(character)
+
+    def fail(_context):
+        for obj in objects:
+            assert obj.get("dna_edit_snapshot") is not None
+            obj.data.vertices[0].co.x += 0.25
+        raise RuntimeError("failed after changing merged geometry")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(editor, "_enter", fail)
+        with pytest.raises(RuntimeError, match="failed after changing merged geometry"):
+            editor.enter(bpy.context)
+    for obj in objects:
+        assert [tuple(vertex.co) for vertex in obj.data.vertices] == positions[obj.name]
+        assert obj.get("dna_edit_snapshot") is None
+    assert {mesh.as_pointer() for mesh in bpy.data.meshes} == meshes
+    assert not editor.is_editing and not controller.is_suspended(character)
+    assert engine.active(character) and not engine.binding_issues(character)
+    # A fresh session must work; inspecting cleanup flags alone is insufficient.
+    editor.enter(bpy.context)
+    editor.revert(bpy.context)
+    assert engine.active(character) and not engine.binding_issues(character)
+
+
 @pytest.mark.parametrize("editor_name", ["raw_control_editor", "rbf_editor", "shape_key_editor", "swing_twist_editor"])
 @pytest.mark.parametrize("finish", ["commit", "revert"])
 def test_editor_lifecycle_is_not_legacy(character, monkeypatch, editor_name, finish):

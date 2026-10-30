@@ -28,13 +28,25 @@ The runner alternates order, retains pytest's exit code, enables branch coverage
 
 The comparison uses `migration-map.json` to retain original case identities, including the exhaustive naming matrices moved to the Python layer. It rejects missing cases, incomplete teardown, new skips/failures, mismatched environments, ratios above 25%, and lost or unmapped covered lines/arcs. Unmapped code is a review requirement, never an automatic waiver. Process totals from `runs.json` must also meet the target, including collection, coverage publication and shutdown. Existing failures remain visible and are compared separately from regressions.
 
-`contracts.json` records fixture ownership and each assertion moved across a mock boundary, together with its retained integration coverage. The numerical pose/reference matrices are unchanged. Validate lifecycle fault sensitivity with:
+`contracts.json` records fixture ownership and each assertion moved across a mock boundary, together with its retained integration coverage. The numerical pose/reference matrices are unchanged. Validate fault sensitivity with:
 
 ```powershell
-.venv/Scripts/python.exe scripts/test_suite_refactor/run_mutations.py
+.venv/Scripts/python.exe scripts/test_suite_refactor/run_mutations.py --output reports/test-suite-refactor/mutations-52
+reports/ci45-venv/Scripts/python.exe scripts/test_suite_refactor/run_mutations.py --output reports/test-suite-refactor/mutations-45
 ```
 
-The mutation runner requires the expected test failures for missing resume, rollback and cleanup calls. A mutation that survives fails the runner; these deliberately failing subprocesses are not ordinary suite failures.
+The mutation runner first requires the unmodified control cases to pass. Separate subprocesses then inject missing resume, rollback and abort cleanup; wrong component routing; reversed preview rotation and incorrect angle units; omitted RBF and shape contributions; lost collection visibility; duplicate document publication; and stale document views. Every selected test must finish setup and teardown, execute the mutated production function, and produce the expected detection count. A surviving fault or a harness/setup failure rejects the diagnostic. These deliberately failing subprocesses are not ordinary suite failures. Use repeated `--fault` options to select particular checks.
+
+Faults are injected in memory only during test bodies, including through previously imported aliases. Fixtures are constructed with unmodified production code, which is restored before teardown. Reports retain the executed function's source hash, invocation count and exception. Output directories must be new so earlier evidence is preserved.
+
+For repeated lease ownership and memory observations, select exactly the two existing canaries below. This opt-in diagnostic does not add repetition to normal CI:
+
+```powershell
+$env:RUNNING_CI='1'
+.venv/Scripts/python.exe -m pytest tests/blender/test_rig_fixtures.py::test_rig_leases_restore_pristine_state_and_own_paths tests/blender/test_rig_fixtures.py::test_failed_edit_does_not_leave_suspended_runtime_or_editor_cache -p scripts.test_suite_refactor.lifetime_plugin --lease-repetitions=10 --lease-evidence=reports/test-suite-refactor/lease-lifetime52.json -o addopts='' -o log_cli=false -q
+```
+
+Use the Blender 4.5 interpreter for a separate run and output path. Each repetition acquires new private paths, checks pristine pose/files/visibility or failed-session recovery, and releases native ownership through the existing canary assertions. Blender ID and handler counts must remain stable. The append-only report retains memory samples, warm ranges and trends after two warm-up repetitions. Current resident memory is available on Windows; a peak-only sample on another platform cannot establish released-memory stability. Review the samples for sustained growth rather than treating allocator caching or peak RSS as a leak proof.
 
 ## Historical planning pilots
 

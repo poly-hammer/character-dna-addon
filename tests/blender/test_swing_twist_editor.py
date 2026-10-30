@@ -5,6 +5,7 @@ import shutil
 
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import create_autospec
 
 import bpy
 import numpy as np
@@ -293,7 +294,11 @@ def test_combined_commit_preserves_head_and_surface(character, monkeypatch, fail
         assert editor.is_editing
         assert path.read_bytes() == before
         assert character.swing_twist_editor.setups[8].outputs[1].weight == pytest.approx(0.2)
-    editor.commit(bpy.context)
+    publish = create_autospec(document._atomic_write, side_effect=document._atomic_write)
+    with monkeypatch.context() as patch:
+        patch.setattr(document, "_atomic_write", publish)
+        editor.commit(bpy.context)
+    assert sum(Path(call.args[0]).resolve() == path.resolve() for call in publish.call_args_list) == 1
     assert document.read_document(path)[1]["head"] == original_head
     assert core.read_setups(character.edit_target.dna_reader)[8].weights == pytest.approx((0.5, 0.2))
     assert identity == (proxy.as_pointer(), proxy.data.as_pointer(), proxy.data.shape_keys.as_pointer())
