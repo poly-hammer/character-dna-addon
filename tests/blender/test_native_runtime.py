@@ -290,8 +290,24 @@ def test_native_raw_preview_returns_to_live_inputs(native_head, release):
         bpy.context.view_layer.update()
         assert item.value == pytest.approx(value)
     if release == "frame":
+        record = engine._component_record(native_head, "head")
+        assert record is not None
+        preview = record["preview"]
+        assert preview is not None
         bpy.context.scene.frame_set(bpy.context.scene.frame_current + 1)
         assert item.value == pytest.approx(0.0)
+        graph = bpy.context.evaluated_depsgraph_get()
+        owner = record["carrier"].evaluated_get(graph)
+        outputs = array("d", owner["outputs"])
+        assert preview["frame"] != graph.scene_eval.frame_current_final
+        assert preview["outputs"] != outputs
+        # Replay the real previous-frame payload through a direct native solve.
+        # Its rejection must not depend on coverage tracing driver callbacks.
+        record["preview"] = preview
+        assert engine.solve(owner, graph) > 0
+        assert record["preview"] is None
+        assert array("d", owner["outputs"]) == outputs
+        assert "preview_controls" not in record["last_context"]
     else:
         native_head.face_board.pose.bones["CTRL_C_jaw"].location.y = 0.2
         native_head.face_board.update_tag()

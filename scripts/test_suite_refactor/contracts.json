@@ -354,10 +354,11 @@
     },
     {
       "case": "Native evaluation flag coverage",
-      "change": "Call the real native publication path directly as well as through Blender callbacks, so coverage of disabled branches does not depend on driver thread scheduling.",
+      "change": "Call the real native publication path directly as well as through Blender callbacks, so disabled outputs and stale-frame rejection do not depend on driver thread scheduling for coverage.",
       "retained_integration": [
         "A changed real SDK preview preserves every disabled output range",
         "Disabled auto evaluation preserves the published graph buffer and solve count",
+        "Replaying the real prior-frame preview cannot overwrite the current native pose",
         "Original full-pose, shape slider and playback release checks remain unchanged"
       ]
     },
