@@ -1,5 +1,10 @@
 """Acceptance must reject a fast run that silently loses existing checks."""
 
+import json
+import os
+import subprocess
+import venv
+
 import pytest
 
 from coverage import CoverageData
@@ -10,11 +15,24 @@ from scripts.test_suite_refactor.compare_runs import (
     compare_coverage,
     covered_path,
 )
-from scripts.test_suite_refactor.run_benchmarks import cleanup_temporary
+from scripts.test_suite_refactor.run_benchmarks import cleanup_temporary, python_executable
 
 
 def report(nodes):
     return {"items": list(nodes), "outcomes": nodes}
+
+
+def test_benchmark_interpreter_preserves_virtual_environment(tmp_path):
+    environment = tmp_path / "isolated-python"
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(environment)
+    executable = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    completed = subprocess.run(  # noqa: S603 - newly created local Python, fixed probe, no shell
+        [python_executable(str(executable)), "-c", "import json, sys; print(json.dumps(sys.prefix))"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert environment.samefile(json.loads(completed.stdout))
 
 
 def test_benchmark_cleanup_refuses_unowned_directory(tmp_path):

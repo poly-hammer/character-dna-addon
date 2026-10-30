@@ -15,6 +15,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def python_executable(value: str) -> str | None:
+    """Keep the virtual environment entry point, even when it is a symlink."""
+    executable = Path(value)
+    return str(executable.absolute()) if executable.is_file() else shutil.which(value)
+
+
 def source_fingerprint(root: Path) -> str:
     digest = hashlib.sha256()
     for folder in (root / "src/addons/character_dna", root / "tests"):
@@ -75,8 +81,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.repeat < 1 or args.repeat_start < 1:
         parser.error("--repeat and --repeat-start must be positive")
-    executable = Path(args.python)
-    args.python = str(executable.resolve()) if executable.is_file() else shutil.which(args.python)
+    args.python = python_executable(args.python)
     if args.python is None:
         parser.error("Python executable was not found")
     output = ROOT / "reports/test-suite-refactor" / args.label
