@@ -19,8 +19,13 @@ def get_bone_differences(
         target_bone_locations = {}
 
     source_rig = bpy.data.objects[source_rig_name]
-    # switch to pose mode this ensures the bone locations are updated when we access them
-    switch_to_pose_mode(source_rig)
+    # Keep the established pose context between numerical samples. Leaving and
+    # re-entering it evaluates the same rig twice; a flush is sufficient when
+    # the source is already the active pose object.
+    if bpy.context.mode == "POSE" and bpy.context.object == source_rig:
+        bpy.context.view_layer.update()
+    else:
+        switch_to_pose_mode(source_rig)
 
     bone_names = source_rig.pose.bones.keys()  # type: ignore
     if isolated_bones:

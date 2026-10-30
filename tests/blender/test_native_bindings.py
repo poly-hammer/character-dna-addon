@@ -129,6 +129,23 @@ def test_mute_rechecks_current_ownership_and_array_channels(native_objects, chan
         assert not replacement.mute
 
 
+def test_unchanged_mute_does_not_revalidate_or_cache_ownership(native_objects, monkeypatch):
+    from character_dna.runtime import bindings
+
+    carrier, target = native_objects.carrier, native_objects.target
+    install_targets(carrier, [Target(target, "location", 0, 0)])
+    curve = target.animation_data.drivers.find("location", index=0)
+    with monkeypatch.context() as patches:
+        patches.setattr(bindings, "owned_curve", lambda *_args: pytest.fail("No mute write needs validation"))
+        bindings.mute_targets(carrier, False)
+        assert not curve.mute
+    # A later requested change still checks the current expression, even when
+    # the preceding no-op observed this exact curve.
+    curve.driver.expression = "42"
+    bindings.mute_targets(carrier, True)
+    assert not curve.mute
+
+
 def test_native_rejects_keyframed_output(native_objects):
     """Output drivers must not hide an existing user's keyed animation."""
     carrier, target = native_objects.carrier, native_objects.target

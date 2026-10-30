@@ -281,6 +281,33 @@
       ]
     }
   ],
+  "measured_hot_path_contracts": [
+    {
+      "case": "Native mute state",
+      "change": "Skip ownership inspection only when the curve already has the requested mute value. Every changed write still rechecks current ownership.",
+      "retained_integration": [
+        "Removed/replaced owner and expression checks",
+        "Array-channel ownership checks",
+        "No-op followed by user replacement"
+      ]
+    },
+    {
+      "case": "UV fallback candidates",
+      "change": "Use the existing padded triangle grid to prune candidates, then retain the original overlap, barycentric, distance and sorted-index tie rules. Broad or invalid boxes use the original dense scan.",
+      "retained_integration": [
+        "Independent full-scan oracle over boundary, overlap, tie, empty, extreme and invalid queries",
+        "All original head/body all-LOD calibration and geometry checks"
+      ]
+    },
+    {
+      "case": "Pose comparison context",
+      "change": "Update the dependency graph directly when the source rig is already active in Pose Mode. Otherwise use the existing mode-switch helper.",
+      "retained_integration": [
+        "Every original Unreal runtime/editor pose",
+        "Every original Maya matrix and numerical tolerance"
+      ]
+    }
+  ],
   "fault_checks": {
     "target": "Editor.enter",
     "mutations": [

@@ -166,7 +166,7 @@ def mute_targets(carrier: Any, muted: bool) -> None:
         if identity not in owners:
             owners[identity] = {(curve.data_path, curve.array_index): curve for curve in owner.animation_data.drivers}
         curve = owners[identity].get((path, max(0, item["index"])))
-        if curve and owned_curve(curve, carrier) and curve.mute != muted:
+        if curve and curve.mute != muted and owned_curve(curve, carrier):
             curve.mute = muted
             owner.update_tag()
 

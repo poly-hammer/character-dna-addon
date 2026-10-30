@@ -343,7 +343,7 @@
       ],
       "after": [
         "__init__.py",
-        "\"version\": (0, 15, 7),"
+        "\"version\": (0, 15, 8),"
       ],
       "reason": "Required patch-version metadata update; no conditional behavior."
     },
@@ -602,6 +602,90 @@
         "for group in groups:"
       ],
       "reason": "The batch reverse index visits exactly the original matching groups in original order; direct native reads retain the full scan and every pose is compared."
+    },
+    {
+      "function": "mute_targets",
+      "before": [
+        "runtime/bindings.py",
+        "if curve and owned_curve(curve, carrier) and curve.mute != muted:"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "if curve and curve.mute != muted and owned_curve(curve, carrier):"
+      ],
+      "reason": "Skip ownership inspection only when no mute write is needed. All changed writes still validate current ownership; removal, replacement and array-channel contracts remain."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "overlap = np.zeros(self.tri_count, dtype=bool)"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "overlap = np.zeros(candidate.size, dtype=bool)"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "(self.bb_max[:, 0] >= fmin[0])"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "(candidate_max[:, 0] >= fmin[0])"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "& (fmax[0] >= self.bb_min[:, 0])"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "& (fmax[0] >= candidate_min[:, 0])"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "& (self.bb_max[:, 1] >= fmin[1])"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "& (candidate_max[:, 1] >= fmin[1])"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "& (fmax[1] >= self.bb_min[:, 1])"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "& (fmax[1] >= candidate_min[:, 1])"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "candidate = np.nonzero(overlap)[0]"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "candidate = candidate[overlap]"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
     }
   ]
 }
