@@ -26,6 +26,15 @@ def dependencies_are_valid() -> bool:
     return _dependencies_are_valid()
 
 
+def draw_component_selector(layout: bpy.types.UILayout, instance: "RigInstance") -> None:
+    """Draw the shared component tabs for editors and output in either edition."""
+    from ..rig_component import component_selection_locked
+
+    row = layout.row(align=True)
+    row.enabled = not component_selection_locked(instance)
+    row.prop(instance, "editor_component", expand=True)
+
+
 def valid_rig_instance_exists(_: "Context", ignore_face_board: bool = False) -> str:  # noqa: PLR0911
     instance = get_active_rig_instance()
     if instance:
@@ -507,10 +516,13 @@ class CHARACTER_DNA_PT_rig_instance_head_sub_panel(bpy.types.Panel):
             box.enabled = not is_reference_readonly(instance)
             row = box.row()
             row.alert = False
-            bad_path = instance.head_dna_file_path and not Path(bpy.path.abspath(instance.head_dna_file_path)).exists()
-            if not instance.head_dna_file_path or bad_path:
+            combined = instance.get("combined_dna_path")
+            dna_path = combined or instance.head_dna_file_path
+            bad_path = dna_path and not Path(bpy.path.abspath(dna_path)).exists()
+            if not dna_path or bad_path:
                 row.alert = True
-            row.prop(instance, "head_dna_file_path", icon="RNA")
+            row.enabled = not combined
+            row.prop(instance, "combined_dna_file_path" if combined else "head_dna_file_path", icon="RNA")
             if bad_path:
                 row = box.row()
                 row.alert = True
@@ -566,10 +578,13 @@ class CHARACTER_DNA_PT_rig_instance_body_sub_panel(bpy.types.Panel):
             box.enabled = not is_reference_readonly(instance)
             row = box.row()
             row.alert = False
-            bad_path = instance.body_dna_file_path and not Path(bpy.path.abspath(instance.body_dna_file_path)).exists()
-            if not instance.body_dna_file_path or bad_path:
+            combined = instance.get("combined_dna_path")
+            dna_path = combined or instance.body_dna_file_path
+            bad_path = dna_path and not Path(bpy.path.abspath(dna_path)).exists()
+            if not dna_path or bad_path:
                 row.alert = True
-            row.prop(instance, "body_dna_file_path", icon="RNA")
+            row.enabled = not combined
+            row.prop(instance, "combined_dna_file_path" if combined else "body_dna_file_path", icon="RNA")
             if bad_path:
                 row = box.row()
                 row.alert = True
@@ -600,10 +615,11 @@ class CHARACTER_DNA_PT_rig_instance_footer_sub_panel(RigInstanceDependentPanel):
         if not instance:
             return
 
-        row = self.layout.row()
-        row.enabled = not is_reference_readonly(instance)
-        row.prop(instance, "head_to_body_constraint_influence", text="Head to Body Constraint Influence")
-        self.layout.separator()
+        if not instance.components_merged:
+            row = self.layout.row()
+            row.enabled = not is_reference_readonly(instance)
+            row.prop(instance, "head_to_body_constraint_influence", text="Head to Body Constraint Influence")
+            self.layout.separator()
         row = self.layout.row()
         row.scale_y = 1.5
         row.operator(f"{ToolInfo.NAME}.force_evaluate", icon="FILE_REFRESH")
@@ -630,19 +646,14 @@ class CHARACTER_DNA_PT_output_panel(RigInstanceDependentPanel):
             active_index = properties.rig_instance_list_active_index
             instance = properties.rig_instance_list[active_index]
             self.layout.enabled = not is_reference_readonly(instance)
-            grid = self.layout.grid_flow(row_major=True, columns=2, even_columns=True, even_rows=True, align=True)
-            col = grid.column()
-            col.label(text="Component:")
-            row = col.row()
-            row.prop(instance.output, "component", text="")
-            col = grid.column()
-            col.label(text="Method:")
-            row = col.row()
+            draw_component_selector(self.layout, instance)
+            self.layout.label(text="Method:")
+            row = self.layout.row()
             row.prop(instance.output, "method", text="")
 
             row = self.layout.row()
             column = None
-            if instance.output.component == "head":
+            if instance.editor_component == "head":
                 column = draw_ui_list(
                     row,
                     context,  # type: ignore[arg-type]
@@ -653,7 +664,7 @@ class CHARACTER_DNA_PT_output_panel(RigInstanceDependentPanel):
                     move_operators=False,  # type: ignore[arg-type]
                     insertion_operators=False,
                 )
-            elif instance.output.component == "body":
+            elif instance.editor_component == "body":
                 column = draw_ui_list(
                     row,
                     context,  # type: ignore[arg-type]

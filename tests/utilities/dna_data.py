@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from character_dna.bindings import dna
-from character_dna.dna_io import get_dna_reader, get_dna_writer
+from character_dna.dna_io import get_dna_reader, get_dna_writer, release_dna_handle
 from constants import CI_BONE_SAMPLE_SIZE, CI_REQUIRED_BONE_NAMES, RUNNING_CI
 
 
@@ -34,12 +34,17 @@ def _ci_only(names: list[str], required: Sequence[str]) -> list[str]:
 
 def get_dna_json_data(dna_file_path: Path, json_file_path: Path, data_layer: str = "All") -> dict:
     reader = get_dna_reader(dna_file_path, file_format="binary", data_layer=data_layer)
-    writer = get_dna_writer(json_file_path, file_format="json")
-    writer.setFrom(reader, getattr(dna, f"DataLayer_{data_layer}"), dna.UnknownLayerPolicy_Preserve, None)
-    writer.write()
-    if not dna.Status.isOk():
-        status = dna.Status.get()
-        raise RuntimeError(f"Error saving DNA: {status.message}")
+    writer = None
+    try:
+        writer = get_dna_writer(json_file_path, file_format="json")
+        writer.setFrom(reader, getattr(dna, f"DataLayer_{data_layer}"), dna.UnknownLayerPolicy_Preserve, None)
+        writer.write()
+        if not dna.Status.isOk():
+            status = dna.Status.get()
+            raise RuntimeError(f"Error saving DNA: {status.message}")
+    finally:
+        release_dna_handle(writer)
+        release_dna_handle(reader)
 
     with json_file_path.open() as file:
         text = file.read()
@@ -51,17 +56,26 @@ def get_dna_json_data(dna_file_path: Path, json_file_path: Path, data_layer: str
 
 def get_bone_names(dna_file_path: Path) -> list[str]:
     reader = get_dna_reader(file_path=dna_file_path, file_format="binary", data_layer="Definition")
-    return [reader.getJointName(index) for index in range(reader.getJointCount())]
+    try:
+        return [reader.getJointName(index) for index in range(reader.getJointCount())]
+    finally:
+        release_dna_handle(reader)
 
 
 def get_mesh_names(dna_file_path: Path) -> list[str]:
     reader = get_dna_reader(file_path=dna_file_path, file_format="binary", data_layer="Definition")
-    return [reader.getMeshName(index) for index in range(reader.getMeshCount())]
+    try:
+        return [reader.getMeshName(index) for index in range(reader.getMeshCount())]
+    finally:
+        release_dna_handle(reader)
 
 
 def get_mesh_vertex_count(dna_file_path: Path) -> list[int]:
     reader = get_dna_reader(file_path=dna_file_path, file_format="binary", data_layer="Geometry")
-    return [reader.getVertexPositionCount(index) for index in range(reader.getMeshCount())]
+    try:
+        return [reader.getVertexPositionCount(index) for index in range(reader.getMeshCount())]
+    finally:
+        release_dna_handle(reader)
 
 
 def get_test_bone_definitions_params(dna_file_path: Path):

@@ -10,6 +10,8 @@ import bpy
 
 from mathutils import Euler, Vector
 
+from .naming import RAW_CONTROL_PREFIX as RAW_CONTROL_PREFIX  # noqa: PLC0414
+
 
 IS_BLENDER_5 = bpy.app.version >= (5, 0, 0)
 
@@ -40,6 +42,7 @@ class PanelOrder(IntEnum):
     RAW_CONTROL_EDITOR = 60
     SHAPE_KEY_EDITOR = 70
     RBF_EDITOR = 80
+    SWING_TWIST_EDITOR = 82
     BEHAVIOR_VIEWER = 85
     BACKUP_MANAGER = 90
     OUTPUT = 100
@@ -61,7 +64,7 @@ MATERIAL_PREVIEW_ITEMS_BASE = (
     ("normals", "Normals", "Displays only the color of the normal texture maps", "NONE", 2),
 )
 NUMBER_OF_HEAD_LODS = 8
-SENTRY_DSN = "https://38575ef4609265865b46dcc274249962@sentry.poly-hammer.com/13"
+SENTRY_DSN = "https://38575ef4609265865b46dcc274249962@o4512285817438208.ingest.us.sentry.io/4512285817438209"
 
 INVALID_NAME_CHARACTERS_REGEX = r"[^-+\w]+"
 LOD_REGEX = r"(?i)(_LOD\d).*"
@@ -69,7 +72,6 @@ LOD_REGEX = r"(?i)(_LOD\d).*"
 # Prefix of every MetaHuman face expression raw control in the DNA
 # (e.g. ``CTRL_expressions.jawOpen``). Lives at the top level so both the
 # Raw Control Editor and the shared dependency-chain resolver can use it.
-RAW_CONTROL_PREFIX = "CTRL_expressions."
 
 # this is the difference in scale between unreal and blender
 SCALE_FACTOR = 100.0

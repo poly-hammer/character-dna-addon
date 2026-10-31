@@ -3,10 +3,26 @@
 import hashlib
 import json
 import math
+import re
 
 from pathlib import Path
 
 import unreal
+
+
+def _riglogic_provenance():
+    """Identify the evaluator that produced the reference, independently of Blender."""
+    source = Path(unreal.Paths.engine_dir()) / "Plugins/Animation/RigLogic/Source/RigLogicLib"
+    header = (source / "Public/riglogic/version/Version.h").read_text(encoding="utf-8")
+    version = re.search(r'#define RL_VERSION_STRING "([^"]+)"', header)
+    assert version is not None, "Cannot identify the capture's RigLogic version"
+    return {
+        "riglogic_version": version.group(1),
+        "riglogic_source_sha256": {
+            name: hashlib.sha256((source / "Private/riglogic/rbf/cpu" / name).read_bytes()).hexdigest()
+            for name in ("RBFSolver.cpp", "InterpolativeRBFSolver.cpp")
+        },
+    }
 
 
 def _pose_options(mesh):
@@ -195,6 +211,7 @@ def bake(
         assert unreal.Exporter.run_asset_export_task(task)
         provenance = {
             "engine_version": unreal.SystemLibrary.get_engine_version(),
+            **_riglogic_provenance(),
             "blueprint": blueprint,
             "mesh": mesh.get_path_name(),
             "post_process": mesh.post_process_anim_blueprint.get_path_name(),

@@ -3,6 +3,7 @@ import logging
 
 # third party imports
 import bpy
+import bpy.utils.previews
 
 # local imports
 from .constants import NUMBER_OF_HEAD_LODS, SIBLING_EDITIONS, ToolInfo
@@ -143,7 +144,7 @@ class OutputData(bpy.types.PropertyGroup):
 class CharacterOutputProperties(bpy.types.PropertyGroup):
     """
     Defines the per-rig-instance state for the Output panel, including the export
-    method/component/format, output folder, and the collections of head and body
+    method/format, output folder, and the collections of head and body
     output items. This is assigned onto :class:`RigInstance` as the ``output``
     pointer property at registration time (see :func:`register`).
     """
@@ -186,13 +187,6 @@ class CharacterOutputProperties(bpy.types.PropertyGroup):
                 1,
             ),
         ],
-    )  # pyright: ignore[reportInvalidTypeForm]
-    component: bpy.props.EnumProperty(
-        name="DNA Output Component",
-        description="Which component to output use when creating the dna file",
-        default="head",
-        items=[("head", "Head", "The head component of the DNA"), ("body", "Body", "The body component of the DNA")],
-        update=callbacks.update_output_component,  # type: ignore[call-arg]
     )  # pyright: ignore[reportInvalidTypeForm]
     format: bpy.props.EnumProperty(
         name="File Format",

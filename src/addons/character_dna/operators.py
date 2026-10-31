@@ -2,6 +2,7 @@
 import logging
 import queue
 import shutil
+import time
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -63,6 +64,8 @@ class GenericProgressQueueOperator(bpy.types.Operator):
     # when importing hundreds of shape keys, while still keeping the UI responsive
     # and the progress bar updating smoothly.
     _batch_size = 25
+    _time_budget = 0.02
+    _progress_limit = 1.0
 
     def modal(self, context: "Context", event: bpy.types.Event) -> set[str]:
         addon_window_manager_properties = utilities.get_addon_window_manager_properties(context)
@@ -77,6 +80,7 @@ class GenericProgressQueueOperator(bpy.types.Operator):
             # Process a batch of commands per tick instead of one, so the timer
             # cadence and redraw cost don't dominate the total import time.
             description = ""
+            deadline = time.perf_counter() + self._time_budget
             for _ in range(self._batch_size):
                 if self._commands_queue.empty():
                     break
@@ -90,11 +94,13 @@ class GenericProgressQueueOperator(bpy.types.Operator):
                     self.finish(context)
                     self.report({"ERROR"}, str(error))
                     return {"CANCELLED"}
+                if time.perf_counter() >= deadline:
+                    break
 
             remaining = self._commands_queue.qsize()
             addon_window_manager_properties.progress = (
-                self._commands_queue_size - remaining
-            ) / self._commands_queue_size
+                (self._commands_queue_size - remaining) / self._commands_queue_size * self._progress_limit
+            )
             addon_window_manager_properties.progress_description = description
 
             # redraw once per batch so the progress bar updates without paying the
@@ -110,7 +116,7 @@ class GenericProgressQueueOperator(bpy.types.Operator):
         if not self.validate(context):
             return {"CANCELLED"}
 
-        head = utilities.get_active_head()
+        head = self.get_component()
         if not head:
             return {"CANCELLED"}
         addon_window_manager_properties.progress = 0
@@ -139,6 +145,9 @@ class GenericProgressQueueOperator(bpy.types.Operator):
 
     def validate(self, context: "Context") -> bool:
         return True
+
+    def get_component(self) -> CharacterComponentHead | CharacterComponentBody | None:
+        return utilities.get_active_head()
 
     def set_commands_queue(
         self,
@@ -865,15 +874,33 @@ class ImportCharacterDna(bpy.types.Operator, importer.ImportAsset, CharacterImpo
             self.report({"ERROR"}, "The scene unit scale must be set to 1.0")
             return {"CANCELLED"}
 
+        from .dna_io.document import is_document, materialize
+
+        combined_path = file_path if is_document(file_path) else None
+        document_name = None
+        if combined_path:
+            try:
+                manifest, partitions = materialize(combined_path)
+                file_path = partitions["head"]
+                document_name = manifest["name"]
+            except (ValueError, RuntimeError, OSError) as error:
+                self.report({"ERROR"}, str(error))
+                return {"CANCELLED"}
+
         # we don't want to evaluate the dependency graph while importing the DNA
         window_manager_properties.evaluate_dependency_graph = False
         component = get_meta_human_component(
             file_path=file_path,
             properties=self.properties,  # type: ignore[arg-type]
+            name=document_name,
         )
         # if the component is a head, we import the body first if the user has selected the option
         body_file = file_path.parent / "body.dna"
-        if self.properties.include_body and component.component_type == "head" and body_file.exists():
+        if (
+            (self.properties.include_body or combined_path)
+            and component.component_type == "head"
+            and body_file.exists()
+        ):
             body_component = get_meta_human_component(
                 file_path=body_file,
                 properties=self.properties,  # type: ignore[arg-type]
@@ -895,6 +922,14 @@ class ImportCharacterDna(bpy.types.Operator, importer.ImportAsset, CharacterImpo
         self.report({"INFO"}, message)
 
         # populate the output items based on what was imported
+        from .dna_io.document import finish_import
+
+        finish_import(
+            component.rig_instance,
+            combined_path,
+            manifest if combined_path else None,
+            import_mesh=self.properties.import_mesh,
+        )
         callbacks.update_head_output_items(None, bpy.context)  # type: ignore[arg-type]
         # now we can evaluate the dependency graph again
         window_manager_properties.evaluate_dependency_graph = True
@@ -1290,9 +1325,9 @@ class ExportSelectedComponent(bpy.types.Operator):
 
         current_context = utilities.get_current_context()
         component = None
-        if instance.output.component == "head":
+        if instance.editor_component == "head":
             component = utilities.get_active_head()
-        elif instance.output.component == "body":
+        elif instance.editor_component == "body":
             component = utilities.get_active_body()
 
         if component:

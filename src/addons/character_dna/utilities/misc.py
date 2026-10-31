@@ -181,6 +181,10 @@ def set_hidden(scene_object: bpy.types.Object | None, state: bool) -> bool:
     """
     if not scene_object:
         return False
+    if scene_object.get("dna_working_source") and (
+        not bpy.context.view_layer or scene_object.name not in bpy.context.view_layer.objects
+    ):
+        return False
     try:
         scene_object.hide_set(state)
     except RuntimeError as error:
@@ -214,8 +218,14 @@ def set_active(scene_object: bpy.types.Object | None) -> bool:
 
 
 def deselect_all():
-    for scene_object in bpy.data.objects:
-        scene_object.select_set(False)
+    view_layer = bpy.context.view_layer
+    if view_layer is None:
+        return
+    # The active-object getter synchronizes bases without evaluating the rig. Otherwise,
+    # select_set can rebuild a stale base list while the RNA iterator still traverses it.
+    _ = view_layer.objects.active
+    for scene_object in tuple(view_layer.objects):
+        scene_object.select_set(False, view_layer=view_layer)
 
 
 def select_only(*scene_object: bpy.types.Object) -> bool:
@@ -372,6 +382,12 @@ def setup_scene(*_: Any) -> None:
 
     # Other addons' setup callbacks may evaluate the graph immediately. Prepare
     # our sessions first so those evaluations have both the callback and its data.
+    from ..dna_io.document import restore_scene_documents
+
+    try:
+        restore_scene_documents()
+    except (ValueError, RuntimeError, OSError):
+        logger.exception("Could not restore a combined DNA document")
     controller.after_load()
     scene_properties = getattr(bpy.context.scene, ToolInfo.NAME, object)
 
@@ -1260,14 +1276,26 @@ def position_face_board(
         position_eye_aim(head_rig_object, face_board_object)
 
 
-def collection_to_list(collection: bpy.types.bpy_prop_collection) -> list:
+def collection_to_list(
+    collection: bpy.types.bpy_prop_collection, *, exclude_suffixes: tuple[str, ...] = (), _schemas: dict | None = None
+) -> list:
+    """Copy current RNA values; share only field descriptions within this call."""
+    if _schemas is None:
+        _schemas = {}
     item_list = []
     for item in collection:
         data = {"__property_group__": item.__class__.__name__}
-        for key, data_type in item.__annotations__.items():
-            if data_type.function.__name__ == "CollectionProperty":
-                data[key] = collection_to_list(getattr(item, key))
-            elif data_type.function.__name__ == "FloatVectorProperty":
+        cls = item.__class__
+        if cls not in _schemas:
+            _schemas[cls] = tuple(
+                (key, data_type.function.__name__)
+                for key, data_type in item.__annotations__.items()
+                if not key.endswith(exclude_suffixes)
+            )
+        for key, kind in _schemas[cls]:
+            if kind == "CollectionProperty":
+                data[key] = collection_to_list(getattr(item, key), exclude_suffixes=exclude_suffixes, _schemas=_schemas)
+            elif kind == "FloatVectorProperty":
                 data[key] = getattr(item, key)[:]
             else:
                 data[key] = getattr(item, key)

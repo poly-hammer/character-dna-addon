@@ -21,7 +21,6 @@ from ..constants import (
     SCALE_FACTOR,
     SHAPE_KEY_BASIS_NAME,
     SHAPE_KEY_DELTA_THRESHOLD,
-    SHAPE_KEY_NAME_MAX_LENGTH,
     VERTEX_COLOR_ATTRIBUTE_NAME,
     ComponentType,
 )
@@ -81,7 +80,7 @@ class DNAExporter:
         # cached reader would be stale (the converter's just-written head.dna).
         self._seam_follower = seam_follower
         self._seam_reference_dna_path = Path(seam_reference_dna_path) if seam_reference_dna_path is not None else None
-        self._component_type = component_type or instance.output.component
+        self._component_type = component_type or instance.editor_component
 
         self._output_folder = Path(bpy.path.abspath(instance.output.folder_path))
 
@@ -277,6 +276,10 @@ class DNAExporter:
         This lets a caller run every component's validations up-front (before any
         file is written), so a validation failure and its fix dialog surface before
         the exporter has already exported another component."""
+        if self._instance.get("dna_merge_proxy"):
+            from ..editors.converter.scene_merge import prepare_export
+
+            prepare_export(self._instance, apply=False)
         self.initialize_scene_data()
         if self._instance.output.run_validations:
             return self.validate()
@@ -443,12 +446,13 @@ class DNAExporter:
         vertex_group_lookup = {vertex_group.index: vertex_group.name for vertex_group in mesh_object.vertex_groups}
         # Initialize the vertex groups dictionary
         vertex_groups = {vertex_group.name: [] for vertex_group in mesh_object.vertex_groups}
+        groups_by_name = {group.name: group for group in mesh_object.vertex_groups}
 
         # Loop through the vertices and get the vertex group names and the vertex and weights
         for vertex in mesh_object.data.vertices:
             vertex_group_names = [vertex_group_lookup.get(group.group, "") for group in vertex.groups]
             for vertex_group_name in vertex_group_names:
-                vertex_group = mesh_object.vertex_groups.get(vertex_group_name)
+                vertex_group = groups_by_name.get(vertex_group_name)
                 if vertex_group:
                     weight = vertex_group.weight(vertex.index)
                     if weight > 0:
@@ -495,6 +499,10 @@ class DNAExporter:
         self._dna_writer.setVertexPositions(meshIndex=mesh_index, positions=positions)
 
     def set_dna_faces(self, mesh_index: int, face_layouts: list[tuple[int, list[int]]]):
+        # SDK indexed collections otherwise grow once per face, copying the
+        # preceding rows repeatedly. Allocate through the last index once.
+        if face_layouts:
+            self._dna_writer.setFaceVertexLayoutIndices(mesh_index, max(row[0] for row in face_layouts), [])
         for face_index, face_vertex_indices in face_layouts:
             self._dna_writer.setFaceVertexLayoutIndices(
                 meshIndex=mesh_index, faceIndex=face_index, layoutIndices=face_vertex_indices
@@ -515,6 +523,11 @@ class DNAExporter:
         # Create a lookup table for the vertex group names by their index
         vertex_group_lookup = {vertex_group.index: vertex_group.name for vertex_group in mesh_object.vertex_groups}
 
+        # Allocate the indexed skin table before populating its variable-length
+        # rows. This preserves every vertex, influence and weight unchanged.
+        groups_by_name = {group.name: group for group in mesh_object.vertex_groups}
+        if mesh_object.data.vertices:
+            self._dna_writer.setSkinWeightsValues(mesh_index, len(mesh_object.data.vertices) - 1, [])
         # Loop through the vertices and get the vertex group names and the vertex and weights
         for vertex in mesh_object.data.vertices:
             vertex_group_names = [vertex_group_lookup.get(group.group, "") for group in vertex.groups]
@@ -523,7 +536,7 @@ class DNAExporter:
 
             for vertex_group_name in vertex_group_names:
                 bone_index = self._bone_index_lookup.get(vertex_group_name)
-                vertex_group = mesh_object.vertex_groups.get(vertex_group_name)
+                vertex_group = groups_by_name.get(vertex_group_name)
                 # ``bone_index`` can be 0 (the root joint), so test against ``None``
                 # explicitly -- ``if bone_index`` would silently drop every weight
                 # painted onto joint index 0.
@@ -810,12 +823,11 @@ class DNAExporter:
             dna_delta_vertex_indices: list[int] = []
             dna_delta_values: list[list[float]] = []
 
-            # Blender caps shape key names at 63 characters, so channels whose block
-            # name would exceed that limit are never imported into the scene; write
-            # an empty target for them (they keep their channel wiring but no deltas).
-            shape_key_block = None
-            if len(block_name) <= SHAPE_KEY_NAME_MAX_LENGTH:
-                shape_key_block = mesh_object.data.shape_keys.key_blocks.get(block_name)  # type: ignore[union-attr]
+            from ..shape_names import find_key
+
+            shape_key_block = find_key(mesh_object.data.shape_keys, block_name)
+            if shape_key_block is None and len(block_name.encode("utf-8")) > 63:
+                raise ValueError(f"Recover or import the missing DNA shape before exporting: {block_name}")
 
             if shape_key_block:
                 for vertex_index in vertex_indices:
@@ -920,7 +932,38 @@ class DNAExporter:
                 blendShapeChannelIndex=channel_index,
             )
 
+    def _prepare_merged_export(self) -> None:
+        from .shape_migration import migrate_instance
+
+        migrate_instance(self._instance)
+        if self._instance.get("dna_merge_proxy"):
+            from ..editors.converter.scene_merge import prepare_export
+
+            prepare_export(self._instance, apply=True)
+
+    def _export_component_extensions(self) -> None:
+        if not self._instance.get("dna_merge_proxy"):
+            return
+        from . import document, metadata
+
+        bridges = [
+            bridge
+            for bridge in document.collect_scene_bridges(self._instance)
+            if bridge["source"]["kind"] == self._component_type
+        ]
+        if bridges or any(
+            self._dna_reader.getMetaDataKey(index) == document.EXTENSION_PREFIX
+            for index in range(self._dna_reader.getMetaDataCount())
+        ):
+            metadata.write(
+                self._dna_writer,
+                self._dna_reader,
+                {"version": 1, "owner": self._component_type, "scene_bridges": bridges},
+                prefix=document.EXTENSION_PREFIX,
+            )
+
     def run(self) -> tuple[bool, str, str, Callable | None]:
+        self._prepare_merged_export()
         self.initialize_scene_data()
         if self._instance.output.run_validations:
             valid, title, message, fix = self.validate()
@@ -941,6 +984,7 @@ class DNAExporter:
             self._report("Exporting shape keys...")
             self.export_shape_keys()
 
+        self._export_component_extensions()
         self._dna_writer.write()
         if not dna.Status.isOk():
             status = dna.Status.get()

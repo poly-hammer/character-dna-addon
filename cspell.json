@@ -161,6 +161,7 @@
                 "PYI",
                 "pyo",
                 "PLR",
+                "PLW",
                 "rbf",
                 "rbfs",
                 "RUF",
@@ -207,9 +208,11 @@
                 "ccx",
                 "ccy",
                 "wxyz",
+                "xyzw",
                 "intp",
                 "tri",
                 "bary",
+                "barycentrics",
                 "bitangent",
                 "neighbour",
                 "undeformed",
@@ -246,7 +249,23 @@
                 "retargeter",
                 "rtol",
                 "rvk",
-                "unkeyed"
+                "unkeyed",
+                "uniquify"
+            ]
+        },
+        {
+            "filename": "src/addons/character_dna/dna_io/**",
+            "description": "Native DNA layer identifiers",
+            "words": [
+                "bhvr",
+                "defn",
+                "dsce",
+                "jbmd",
+                "mlbe",
+                "mlbh",
+                "rbfb",
+                "rbfe",
+                "twsw"
             ]
         },
         {

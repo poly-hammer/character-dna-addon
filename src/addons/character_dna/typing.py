@@ -49,6 +49,7 @@ if TYPE_CHECKING:
         ShapeKeyEditorProperties,
     )
     from .editors.shared.rbf_solve import RBFDriverTarget, RBFPoseTarget  # noqa: TC004
+    from .editors.swing_twist_editor.properties import SwingTwistEditorPreferences, SwingTwistEditorProperties
     from .operators import BakeAnimationBase, DuplicateRigInstance  # noqa: TC004
     from .properties import (
         CharacterAddonProperties,
@@ -102,6 +103,7 @@ if TYPE_CHECKING:
         raw_control_editor: RawControlEditorProperties
         behavior_viewer: BehaviorViewerProperties
         shape_key_editor: ShapeKeyEditorProperties
+        swing_twist_editor: SwingTwistEditorProperties
         output: CharacterOutputProperties
         view_options: CharacterViewOptionsProperties
 
@@ -126,6 +128,7 @@ if TYPE_CHECKING:
         rbf_editor: RBFEditorPreferences
         raw_control_editor: RawControlEditorPreferences
         shape_key_editor: ShapeKeyEditorPreferences
+        swing_twist_editor: SwingTwistEditorPreferences
         backup_manager: BackupManagerPreferences
         next_metrics_consent_timestamp: float
         extra_dna_folder_list: ExtraDnaFolders

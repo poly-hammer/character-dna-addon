@@ -1,0 +1,406 @@
+{
+  "schema": 1,
+  "baseline_parent": "f5f204b34673b0717404741b964f8de885ba9990",
+  "rules": [
+    "Retain every original collected case and numerical parameter.",
+    "Keep original numerical tolerances and reference assets unchanged.",
+    "A mocked collaborator must have a separately retained real integration contract.",
+    "Fresh-import cases remain responsible for importer construction; restored scenes exercise downstream consumers.",
+    "A complete matched run, including cold artifact construction, must satisfy the runtime target."
+  ],
+  "fixture_contracts": [
+    {
+      "fixture": "rig_factory",
+      "owner": "pytest process",
+      "shared": "Pristine blend files and source fingerprints only",
+      "mutable": "Function or module lease with independently copied DNA, output paths and reopened RNA",
+      "checks": [
+        "test_rig_leases_restore_pristine_state_and_own_paths",
+        "test_failed_edit_does_not_leave_suspended_runtime_or_editor_cache",
+        "Opt-in lifetime_plugin repeats both lease canaries with private paths, stable Blender ID/handler counts and resident-memory samples",
+        "test_partition_cleanup_preserves_preexisting_working_directories",
+        "test_narrow_profile_constructs_final_bindings_once"
+      ]
+    },
+    {
+      "fixture": "load_head_dna / load_body_dna / unreal_body",
+      "owner": "One pose-test module",
+      "shared": "Scene within a module whose cases reset their evaluated pose",
+      "mutable": "No RNA or writable DNA survives module teardown",
+      "checks": [
+        "Unchanged Maya and Unreal numerical pose matrices",
+        "Unreal asset provenance"
+      ]
+    },
+    {
+      "fixture": "modify_head_scene / exported and calibrated datasets",
+      "owner": "Session artifact, separately opened export operation",
+      "shared": "Paths and parsed reference data only",
+      "mutable": "Each exporter opens and closes its own saved scene; no shared live Blender object",
+      "checks": [
+        "Original bone, mesh, normal, skin and LOD assertion matrices"
+      ]
+    },
+    {
+      "fixture": "animated_body / animated_face_board",
+      "owner": "One test",
+      "shared": "Pristine face-board animation artifact",
+      "mutable": "Body animation is imported immediately before baking because it transfers output ownership",
+      "checks": [
+        "Original import and bake action assertions in shuffled order"
+      ]
+    },
+    {
+      "fixture": "native_character / animated_character",
+      "owner": "One test",
+      "shared": "Pristine real head/body native input bones, observed jaw/knee outputs, ancestor chains and face board; complete original DNA behavior",
+      "mutable": "Actual native drivers, actions, ownership toggles and save/reload",
+      "checks": [
+        "All original native baking and evaluation ownership cases"
+      ]
+    },
+    {
+      "fixture": "head_character (shape-name frame cost)",
+      "owner": "One test",
+      "shared": "Pristine real head-only DNA and scene",
+      "mutable": "Own full head mesh, all 42 targets and native bindings; four name-mode rounds with three distinct frame/control samples, each checked against all 42 native SDK channel outputs",
+      "checks": [
+        "test_frame_cost_uses_same_numeric_bindings_for_compact_and_hashed_names"
+      ]
+    },
+    {
+      "fixture": "reference_scene",
+      "owner": "One test",
+      "shared": "Pristine compact head/body/face-board artifact for the unrelated destination character in coexistence cases; the referenced source keeps full original geometry and skeleton",
+      "mutable": "Own DNA files and live scene; empty-destination cases do not build an unused character",
+      "checks": [
+        "All six test_reference_blend_file combinations, including reload, native animation and source file protection"
+      ]
+    },
+    {
+      "fixture": "merged/seeded RigProfile variants",
+      "owner": "One test",
+      "shared": "Pristine SCENE/DNA presentation and optional real first head target; combined surfaces are constructed against cold projected SDK views",
+      "mutable": "Each combined document is copied before loading; public load recovery produces independent SDK partitions owned by that document",
+      "checks": [
+        "test_merged_leases_own_document_and_partition_paths (both modes with/without head target, cache eviction and DNA revision validation)",
+        "All original runtime retention, shape-import finalization and combined swing/twist cases",
+        "Dedicated merge construction and cold portability tests remain unchanged"
+      ]
+    },
+    {
+      "fixture": "compact_dna / RigProfile.pose_bones",
+      "owner": "Session immutable SDK asset; private files and Blender scene per lease",
+      "shared": "All original native controls, joint definitions, solvers and LODs; three vertices per mesh and one original mapped shape channel",
+      "mutable": "Real import, native bindings, mesh/key edits, commit/revert, save/load and backups. Scene bone subset keeps observed outputs, every native quaternion input, head attachment and ancestors.",
+      "checks": [
+        "test_compact_fixture_keeps_all_behavior_at_every_lod (exact complete SDK arrays, head/body)",
+        "test_compact_leases_preserve_complete_native_data_and_private_scene_state",
+        "Original lifecycle, retention, backup, visibility and editor transaction assertions",
+        "Original full geometry, UV, long-key, calf-back-90 deformation, native graph and export/calibration anchors remain"
+      ]
+    },
+    {
+      "fixture": "saved_visibility_rig",
+      "owner": "One module artifact; privately reopened for every case",
+      "shared": "Complete face board, native eye bones, quaternion inputs and ancestor chains; no unrelated output bones",
+      "mutable": "Actual animated visibility drivers, converted Blender metadata, conflicts, rebuild and reference transport",
+      "checks": [
+        "All original seven-bone visibility assertions, APPEND/LINK/EDITABLE_LINK, save/reopen and source-byte protection",
+        "Full head and body matrices remain in driver recovery, native runtime and reference transport tests"
+      ]
+    }
+  ],
+  "changed_assertion_boundaries": [
+    {
+      "case": "Merged raw jaw/rest editing, publication retry, RBF editing and export presentation",
+      "before": "Thirteen editor/export cases repeated the scene merge as preparation for testing an already merged surface.",
+      "after": "The real profile builder constructs that surface once; each case acquires private files and scene state, asserts merged presentation, and retains every original editor, geometry, publication and identity assertion.",
+      "retained_integration": [
+        "test_scene_merge_noop_preserves_sources_and_shape_keys",
+        "test_merge_all_scene_lods_and_switch_without_splitting",
+        "test_merged_masks_match_posed_components_with_object_transforms",
+        "test_merged_leases_own_document_and_partition_paths"
+      ]
+    },
+    {
+      "case": "test_retention_keeps_pairs_and_unique_ids",
+      "before": "Real merge and split were performed to create paired backup records.",
+      "after": "Real backup tracking creates paired operation records around small file changes; retention checks pairing and distinct IDs directly.",
+      "retained_integration": [
+        "test_same_folder_overwrite_and_restore_both_document_modes",
+        "test_backup_failure_leaves_original_files_and_mode",
+        "test_failed_split_restores_overwritten_outputs"
+      ]
+    },
+    {
+      "case": "test_output_uses_shared_component_for_defaults_and_operator",
+      "before": "Every routing combination repeated full geometry export and checked joint count and last joint name.",
+      "after": "Real exporter construction and the Blender operator run against an autospecced run boundary; assertions cover exact exporter class, selected component, source path, destination name and texture exclusion.",
+      "retained_integration": [
+        "test_body_operator_publication_preserves_joint_definition (both methods, all joint names)",
+        "test_head_exporter.py",
+        "test_head_calibrator.py",
+        "test_head_overwrite_exporter.py"
+      ]
+    },
+    {
+      "case": "test_document_merge_requires_shared_output_folder",
+      "before": "Full DNA imports provided two paths to the output-folder validator.",
+      "after": "Registered minimal RNA and real temporary paths exercise the same validator and exception assertion.",
+      "retained_integration": [
+        "test_document_noop_restores_all_native_data_and_replaces_outputs",
+        "test_combined_document_import_and_partition_edit"
+      ]
+    },
+    {
+      "case": "test_ci_benchmark.py",
+      "before": "An exact directory listing rejected unrelated local measurement tools.",
+      "after": "Required benchmark files remain required; AST inspection rejects transitive CI dependencies on local probe tools.",
+      "retained_integration": [
+        "Existing CI benchmark invocation and subprocess boundaries"
+      ]
+    },
+    {
+      "case": "test_import_reuses_bones_and_evaluates_shapes",
+      "before": "Each parameter called the merge operator as a setup precondition.",
+      "after": "The profile builder calls and asserts the real merge once; each lease asserts its requested merged state before the unchanged import and native-output checks.",
+      "retained_integration": [
+        "test_merged_leases_own_document_and_partition_paths",
+        "test_merge_all_scene_lods_and_switch_without_splitting",
+        "test_combined_document_import_and_partition_edit"
+      ]
+    },
+    {
+      "case": "test_generation_confirmation_is_read_only_and_reports_exact_count",
+      "before": "Expected an obsolete confirmation sentence, failing on the original baseline.",
+      "after": "Asserts the existing production confirmation sentence with the same exact generated count; read-only file and key checks remain unchanged.",
+      "retained_integration": [
+        "test_body_generate_routes_keys_once_and_restores_pre_post_backups"
+      ]
+    },
+    {
+      "case": "test_frame_cost_uses_same_numeric_bindings_for_compact_and_hashed_names",
+      "before": "Four 85-frame timing loops verified binding count but never asserted frame outputs or a runtime threshold.",
+      "after": "All 42 original targets, their full geometry and four name-mode transitions remain. Three distinct frame/control samples per mode compare every evaluated channel to the real SDK. Scene bones are limited to native inputs, observed outputs and ancestors because this case asserts shape-channel values, while deformation matrices remain elsewhere. Complete-suite performance is measured separately.",
+      "retained_integration": [
+        "test_all_42_long_head_targets_import_recover_bind_and_split",
+        "Full head/body numerical pose matrices"
+      ]
+    },
+    {
+      "case": "Native graph copy and equality helpers",
+      "before": "Python deepcopy recursively visited every scalar; exact equality recursively revisited large equal scalar arrays.",
+      "after": "Trusted in-memory graphs are independently copied with pickle; scalar-list equality short-circuits in C with explicit nested-container and NaN safeguards. Native modules restore private containers from a session archive built through the SDK, then detect reference mutation at teardown. Exact comparisons and mismatch paths are unchanged.",
+      "retained_integration": [
+        "test_graph_fixture.py ownership, independent archive restoration, tiny float differences, metadata and NaN checks",
+        "All original native graph, projection and round-trip tests"
+      ]
+    },
+    {
+      "case": "Merged editor rollback and selection fixtures",
+      "before": "Full geometry and output skeletons were rebuilt for rollback, selected-component publication and list-availability assertions.",
+      "after": "Compact native DNA and observed scene bones retain real transactions, UI callbacks, native channel counts, canonical vertex ordering and untouched-component byte comparisons. The failed-bridge test reads the fixture's actual seam map.",
+      "retained_integration": [
+        "test_merge_all_scene_lods_and_switch_without_splitting",
+        "test_raw_jaw_edit_keeps_merged_surface_and_canonical_target",
+        "test_export_merged_surface_keeps_presentation_and_source_files",
+        "test_combined_neckline_shape_is_portable_and_backup_restores_document",
+        "test_dna_merge_removes_scene_objects_and_split_imports_new_meshes"
+      ]
+    },
+    {
+      "case": "native_head runtime fixture",
+      "before": "Every head runtime case loaded full mesh data and materials.",
+      "after": "Full matrix and shape-deformation cases retain every original scene joint. Explicit state-only cases keep observed outputs, native quaternion inputs and ancestors. Meshes are loaded only for native_shape consumers; unused materials are omitted. Native input/output arrays remain complete in every case.",
+      "retained_integration": [
+        "test_import_uses_runtime_without_opt_in (both original fresh imports)",
+        "Original full-mesh native_shape matrix and deformation assertions"
+      ]
+    },
+    {
+      "case": "Animation, duplicate ownership, component routing and scoped-key transactions",
+      "before": "Dense geometry and unobserved output bones were repeatedly restored for action routing, ownership, material-node action creation, coefficient and untouched-key checks.",
+      "after": "Animation and body-publication fixtures retain the full native skeleton with compact geometry. Duplicate ownership and UI-only runtime cases keep observed outputs and input ancestors. A two-channel compact asset supports independent-key commits at all eight LODs; complete native arrays are compared with the original SDK at every LOD. Real FBX import, baking, render callbacks, reference modes, commit/split and byte-preservation assertions remain.",
+      "retained_integration": [
+        "Full Maya/Unreal pose and deformation matrices",
+        "test_combined_neckline_shape_is_portable_and_backup_restores_document",
+        "test_target_commit_uses_native_arrays_and_survives_cold_reopen",
+        "test_compact_projection",
+        "Full source-reference transport matrix",
+        "All original exporter and calibrator geometry assertions"
+      ]
+    },
+    {
+      "case": "Narrow-profile native driver construction",
+      "before": "The profile importer installed full native output bindings and immediately deleted them while trimming unobserved bones, then installed the smaller plan.",
+      "after": "An autospecced native-install boundary is deferred only during narrow-profile preparation. Real readers, mesh and skeleton import, final native installation, shape preview and ownership validation remain. The canary requires exactly one final installation including keys created during preparation. Full importer profiles keep the original path.",
+      "retained_integration": [
+        "test_narrow_profile_constructs_final_bindings_once",
+        "test_compact_leases_preserve_complete_native_data_and_private_scene_state",
+        "test_merged_leases_own_document_and_partition_paths",
+        "test_import_uses_runtime_without_opt_in"
+      ]
+    },
+    {
+      "case": "RBF refresh metadata reuse",
+      "before": "Solver refreshes rebuilt joint/control indices for each pose and calculated every shape coefficient once per affected shape.",
+      "after": "Derived read-only indices live only in one ReadBatch; shape coefficients are computed once per pose occurrence. Every resulting native pose is compared with an uncached SDK read, and a later refresh reads the document again.",
+      "retained_integration": [
+        "test_batched_solver_reads_match_every_uncached_native_pose (head and body)",
+        "All native RBF round trips and editor pose matrices"
+      ]
+    },
+    {
+      "case": "Skin-weight import lookup reuse",
+      "before": "Every influence searched Blender vertex groups by name and fetched the same native joint name again.",
+      "after": "Names and existing groups are indexed only for one synchronous mesh import. Exact full native head/body weight dictionaries, preexisting unrelated groups and a removed/recreated group are checked. No vertex, influence, precision or full-geometry oracle is removed.",
+      "retained_integration": [
+        "test_skin_weight_import_matches_native_values_and_reuses_existing_groups",
+        "All original full geometry importer, exporter, calibration and deformation tests"
+      ]
+    },
+    {
+      "case": "Component selection session routing",
+      "before": "The routing/lock test freshly imported every head and body output bone before two no-op editor commits.",
+      "after": "A private no-mesh lease retains complete native DNA, complete solver lists, input bones, observed output bones and ancestors. The actual editor entry, component lock, commit, untouched-component file hash and native binding checks remain. Full output matrices and per-component native round trips remain separate integration oracles.",
+      "retained_integration": [
+        "test_component_selection_routes_and_locks_sessions",
+        "test_rbf_noop_preserves_behavior (both components)",
+        "Complete Maya/Unreal pose matrices and full reference transport"
+      ]
+    },
+    {
+      "case": "Full reference sources, topology validation and second-character import",
+      "before": "Preparation repeated complete DNA imports and the second-character fixture retained live RNA at session scope.",
+      "after": "Owned leases restore complete head or paired-character profiles with all original geometry, bones and materials. The full reference still authors the same controls and animation before saving; all six reference modes retain every frame and reload assertion. Both original and private source DNA files are protected by byte fingerprints. The second character is still imported fresh into the animated scene, and no live RNA escapes the module lease. Calibration cases restore an independent full head before changing topology.",
+      "retained_integration": [
+        "All original test_reference_blend_file parameters and animation frames",
+        "All four test_multi_character_import assertions",
+        "Both original test_calibrate_validation cases",
+        "Pristine lease mutation and path-ownership canaries"
+      ]
+    },
+    {
+      "case": "Key identity, legacy migration and rollback",
+      "before": "Three identity and rollback tests rebuilt dense surfaces while asserting naming, canonical source preservation, transaction rollback and cross-component rejection.",
+      "after": "Compact native meshes keep a real long-named head channel, source/merged coordinate comparisons, driver routing, legacy metadata migration and rejection assertions. All native outputs still match the original SDK at every LOD.",
+      "retained_integration": [
+        "test_all_42_long_head_targets_import_recover_bind_and_split",
+        "test_combined_neckline_shape_is_portable_and_backup_restores_document",
+        "Both full-geometry numerical and native compact-asset equivalence matrices"
+      ]
+    },
+    {
+      "case": "Named-bone Swing/Twist transactions and native ownership",
+      "before": "Transaction, UI, visibility and named-output tests rebuilt full scene output skeletons; a multi-character preview ownership test also imported an unobserved mesh.",
+      "after": "Owned compact-geometry leases retain every swing/twist output, all native input bones, observed state bones and all ancestors. The complete DNA, evaluator arrays, individual matrix assertions, file round trips and surface checks stay unchanged. The second character is still imported fresh with its complete skeleton. Invalid native buffer/index contracts use the established state profile.",
+      "retained_integration": [
+        "Full-skeleton test_preview_matches_committed_native_runtime with and without RBFs",
+        "Complete knee deformation in test_calf_back_90_preview_matches_complete_rbf_pose",
+        "Every-bone rest/offset restoration and real undo/redo",
+        "All native head shape, spatial, matrix and fresh-import oracles"
+      ]
+    },
+    {
+      "case": "Supplemental document revision and publication guards",
+      "before": "The original integration checks retained document bytes and component behavior, but the planned stale-view and duplicate-publication mutations were not explicitly measured.",
+      "after": "An additional small cache contract uses real files and spec-constrained projection collaborators. A separate real SDK round trip verifies the same revision behavior. Native writes and the existing combined Swing/Twist commit count actual authoritative-file publications while preserving all previous byte, weight, geometry, identity and binding assertions.",
+      "retained_integration": [
+        "test_native_document_read_refreshes_after_publication",
+        "test_native_document_write_publishes_once",
+        "test_combined_commit_preserves_head_and_surface",
+        "test_failed_merged_entry_restores_surface_and_removes_snapshots"
+      ]
+    }
+  ],
+  "measured_hot_path_contracts": [
+    {
+      "case": "Native mute state",
+      "change": "Skip ownership inspection only when the curve already has the requested mute value. Every changed write still rechecks current ownership.",
+      "retained_integration": [
+        "Removed/replaced owner and expression checks",
+        "Array-channel ownership checks",
+        "No-op followed by user replacement"
+      ]
+    },
+    {
+      "case": "UV fallback candidates",
+      "change": "Use the existing padded triangle grid to prune candidates, then retain the original overlap, barycentric, distance and sorted-index tie rules. Broad or invalid boxes use the original dense scan.",
+      "retained_integration": [
+        "Independent full-scan oracle over boundary, overlap, tie, empty, extreme and invalid queries",
+        "All original head/body all-LOD calibration and geometry checks"
+      ]
+    },
+    {
+      "case": "Pose comparison context",
+      "change": "Update the dependency graph directly when the source rig is already active in Pose Mode. Otherwise use the existing mode-switch helper.",
+      "retained_integration": [
+        "Every original Unreal runtime/editor pose",
+        "Every original Maya matrix and numerical tolerance"
+      ]
+    },
+    {
+      "case": "RNA preview serialization",
+      "change": "Cache only field descriptions within one recursive call, copying all current values and filtering preview-only suffixes during traversal.",
+      "retained_integration": [
+        "Independent original serializer and authored-data filter over real RNA, changed values and removed items",
+        "Every original Unreal editor pose and companion-preservation assertion"
+      ]
+    },
+    {
+      "case": "Native weight export and calibration",
+      "change": "Index Blender groups for one operation and preallocate native calibration rows. Keep original weight queries, order, root index and distinct zero-weight policies.",
+      "retained_integration": [
+        "Exact compact native head/body rows for both writers, including zero/root/unrelated/replaced groups",
+        "All original export, calibration, geometry and LOD assertions"
+      ]
+    },
+    {
+      "case": "UV grid cell calculation",
+      "change": "Use scalar integer clamps with the same truncation and bounds as the original NumPy operation.",
+      "retained_integration": [
+        "Original NumPy oracle at every grid boundary and adjacent floats",
+        "Dense fallback oracle and all original full geometry/LOD calibration"
+      ]
+    },
+    {
+      "case": "Native evaluation flag coverage",
+      "change": "Call the real native publication path directly as well as through Blender callbacks, so disabled outputs and stale-frame rejection do not depend on driver thread scheduling for coverage.",
+      "retained_integration": [
+        "A changed real SDK preview preserves every disabled output range",
+        "Disabled auto evaluation preserves the published graph buffer and solve count",
+        "Replaying the real prior-frame preview cannot overwrite the current native pose",
+        "Original full-pose, shape slider and playback release checks remain unchanged"
+      ]
+    },
+    {
+      "case": "Native output driver construction",
+      "change": "Copy immutable private driver templates using Blender RNA after normal property/index validation; preserve exact carrier dependencies, output slots and transactional cleanup.",
+      "retained_integration": [
+        "Exact scalar/array and multiple-owner evaluated values on both Blender versions",
+        "Yielded-curve mutations cannot contaminate later copies",
+        "Invalid-index and canceled-install rollback preserve existing bindings and remove private templates",
+        "Original complete native pose, shape, undo, retention, reference and document integration checks remain unchanged"
+      ]
+    }
+  ],
+  "fault_checks": {
+    "target": "Shared editor recovery, component routing, swing/twist evaluation, collection restoration and native document publication",
+    "mutations": [
+      "omit resume",
+      "omit surface rollback",
+      "omit abort cleanup",
+      "write to the other component",
+      "reverse preview rotation",
+      "use degrees where the preview quaternion requires radians",
+      "omit RBF contribution",
+      "omit shape coefficient publication",
+      "omit collection visibility restoration",
+      "publish a native document twice",
+      "reuse the first document view after its bytes change"
+    ],
+    "method": "Passing unmodified controls, then in-memory mutations only during test bodies; original function code is restored before teardown. Record source hashes, invocation counts, exceptions and exact expected detection counts. No production source-file edits.",
+    "integration": "Real per-editor failure and bone-lock recovery, merged-surface geometry rollback, full knee pose/RBF deformation, live shape output, collection restoration and native document commit/read tests accompany the cheap boundary contracts."
+  }
+}

@@ -5,6 +5,7 @@ XYZ would change additive facial animation, even with matching neutral poses.
 Units remain centimetres and degrees; scene adapters still handle unit scale.
 """
 
+from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -82,7 +83,11 @@ class CanonicalDNAWriter:
     def write(self) -> None:
         from ..bindings import dna
         from ..runtime.engine import invalidate_model_file
+        from .document import partition_backup, publish_partition, validate_write
         from .misc import release_dna_handle
+
+        validate_write(self.file_path)
+        previous_partition = partition_backup(self.file_path)
 
         self.writer.write()
         if not dna.Status.isOk():
@@ -97,14 +102,20 @@ class CanonicalDNAWriter:
         writer_class = dna.JSONStreamWriter if self.file_format == "json" else dna.BinaryStreamWriter
         output = writer_class(stream)
         try:
-            output.setFrom(reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
-            output.write()
-            if not dna.Status.isOk():
-                raise RuntimeError(dna.Status.get().message)
-        finally:
-            release_dna_handle(output)
-            release_dna_handle(stream)
-            release_dna_handle(reader)
+            try:
+                output.setFrom(reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
+                output.write()
+                if not dna.Status.isOk():
+                    raise RuntimeError(dna.Status.get().message)
+            finally:
+                release_dna_handle(output)
+                release_dna_handle(stream)
+                release_dna_handle(reader)
+            publish_partition(self.file_path)
+        except Exception:
+            if previous_partition is not None:
+                self.file_path.write_bytes(previous_partition)
+            raise
 
     def close(self) -> None:
         from .misc import release_dna_handle
@@ -112,3 +123,53 @@ class CanonicalDNAWriter:
         release_dna_handle(self.writer)
         release_dna_handle(self.stream)
         self.writer = self.stream = None
+
+
+def write_shape_targets(file_path: Path, targets: dict[tuple[int, int], tuple[list[int], list[list[float]]]]) -> None:
+    """Patch existing targets in place, preserving every other native DNA field.
+
+    Deltas use Blender's basis and the DNA's translation units, as returned by
+    the configured reader. Only these vectors need the inverse basis transform;
+    re-expressing the whole rig can otherwise change neutral Euler branches.
+    Structural edits and exports continue through CanonicalDNAWriter.
+    """
+    from ..bindings import dna
+    from ..runtime.engine import invalidate_model_file
+    from .document import partition_backup, publish_partition, validate_write
+    from .misc import release_dna_handle
+
+    validate_write(file_path)
+    previous_partition = partition_backup(file_path)
+    try:
+        with ExitStack() as handles:
+            source = dna.FileStream(str(file_path), dna.AccessMode_Read, dna.OpenMode_Binary, None)
+            handles.callback(release_dna_handle, source)
+            reader = dna.BinaryStreamReader(source, configuration(blender=False), None)
+            handles.callback(release_dna_handle, reader)
+            reader.read()
+            if not dna.Status.isOk():
+                raise RuntimeError(dna.Status.get().message)
+            stream = dna.FileStream(str(file_path), dna.AccessMode_Write, dna.OpenMode_Binary, None)
+            handles.callback(release_dna_handle, stream)
+            writer = dna.BinaryStreamWriter(stream)
+            handles.callback(release_dna_handle, writer)
+            writer.setFrom(reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
+            for (mesh, target), (indices, deltas) in targets.items():
+                if not 0 <= mesh < reader.getMeshCount() or not 0 <= target < reader.getBlendShapeTargetCount(mesh):
+                    raise ValueError("A target-only edit cannot add a new mesh or shape target.")
+                vertex_count = reader.getVertexPositionCount(mesh)
+                if len(indices) != len(deltas) or any(index < 0 or index >= vertex_count for index in indices):
+                    raise ValueError("Invalid sparse shape target vertex indices.")
+                writer.setBlendShapeTargetVertexIndices(mesh, target, indices)
+                writer.setBlendShapeTargetDeltas(mesh, target, [[float(x), float(z), -float(y)] for x, y, z in deltas])
+            release_dna_handle(reader)
+            release_dna_handle(source)
+            invalidate_model_file(file_path)
+            writer.write()
+            if not dna.Status.isOk():
+                raise RuntimeError(dna.Status.get().message)
+        publish_partition(file_path, targets=set(targets))
+    except Exception:
+        if previous_partition is not None:
+            file_path.write_bytes(previous_partition)
+        raise

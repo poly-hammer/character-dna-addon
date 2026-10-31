@@ -10,7 +10,7 @@ import bpy
 import numpy as np
 
 # local imports
-from ..constants import SHAPE_KEY_BASIS_NAME, ComponentType
+from ..constants import SHAPE_KEY_BASIS_NAME, SHAPE_KEY_DELTA_THRESHOLD, ComponentType
 from ..typing import *  # noqa: F403
 from ..utilities import (
     exclude_rig_instance_evaluation,
@@ -50,7 +50,7 @@ def _json_input_stream(file_path: Path, memory_resource: Any) -> Any:
             return token
         return b"0.0" if 0 < abs(float(token)) < minimum else token
 
-    data = re.sub(rb'"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?[eE]-\d+', normalize, file_path.read_bytes())
+    data = re.sub(rb'"(?:[^"\\]|\\.)*"|(?<![0-9.])-?\d+(?:\.\d+)?[eE]-\d+', normalize, file_path.read_bytes())
     stream = dna.MemoryStream(memory_resource)
     stream.write(data.decode("utf-8"), len(data))
     stream.seek(0)
@@ -187,6 +187,7 @@ def create_shape_key(
     prefix: str = "",
     is_neutral: bool = False,
     linear_modifier: float = 1.0,
+    delta_flags: dict[str, bool] | None = None,
 ) -> bpy.types.ShapeKey | None:
     if not mesh_object:
         logger.error(f"Mesh object not found for shape key {name}. Skipping creation.")
@@ -203,7 +204,9 @@ def create_shape_key(
     window_manager_properties.progress_mesh_name = mesh_object.name
     # create the new key block on the shape key
     logger.debug(f"Creating shape key {name}")
-    shape_key_name = f"{prefix}{name}"
+    from ..shape_names import ensure_name
+
+    shape_key_name = ensure_name(mesh_object.data.shape_keys, f"{prefix}{name}", mesh=prefix.removesuffix("__") or None)
 
     switch_to_object_mode()
 
@@ -220,8 +223,9 @@ def create_shape_key(
     shape_key_block.value = 0.0
 
     # Import the deltas if the shape key is not supposed to be neutral
+    has_deltas = False
     if not is_neutral:
-        apply_blend_shape_deltas(
+        has_deltas = apply_blend_shape_deltas(
             mesh_object=mesh_object,
             shape_key_block=shape_key_block,
             reader=reader,
@@ -232,6 +236,8 @@ def create_shape_key(
         )
 
     shape_key_block.lock_shape = True
+    if delta_flags is not None:
+        delta_flags[f"{prefix}{name}"] = has_deltas
 
     return shape_key_block
 
@@ -244,17 +250,18 @@ def apply_blend_shape_deltas(
     index: int,
     name: str,
     linear_modifier: float = 1.0,
-) -> None:
+) -> bool:
     """Apply a DNA blend shape target's deltas onto ``shape_key_block`` using
     vectorized numpy + ``foreach_get``/``foreach_set`` for speed.
 
     Reads the basis (reference key) coordinates once, scales the sparse deltas
     from DNA units into Blender units, scatters them onto the
     affected vertices, and writes the whole shape key in a single bulk call.
+    Returns whether its resulting coordinates exceed the editor's delta threshold.
     """
     vertex_indices = reader.getBlendShapeTargetVertexIndices(mesh_index, index)
     if len(vertex_indices) == 0:
-        return
+        return False
 
     reference_key = mesh_object.data.shape_keys.reference_key  # type: ignore[attr-defined]
     vertex_count = len(reference_key.data)
@@ -287,3 +294,4 @@ def apply_blend_shape_deltas(
     # the new vertex layout is the original vertex layout with the deltas from the dna applied
     new[vertex_indices] = base[vertex_indices] + scaled
     shape_key_block.data.foreach_set("co", new_flat)
+    return bool(np.any(np.linalg.norm(new[vertex_indices] - base[vertex_indices], axis=1) > SHAPE_KEY_DELTA_THRESHOLD))

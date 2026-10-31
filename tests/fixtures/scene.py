@@ -10,6 +10,7 @@ import pytest
 from mathutils import Euler, Vector
 
 from constants import TEST_DNA_FOLDER, TEST_FBX_FOLDER
+from fixtures.rigs import RigProfile
 
 
 if TYPE_CHECKING:
@@ -74,114 +75,82 @@ def _load_temp_body_dna(
     )
 
 
-@pytest.fixture(scope="session")
-def load_head_dna(
-    addon,
-    dna_folder_name: str,
-    import_shape_keys: bool,
-    import_lods: list,
-):
-    load_dna(
-        file_path=TEST_DNA_FOLDER / dna_folder_name / "head.dna",
-        import_lods=import_lods,
-        import_shape_keys=import_shape_keys,
-        import_face_board=True,
-        include_body=True,
+@pytest.fixture(scope="module")
+def load_head_dna(rig_factory, tmp_path_factory, dna_folder_name, import_shape_keys, import_lods):
+    profile = RigProfile(
+        asset=dna_folder_name,
+        lods=tuple(int(lod[-1]) for lod in import_lods),
+        shape_keys=import_shape_keys,
+        face_board=True,
+        materials=True,
     )
+    with rig_factory.lease(profile, tmp_path_factory.mktemp("head_pose_module")):
+        yield
 
 
-@pytest.fixture(scope="session")
-def load_body_dna(
-    addon,
-    dna_folder_name: str,
-    import_shape_keys: bool,
-    import_lods: list,
-):
-    load_dna(
-        file_path=TEST_DNA_FOLDER / dna_folder_name / "body.dna",
-        import_lods=import_lods,
-        import_shape_keys=import_shape_keys,
-        import_face_board=False,
-        include_body=False,
+@pytest.fixture(scope="module")
+def load_body_dna(rig_factory, tmp_path_factory, dna_folder_name, import_shape_keys, import_lods):
+    profile = RigProfile(
+        components=("body",),
+        asset=dna_folder_name,
+        lods=tuple(int(lod[-1]) for lod in import_lods),
+        shape_keys=import_shape_keys,
+        materials=True,
     )
-
-
-@pytest.fixture(scope="session")
-def load_body_dna_for_pose_editing(
-    addon,
-    temp_folder,
-    dna_folder_name: str,
-    import_shape_keys: bool,
-    import_lods: list,
-):
-    _load_temp_body_dna(
-        file_name="body.dna",
-        temp_folder=temp_folder,
-        dna_folder_name=dna_folder_name,
-        import_shape_keys=import_shape_keys,
-        import_lods=import_lods,
-    )
-
-
-@pytest.fixture(scope="session")
-def load_body_dna_for_pose_roundtrip(
-    addon,
-    temp_folder,
-    dna_folder_name: str,
-    import_shape_keys: bool,
-    import_lods: list,
-):
-    _load_temp_body_dna(
-        file_name="body.dna",
-        temp_folder=temp_folder,
-        dna_folder_name=dna_folder_name,
-        import_shape_keys=import_shape_keys,
-        import_lods=import_lods,
-    )
-
-
-@pytest.fixture(scope="session")
-def load_full_dna_for_animation(
-    addon,
-    temp_folder,
-    dna_folder_name: str,
-    import_shape_keys: bool,
-    import_lods: list,
-):
-    load_dna(
-        file_path=TEST_DNA_FOLDER / dna_folder_name / "head.dna",
-        import_lods=import_lods,
-        import_shape_keys=import_shape_keys,
-        import_face_board=True,
-        include_body=True,
-    )
-
-
-@pytest.fixture(scope="session")
-def load_dna_for_rig_instance_ops(addon):
-    load_dna(
-        file_path=TEST_DNA_FOLDER / "ada" / "head.dna",
-        import_lods=["lod0"],
-        import_shape_keys=False,
-        import_face_board=True,
-        include_body=True,
-    )
+    with rig_factory.lease(profile, tmp_path_factory.mktemp("body_pose_module")):
+        yield
 
 
 @pytest.fixture
-def load_head_only_dna(addon):
-    """A head DNA imported with no body, so nothing constrains the head rig's neck bones."""
-    load_dna(
-        file_path=TEST_DNA_FOLDER / "ada" / "head.dna",
-        import_lods=["lod0"],
-        import_shape_keys=False,
-        import_face_board=True,
-        include_body=False,
+def load_body_dna_for_pose_editing(rig_factory, tmp_path, dna_folder_name, import_shape_keys, import_lods):
+    profile = RigProfile(
+        components=("body",),
+        asset=dna_folder_name,
+        lods=tuple(int(lod[-1]) for lod in import_lods),
+        shape_keys=import_shape_keys,
+        materials=True,
     )
+    with rig_factory.lease(profile, tmp_path):
+        yield
 
 
-@pytest.fixture(scope="session")
-def load_mhc_conformed_topology_meshes(addon):
+@pytest.fixture
+def load_body_dna_for_pose_roundtrip(load_body_dna_for_pose_editing):
+    yield
+
+
+@pytest.fixture
+def load_full_dna_for_animation(rig_factory, tmp_path, compact_dna, import_shape_keys, import_lods):
+    # Animation routing and baking need the complete skeleton, native behavior,
+    # face board and material nodes, but do not inspect dense surface geometry.
+    profile = RigProfile(
+        asset=str(compact_dna),
+        lods=tuple(int(lod[-1]) for lod in import_lods),
+        shape_keys=import_shape_keys,
+        face_board=True,
+        materials=True,
+    )
+    with rig_factory.lease(profile, tmp_path):
+        yield
+
+
+@pytest.fixture
+def load_dna_for_rig_instance_ops(rig_factory, tmp_path):
+    with rig_factory.lease(RigProfile(face_board=True, materials=True), tmp_path):
+        yield
+
+
+@pytest.fixture
+def load_head_only_dna(rig_factory, tmp_path):
+    """A head DNA imported with no body, so nothing constrains the head rig's neck bones."""
+    from fixtures.rigs import RigProfile
+
+    with rig_factory.lease(RigProfile(components=("head",), face_board=True, materials=True), tmp_path):
+        yield
+
+
+@pytest.fixture
+def load_mhc_conformed_topology_meshes(empty_character_scene):
     # open default scene
     bpy.ops.wm.read_homefile(app_template="")
     # import head and body wrapped meshes
@@ -197,33 +166,27 @@ def load_mhc_conformed_topology_meshes(addon):
 
 
 @pytest.fixture(scope="session")
-def setup_reference_blend_file(addon, temp_folder) -> Path:
-    load_dna(
-        file_path=TEST_DNA_FOLDER / "ada" / "head.dna",
-        import_lods=["lod0"],
-        import_shape_keys=False,
-        import_face_board=True,
-        include_body=True,
-    )
-    instance = bpy.context.scene.character_dna.rig_instance_list[0]
-    face = instance.face_board
-    face["authored_reference_control"] = True
-    jaw = face.pose.bones["CTRL_C_jaw"]
-    for frame, value in ((1, 0.0), (10, 0.8), (25, 0.2), (50, 1.0), (100, 0.4), (200, 0.0)):
-        jaw.location.y = value
-        jaw.keyframe_insert(data_path="location", index=1, frame=frame)
-    root = bpy.data.collections.get((instance.name, None))
-    nested = bpy.data.collections.new("reference_nested")
-    root.children.link(nested)
-    helper = bpy.data.objects.new("reference_shared_helper", None)
-    root.objects.link(helper)
-    nested.objects.link(helper)
-    _add_reference_control_rig(instance, root)
-    bpy.context.scene.frame_set(1)
-    file_path = temp_folder / "reference_blend_file.blend"
-    # Save the blend file
-    bpy.ops.wm.save_as_mainfile(filepath=str(file_path))
-
+def setup_reference_blend_file(rig_factory, tmp_path_factory) -> Path:
+    # Keep the complete source character and authored animation. Only its
+    # initial construction is shared; the saved reference owns private DNA.
+    folder = tmp_path_factory.mktemp("reference_source")
+    with rig_factory.lease(RigProfile(face_board=True, materials=True), folder) as instance:
+        face = instance.face_board
+        face["authored_reference_control"] = True
+        jaw = face.pose.bones["CTRL_C_jaw"]
+        for frame, value in ((1, 0.0), (10, 0.8), (25, 0.2), (50, 1.0), (100, 0.4), (200, 0.0)):
+            jaw.location.y = value
+            jaw.keyframe_insert(data_path="location", index=1, frame=frame)
+        root = bpy.data.collections.get((instance.name, None))
+        nested = bpy.data.collections.new("reference_nested")
+        root.children.link(nested)
+        helper = bpy.data.objects.new("reference_shared_helper", None)
+        root.objects.link(helper)
+        nested.objects.link(helper)
+        _add_reference_control_rig(instance, root)
+        bpy.context.scene.frame_set(1)
+        file_path = folder / "reference_blend_file.blend"
+        bpy.ops.wm.save_as_mainfile(filepath=str(file_path))
     return file_path
 
 
@@ -289,7 +252,7 @@ def _add_reference_control_rig(instance: "RigInstance", root: bpy.types.Collecti
     control["reference_body_samples"] = samples
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def head_bmesh(load_head_dna) -> bmesh.types.BMesh | None:
     from character_dna.dna_io.exporter import DNAExporter
     from character_dna.utilities import get_active_head
@@ -300,7 +263,7 @@ def head_bmesh(load_head_dna) -> bmesh.types.BMesh | None:
     return None
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def head_armature(load_head_dna) -> bpy.types.Object | None:
     from character_dna.utilities import get_active_head
 
@@ -312,7 +275,10 @@ def head_armature(load_head_dna) -> bpy.types.Object | None:
 
 @pytest.fixture(scope="session")
 def modify_head_scene(
-    load_head_dna,
+    rig_factory,
+    tmp_path_factory,
+    import_lods,
+    import_shape_keys,
     dna_folder_name: str,
     changed_head_bone_name: str,
     changed_head_bone_location: tuple[Vector, Vector],
@@ -334,33 +300,43 @@ def modify_head_scene(
         apply_vertex_transform,
     )
 
-    # Make some changes
-    apply_vertex_transform(
-        prefix=dna_folder_name,
-        mesh_name=changed_head_mesh_name,
-        vertex_index=changed_head_vertex_index,
-        location=changed_head_vertex_location[0],
+    profile = RigProfile(
+        asset=dna_folder_name,
+        lods=tuple(int(lod[-1]) for lod in import_lods),
+        shape_keys=import_shape_keys,
+        face_board=True,
+        materials=True,
     )
-    apply_vertex_normal(
-        prefix=dna_folder_name,
-        mesh_name=changed_head_mesh_name,
-        vertex_index=changed_head_normal_index,
-        normal=changed_head_normal_vector[0],
-    )
-    apply_bone_transform(
-        prefix=dna_folder_name,
-        component="head",
-        bone_name=changed_head_bone_name,
-        location=changed_head_bone_location[0],
-        rotation=changed_head_bone_rotation[0],
-    )
-    apply_vertex_group_weight(
-        prefix=dna_folder_name,
-        mesh_name=changed_head_mesh_name,
-        vertex_group_name=changed_head_vertex_group_name,
-        vertex_index=changed_head_vertex_group_vertex_index,
-        weight=changed_head_vertex_group_weight,
-    )
+    path = temp_folder / f"{dna_folder_name}_head_modified.blend"
+    with rig_factory.lease(profile, tmp_path_factory.mktemp("modified_head")):
+        # Make some changes
+        apply_vertex_transform(
+            prefix=dna_folder_name,
+            mesh_name=changed_head_mesh_name,
+            vertex_index=changed_head_vertex_index,
+            location=changed_head_vertex_location[0],
+        )
+        apply_vertex_normal(
+            prefix=dna_folder_name,
+            mesh_name=changed_head_mesh_name,
+            vertex_index=changed_head_normal_index,
+            normal=changed_head_normal_vector[0],
+        )
+        apply_bone_transform(
+            prefix=dna_folder_name,
+            component="head",
+            bone_name=changed_head_bone_name,
+            location=changed_head_bone_location[0],
+            rotation=changed_head_bone_rotation[0],
+        )
+        apply_vertex_group_weight(
+            prefix=dna_folder_name,
+            mesh_name=changed_head_mesh_name,
+            vertex_group_name=changed_head_vertex_group_name,
+            vertex_index=changed_head_vertex_group_vertex_index,
+            weight=changed_head_vertex_group_weight,
+        )
 
-    # Save the blend file
-    bpy.ops.wm.save_as_mainfile(filepath=str(temp_folder / f"{dna_folder_name}_head_modified.blend"))
+        # Save the blend file
+        bpy.ops.wm.save_as_mainfile(filepath=str(temp_folder / f"{dna_folder_name}_head_modified.blend"))
+    return path

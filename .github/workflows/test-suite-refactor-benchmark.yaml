@@ -1,0 +1,145 @@
+name: Test suite refactor benchmark
+run-name: Test suite benchmark - ${{ inputs.lane }} (${{ inputs.repetitions }} pairs)
+
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: Supported platform and Blender version to measure
+        required: true
+        type: choice
+        default: ubuntu-latest / 5.2
+        options:
+          - ubuntu-latest / 5.2
+          - windows-latest / 4.5
+          - windows-latest / 5.2
+          - macos-latest / 4.5
+          - macos-latest / 5.2
+      repetitions:
+        description: Sequential matched pairs, including the original slow suite
+        required: true
+        type: choice
+        default: "1"
+        options: ["1", "3"]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Across branches and manual dispatches, only one benchmark may occupy runners.
+  group: test-suite-refactor-benchmark
+  cancel-in-progress: false
+
+jobs:
+  select-lane:
+    name: Select requested benchmark lane
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Build the requested sequential pairs
+        id: matrix
+        shell: python
+        env:
+          BENCHMARK_LANE: ${{ inputs.lane }}
+          BENCHMARK_REPETITIONS: ${{ inputs.repetitions }}
+        run: |
+          import json
+          import os
+
+          system, blender = os.environ["BENCHMARK_LANE"].split(" / ")
+          supported = {
+              ("ubuntu-latest", "5.2"),
+              ("windows-latest", "4.5"), ("windows-latest", "5.2"),
+              ("macos-latest", "4.5"), ("macos-latest", "5.2"),
+          }
+          repetitions = int(os.environ["BENCHMARK_REPETITIONS"])
+          if (system, blender) not in supported or repetitions not in (1, 3):
+              raise ValueError("Choose a supported lane and one or three pairs")
+          matrix = {"include": [
+              {"os": system, "blender": blender,
+               "python": "3.11" if blender == "4.5" else "3.13",
+               "repetition": repeat}
+              for repeat in range(1, repetitions + 1)
+          ]}
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("matrix=" + json.dumps(matrix) + "\n")
+
+  matched-pairs:
+    # Ordinary PRs use on-pr.yaml. This expensive original-suite comparison is opt-in.
+    needs: [select-lane]
+    name: Matched pair ${{ matrix.repetition }} ${{ matrix.os }} Blender ${{ matrix.blender }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.select-lane.outputs.matrix) }}
+    env:
+      RUNNING_CI: "1"
+      CHARACTER_DNA_DEV: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Install Blender system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends git-lfs libegl1 libgl1 libsm6 libxfixes3 libxi6 libxkbcommon0 libxrender1 libxxf86vm1
+      - name: Checkout candidate
+        uses: actions/checkout@v7
+        with:
+          path: candidate
+          ref: ${{ github.sha }}
+          lfs: true
+          submodules: true
+          token: ${{ secrets.GH_PAT }}
+      - name: Checkout original suite
+        uses: actions/checkout@v7
+        with:
+          path: baseline
+          ref: f5f204b34673b0717404741b964f8de885ba9990
+          lfs: true
+          submodules: true
+          token: ${{ secrets.GH_PAT }}
+      - name: Checkout bindings
+        uses: actions/checkout@v7
+        with:
+          repository: poly-hammer/character-dna-bindings
+          ref: f72548dff3502394d1638b8e451382e8f58b2459
+          path: character-dna-bindings
+          token: ${{ secrets.GH_PAT }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v7
+      - name: Install one environment for both suites
+        working-directory: candidate
+        run: |
+          uv sync --python ${{ matrix.python }}
+          uv pip install "bpy==${{ matrix.blender }}.*" pytest==9.0.2 coverage==7.13.5
+      - name: Prepare identical bindings
+        working-directory: candidate
+        run: uv run --no-sync python scripts/test_suite_refactor/prepare_ci.py --bindings ../character-dna-bindings ../baseline .
+      - name: Measure one complete matched pair
+        id: measurement
+        continue-on-error: true
+        working-directory: candidate
+        run: uv run --no-sync python scripts/test_suite_refactor/run_benchmarks.py --baseline-root ../baseline --repeat 1 --repeat-start ${{ matrix.repetition }} --label ci-matched
+      - name: Compare the complete pair
+        if: ${{ !cancelled() }}
+        working-directory: candidate
+        run: uv run --no-sync python scripts/test_suite_refactor/summarize_benchmarks.py reports/test-suite-refactor/ci-matched/runs.json --minimum-pairs 1
+      - name: Preserve complete and interrupted evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-refactor-${{ matrix.os }}-${{ matrix.blender }}-${{ matrix.repetition }}
+          path: |
+            candidate/reports/test-suite-refactor/ci-matched/*.json
+            candidate/reports/test-suite-refactor/ci-matched/*.jsonl
+            candidate/reports/test-suite-refactor/ci-matched/*.log
+            candidate/reports/test-suite-refactor/ci-matched/*.xml
+            candidate/reports/test-suite-refactor/ci-matched/.coverage.*
+          include-hidden-files: true
+          retention-days: 14

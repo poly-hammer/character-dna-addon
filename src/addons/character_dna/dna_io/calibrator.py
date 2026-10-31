@@ -17,7 +17,6 @@ from ..constants import (
     NORMAL_DELTA_THRESHOLD,
     SHAPE_KEY_BASIS_NAME,
     SHAPE_KEY_DELTA_THRESHOLD,
-    SHAPE_KEY_NAME_MAX_LENGTH,
 )
 from ..typing import *  # noqa: F403  # noqa: F403
 from .exporter import DNAExporter
@@ -434,11 +433,6 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 self._dna_writer.setVertexPositions(meshIndex=mesh_index, positions=positions)
 
     def calibrate_shape_keys(self):
-        if self._component_type != "head":
-            # TODO: in the future, we may want to support shape key calibration for other components
-            # currently, we only calibrate shape keys for the head component
-            return
-
         for lod_index in range(self._dna_reader.getLODCount()):
             # Skip LODs without blend shape channels
             if len(self._dna_reader.getBlendShapeChannelIndicesForLOD(lod_index)) == 0:
@@ -484,12 +478,14 @@ class DNACalibrator(DNAExporter, DNAImporter):
                     channel_index = self._dna_reader.getBlendShapeChannelIndex(mesh_index, index)
                     shape_key_name = self._dna_reader.getBlendShapeChannelName(channel_index)
 
-                    # Currently, Blender has a limit of 63 characters for shape key names
-                    if len(f"{mesh_name}__{shape_key_name}") > SHAPE_KEY_NAME_MAX_LENGTH:
-                        continue
+                    from ..shape_names import find_key
 
-                    shape_key_block = mesh_object.data.shape_keys.key_blocks.get(f"{mesh_name}__{shape_key_name}")
+                    shape_key_block = find_key(mesh_object.data.shape_keys, f"{mesh_name}__{shape_key_name}")
                     if not shape_key_block:
+                        if len(f"{mesh_name}__{shape_key_name}".encode()) > 63:
+                            raise ValueError(
+                                f"Recover or import the missing DNA shape before calibration: {shape_key_name}"
+                            )
                         logger.error(
                             f"Shape key '{shape_key_name}' not found for mesh '{real_mesh_name}'. "
                             "Skipping calibration..."
@@ -581,6 +577,9 @@ class DNACalibrator(DNAExporter, DNAImporter):
                     continue
 
                 self._dna_writer.clearSkinWeights(meshIndex=mesh_index)
+                if mesh_object.data.vertices:
+                    self._dna_writer.setSkinWeightsValues(mesh_index, len(mesh_object.data.vertices) - 1, [])
+                groups_by_name = {group.name: group for group in mesh_object.vertex_groups}
                 # Create a lookup table for the vertex group names by their index
                 vertex_group_lookup = {
                     vertex_group.index: vertex_group.name for vertex_group in mesh_object.vertex_groups
@@ -598,7 +597,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
 
                     for vertex_group_name in vertex_group_names:
                         bone_index = bone_index_lookup.get(vertex_group_name)
-                        vertex_group = mesh_object.vertex_groups.get(vertex_group_name)
+                        vertex_group = groups_by_name.get(vertex_group_name)
                         if bone_index is not None and vertex_group:
                             weight = vertex_group.weight(vertex.index)
                             bone_indices.append(bone_index)
@@ -690,6 +689,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
         )
 
     def run(self) -> tuple[bool, str, str, Callable | None]:
+        self._prepare_merged_export()
         self.initialize_scene_data()
         if self._instance.output.run_validations:
             valid, title, message, fix = self.validate()
@@ -715,6 +715,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
             self.calibrate_bone_transforms()
 
         logger.info(f'Saving DNA to: "{self._target_dna_file}"...')
+        self._export_component_extensions()
         self._dna_writer.write()
 
         if not dna.Status.isOk():

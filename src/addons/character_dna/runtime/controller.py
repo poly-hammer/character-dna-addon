@@ -12,7 +12,7 @@ from typing import Any
 import bpy
 
 from ..constants import ToolInfo
-from . import engine, eyes, ui_refresh
+from . import engine, eyes, retention, ui_refresh
 
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def status() -> str:
 
 def release(instance: Any) -> None:
     """Release native ownership before DNA replacement or component reinitialization."""
-    if not _undoing and not _transitioning and engine.carriers(instance):
+    if not _undoing and not _transitioning and not retention.retained(instance) and engine.carriers(instance):
         engine.discard(instance)
         if not is_suspended(instance):
             request_sync()
@@ -60,7 +60,8 @@ def rebuild(instance: Any) -> None:
 
 def ensure_bindings(instance: Any) -> None:
     """Bind newly enabled local components before validating the saved runtime."""
-    if engine.missing_components(instance) and not any(
+    instance.enforce_merged_constraints()
+    if (engine.missing_components(instance) or instance.get("dna_shape_name_version", 0) < 1) and not any(
         carrier.library or carrier.override_library for carrier in engine.carriers(instance)
     ):
         rebuild(instance)
@@ -220,7 +221,7 @@ def after_undo() -> None:
         _undoing = False
 
 
-def suspend(instance: Any) -> bool:
+def suspend(instance: Any, *, preserve_bindings: bool = False) -> bool:
     """Give an editor or animation baker exclusive access to output channels."""
     if any(carrier.library or carrier.override_library for carrier in engine.carriers(instance)):
         raise ValueError("Linked character data is read-only; edit the source file or append the character")
@@ -232,18 +233,38 @@ def suspend(instance: Any) -> bool:
                 instance, component, instance.data.get(instance.cache_key(component, "instance"))
             )
         _suspended.add(identity)
-        engine.discard(instance)
+        if not preserve_bindings or not retention.pause(instance):
+            engine.discard(instance)
+            if preserve_bindings:
+                instance.destroy()
     return was_active
 
 
 def resume(instance: Any, was_active: bool) -> None:
     """Rebind only after the owning operation has released its mutable SDK state."""
     if was_active:
+        muted = retention.resume(instance)
         _suspended.discard(engine.instance_id(instance))
-        for component in ("body", "head"):
-            if instance.auto_evaluate and getattr(instance, f"auto_evaluate_{component}"):
-                instance.evaluate(component=component)
+        enabled = [component for component in ("body", "head") if getattr(instance, f"auto_evaluate_{component}")]
+        if instance.auto_evaluate and enabled:
+            instance.evaluate(component=enabled[0] if len(enabled) == 1 else "all")
+        retention.restore_mutes(muted)
         bpy.context.view_layer.update()
+
+
+@contextmanager
+def shape_import_operation(instance: Any):
+    """Lock component selection even when import starts with evaluation disabled."""
+    if is_suspended(instance):
+        raise RuntimeError("Commit or revert active edits before importing shape keys.")
+    was_active = suspend(instance, preserve_bindings=True)
+    identity = engine.instance_id(instance)
+    _suspended.add(identity)
+    try:
+        yield
+    finally:
+        _suspended.discard(identity)
+        resume(instance, was_active)
 
 
 @contextmanager

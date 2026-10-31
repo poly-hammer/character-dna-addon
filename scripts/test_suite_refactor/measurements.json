@@ -1,0 +1,167 @@
+{
+  "revision": "f5f204b34673b0717404741b964f8de885ba9990",
+  "date": "2026-10-29",
+  "environment": {
+    "os": "Windows",
+    "python": "3.13.11",
+    "blender": "5.2.0 LTS",
+    "coverage": "7.13.5",
+    "branch_coverage": true
+  },
+  "measurements": {
+    "baseline-selected": {
+      "exitstatus": 0,
+      "wall_seconds": 166.6391994000005,
+      "phase_seconds": {
+        "setup": 108.22812590000103,
+        "call": 49.616640499967616,
+        "teardown": 0.8390848000126425
+      },
+      "results": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "snapshot-preserved": {
+      "exitstatus": 0,
+      "wall_seconds": 83.05679970001802,
+      "phase_seconds": {
+        "setup": 37.37024579994613,
+        "call": 38.59773119998863,
+        "teardown": 0.6400799000111874
+      },
+      "results": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "baseline-rna": {
+      "exitstatus": 0,
+      "wall_seconds": 61.97422119998373,
+      "phase_seconds": {
+        "setup": 51.34391689999029,
+        "call": 2.264839999988908,
+        "teardown": 0.36418599999160506
+      },
+      "results": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "minimal-rna": {
+      "exitstatus": 0,
+      "wall_seconds": 7.890503200003877,
+      "phase_seconds": {
+        "setup": 0.35965469997609034,
+        "call": 0.00368920000619255,
+        "teardown": 0.02709730001515709
+      },
+      "results": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "baseline-rbf": {
+      "exitstatus": 0,
+      "wall_seconds": 95.69256709999172,
+      "phase_seconds": {
+        "setup": 52.4053173000284,
+        "call": 33.64109680001275,
+        "teardown": 0.4187724000075832
+      },
+      "results": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "body-rbf": {
+      "exitstatus": 0,
+      "wall_seconds": 37.17372960000648,
+      "phase_seconds": {
+        "setup": 15.75265169996419,
+        "call": 13.57646339997882,
+        "teardown": 0.1065206999774091
+      },
+      "results": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "body-cached-rbf": {
+      "exitstatus": 0,
+      "wall_seconds": 26.185804699984146,
+      "phase_seconds": {
+        "setup": 4.749067099997774,
+        "call": 13.152247799996985,
+        "teardown": 0.11397359997499734
+      },
+      "results": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "baseline-native": {
+      "exitstatus": 0,
+      "wall_seconds": 9.856644199986476,
+      "phase_seconds": {
+        "setup": 0.4048718999547418,
+        "call": 3.792070800001966,
+        "teardown": 0.030686100013554096
+      },
+      "results": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 1
+      }
+    },
+    "slim-native": {
+      "exitstatus": 0,
+      "wall_seconds": 13.518539200013038,
+      "phase_seconds": {
+        "setup": 1.024118799919961,
+        "call": 3.405011899943929,
+        "teardown": 0.014465899992501363
+      },
+      "results": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 1
+      }
+    },
+    "contracts-and-readers": {
+      "exitstatus": 0,
+      "wall_seconds": 7.870310199999949,
+      "phase_seconds": {
+        "setup": 0.006447099964134395,
+        "call": 1.1833635999064427,
+        "teardown": 0.00310089995036833
+      },
+      "results": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "contract-mutant": {
+      "exitstatus": 1,
+      "wall_seconds": 1.515690000000177,
+      "phase_seconds": {
+        "setup": 0.0035528999869711697,
+        "call": 0.02287459999206476,
+        "teardown": 0.0032110999745782465
+      },
+      "results": {
+        "passed": 0,
+        "failed": 12,
+        "skipped": 0
+      }
+    }
+  }
+}

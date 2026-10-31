@@ -399,9 +399,8 @@ def main() -> int:
     relevant_changes = has_relevant_changes(staged_files, watch_patterns, version_files)
 
     # Determine if version files are already staged
-    version_files_staged = any(
-        str(f) in [str(p) for p in version_files] for f in staged_files
-    )
+    resolved_version_files = {path.resolve() for path in version_files}
+    version_files_staged = any(path.resolve() in resolved_version_files for path in staged_files)
 
     if relevant_changes and not version_files_staged:
         # Auto-bump patch version

@@ -14,6 +14,7 @@ nav:
     - Raw Editor: "pro-features/raw-editor.md"
     - Shape Key Editor: "pro-features/shape-key-editor.md"
     - RBF Editor: "pro-features/rbf-editor.md"
+    - Swing/Twist Editor: "pro-features/swing-twist-editor.md"
     - Backup Manager: "pro-features/backup-manager.md"
   - Workflows:
     - Append & Link: "workflows/append-link.md"

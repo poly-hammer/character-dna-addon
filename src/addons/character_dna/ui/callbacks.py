@@ -639,6 +639,10 @@ def set_active_lod(self: "CharacterViewOptionsProperties", value: int):
     body_lod_object = bpy.data.objects.get(f"{instance.name}_body_lod{body_lod_index}_mesh")
     if body_lod_object and not is_readonly_id(body_lod_object):
         set_hidden(body_lod_object, False)
+    if instance.get("dna_merge_proxy"):
+        from ..editors.converter.scene_merge import sync_visibility
+
+        sync_visibility(instance)
 
 
 def set_show_head_bones(self: "CharacterViewOptionsProperties", value: bool):
@@ -950,9 +954,12 @@ def update_face_pose(self: "CharacterFaceBoardProperties", context: "Context"):
 def update_head_to_body_constraint_influence(self: "RigInstance", context: "Context"):  # noqa: ARG001
     if is_reference_readonly(self) or is_readonly_id(self.head_rig):
         return
-    head = get_active_head()
-    if head:
-        head.set_head_to_body_constraint_influence(self.head_to_body_constraint_influence)
+    from ..components.head import CharacterComponentHead
+
+    if self.components_merged:
+        self["head_to_body_constraint_influence"] = 1.0
+    head = CharacterComponentHead(rig_instance=self)
+    head.set_head_to_body_constraint_influence(self.head_to_body_constraint_influence)
 
 
 def get_head_mesh_output_items(instance: "RigInstance") -> list[bpy.types.Object]:
@@ -1174,21 +1181,18 @@ def update_head_output_items(self: "RigInstance | None", context: "Context"):  #
                     instance.output.head_item_list.remove(index)
 
 
-def update_output_component(self: "RigInstance", context: "Context"):
-    update_head_output_items(self, context)
-    update_body_output_items(self, context)
-
-
 # Cache of LOD enum items keyed by rig-instance name. The value is the tuple of
 # currently-available LOD indices (the cache key) paired with the built item list.
 # Returning the same list object across redraws keeps Python references alive (a
 # requirement for callback-based EnumProperty items) and avoids re-allocating the
 # item strings on every N-panel redraw, which is what made the View Options panel lag.
-_LOD_ITEMS_DEFAULT: list[tuple[str, str, str]] = [("lod0", "LOD 0", "Displays only LOD 0")]
-_lod_items_cache: dict[str, tuple[int, list[tuple[str, str, str]]]] = {}
+_LOD_ITEMS_DEFAULT: list[tuple[str, str, str, int, int]] = [("lod0", "LOD 0", "Displays only LOD 0", 0, 0)]
+_lod_items_cache: dict[str, tuple[tuple[int, tuple[int, ...]], list[tuple[str, str, str, int, int]]]] = {}
 
 
-def get_head_mesh_lod_items(self: "CharacterViewOptionsProperties", context: "Context") -> list[tuple[str, str, str]]:  # noqa: ARG001
+def get_head_mesh_lod_items(
+    _self: "CharacterViewOptionsProperties", _context: "Context"
+) -> list[tuple[str, str, str, int, int]]:
     try:
         instance = get_active_rig_instance()
     except AttributeError:
@@ -1198,20 +1202,23 @@ def get_head_mesh_lod_items(self: "CharacterViewOptionsProperties", context: "Co
         return _LOD_ITEMS_DEFAULT
 
     name = instance.name
+    merged_lods = tuple(
+        sorted(int(lod) for lod, obj in instance.get("dna_merged_surfaces", {}).items() if obj is not None)
+    )
     # This items callback runs on every panel redraw. Probing each LOD mesh with
-    # ``bpy.data.objects.get`` is comparatively expensive, so guard the cache with
-    # the object count instead: LOD-mesh availability only changes when meshes are
-    # imported or removed, which always changes ``len(bpy.data.objects)``. This
-    # keeps the common redraw path down to a single O(1) length read.
-    guard = len(bpy.data.objects)
+    # ``bpy.data.objects.get`` is comparatively expensive. Merged surfaces define
+    # availability even when canonical head meshes no longer belong to the scene.
+    guard = (len(bpy.data.objects), merged_lods)
     cached = _lod_items_cache.get(name)
     if cached is not None and cached[0] == guard:
         # Nothing changed since the last redraw, return the same list object.
         return cached[1]
 
-    available = tuple(i for i in range(NUMBER_OF_HEAD_LODS) if bpy.data.objects.get(f"{name}_head_lod{i}_mesh"))
+    available = merged_lods or tuple(
+        i for i in range(NUMBER_OF_HEAD_LODS) if bpy.data.objects.get(f"{name}_head_lod{i}_mesh")
+    )
     if available:
-        items = [(f"lod{i}", f"LOD {i}", f"Displays only LOD {i}") for i in available]
+        items = [(f"lod{i}", f"LOD {i}", f"Displays only LOD {i}", 0, i) for i in available]
     else:
         items = _LOD_ITEMS_DEFAULT
 

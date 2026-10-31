@@ -1,0 +1,847 @@
+{
+  "tests": {
+    "tests/test_addon_registration.py": "tests/blender/test_addon_registration.py",
+    "tests/test_animation.py": "tests/blender/test_animation.py",
+    "tests/test_animation_validators.py": "tests/blender/test_animation_validators.py",
+    "tests/test_bindings_no_top_level_modules.py": "tests/blender/test_bindings_no_top_level_modules.py",
+    "tests/test_binding_installation.py": "tests/blender/test_binding_installation.py",
+    "tests/test_blender_process.py": "tests/blender/test_blender_process.py",
+    "tests/test_body_rbf_editor.py": "tests/blender/test_body_rbf_editor.py",
+    "tests/test_body_rig_logic.py": "tests/blender/test_body_rig_logic.py",
+    "tests/test_body_rig_logic_unreal.py": "tests/blender/test_body_rig_logic_unreal.py",
+    "tests/test_calibrate_validation.py": "tests/blender/test_calibrate_validation.py",
+    "tests/test_ci_benchmark.py": "tests/blender/test_ci_benchmark.py",
+    "tests/test_compact_document.py": "tests/blender/test_compact_document.py",
+    "tests/test_component_editing.py": "tests/blender/test_component_editing.py",
+    "tests/test_component_lod_visibility.py": "tests/blender/test_component_lod_visibility.py",
+    "tests/test_coordinate_migration.py": "tests/blender/test_coordinate_migration.py",
+    "tests/test_dna_coordinates.py": "tests/blender/test_dna_coordinates.py",
+    "tests/test_dna_document_metadata.py": "tests/blender/test_dna_document_metadata.py",
+    "tests/test_dna_metadata.py": "tests/blender/test_dna_metadata.py",
+    "tests/test_dna_operation_backups.py": "tests/blender/test_dna_operation_backups.py",
+    "tests/test_dna_scene_sources.py": "tests/blender/test_dna_scene_sources.py",
+    "tests/test_driver_recovery.py": "tests/blender/test_driver_recovery.py",
+    "tests/test_editor_component_corrections.py": "tests/blender/test_editor_component_corrections.py",
+    "tests/test_editor_runtime_lifecycle.py": "tests/blender/test_editor_runtime_lifecycle.py",
+    "tests/test_eye_convergence.py": "tests/blender/test_eye_convergence.py",
+    "tests/test_eye_visibility_bindings.py": "tests/blender/test_eye_visibility_bindings.py",
+    "tests/test_face_board_reposition.py": "tests/blender/test_face_board_reposition.py",
+    "tests/test_fbx_reader.py": "tests/blender/test_fbx_reader.py",
+    "tests/test_fbx_writer.py": "tests/blender/test_fbx_writer.py",
+    "tests/test_head_body_seam_normals.py": "tests/blender/test_head_body_seam_normals.py",
+    "tests/test_head_calibrator.py": "tests/blender/test_head_calibrator.py",
+    "tests/test_head_exporter.py": "tests/blender/test_head_exporter.py",
+    "tests/test_head_import_metadata.py": "tests/blender/test_head_import_metadata.py",
+    "tests/test_head_import_repeatability.py": "tests/blender/test_head_import_repeatability.py",
+    "tests/test_head_only_evaluation.py": "tests/blender/test_head_only_evaluation.py",
+    "tests/test_head_overwrite_exporter.py": "tests/blender/test_head_overwrite_exporter.py",
+    "tests/test_head_overwrite_shape_keys.py": "tests/blender/test_head_overwrite_shape_keys.py",
+    "tests/test_head_rig_logic.py": "tests/blender/test_head_rig_logic.py",
+    "tests/test_head_shape_keys.py": "tests/blender/test_head_shape_keys.py",
+    "tests/test_legacy_data_migration.py": "tests/blender/test_legacy_data_migration.py",
+    "tests/test_merge_lod_selection.py": "tests/blender/test_merge_lod_selection.py",
+    "tests/test_merge_restore_visibility.py": "tests/blender/test_merge_restore_visibility.py",
+    "tests/test_merge_split.py": "tests/blender/test_merge_split.py",
+    "tests/test_multi_character_import.py": "tests/blender/test_multi_character_import.py",
+    "tests/test_name_prefixes.py": "tests/blender/test_name_prefixes.py",
+    "tests/test_native_baking.py": "tests/blender/test_native_baking.py",
+    "tests/test_native_bindings.py": "tests/blender/test_native_bindings.py",
+    "tests/test_native_document.py": "tests/blender/test_native_document.py",
+    "tests/test_native_evaluation_ownership.py": "tests/blender/test_native_evaluation_ownership.py",
+    "tests/test_native_loader.py": "tests/blender/test_native_loader.py",
+    "tests/test_native_merged_graph.py": "tests/blender/test_native_merged_graph.py",
+    "tests/test_native_runtime.py": "tests/blender/test_native_runtime.py",
+    "tests/test_native_ui_refresh.py": "tests/blender/test_native_ui_refresh.py",
+    "tests/test_native_undo.py": "tests/blender/test_native_undo.py",
+    "tests/test_output_component_selection.py": "tests/blender/test_output_component_selection.py",
+    "tests/test_rbf_edits.py": "tests/blender/test_rbf_edits.py",
+    "tests/test_reference_blend_file.py": "tests/blender/test_reference_blend_file.py",
+    "tests/test_render_sync.py": "tests/blender/test_render_sync.py",
+    "tests/test_rig_definition_validator.py": "tests/blender/test_rig_definition_validator.py",
+    "tests/test_rig_fixtures.py": "tests/blender/test_rig_fixtures.py",
+    "tests/test_rig_instance_ops.py": "tests/blender/test_rig_instance_ops.py",
+    "tests/test_runtime_namespace.py": "tests/blender/test_runtime_namespace.py",
+    "tests/test_runtime_retention.py": "tests/blender/test_runtime_retention.py",
+    "tests/test_shape_generation.py": "tests/blender/test_shape_generation.py",
+    "tests/test_shape_import_finalization.py": "tests/blender/test_shape_import_finalization.py",
+    "tests/test_shape_names.py": "tests/blender/test_shape_names.py",
+    "tests/test_source_animation.py": "tests/blender/test_source_animation.py",
+    "tests/test_swing_twist_editor.py": "tests/blender/test_swing_twist_editor.py",
+    "tests/test_undo_model_cache.py": "tests/blender/test_undo_model_cache.py",
+    "tests/test_view_layer_safety.py": "tests/blender/test_view_layer_safety.py",
+    "tests/test_working_source_editor_access.py": "tests/blender/test_working_source_editor_access.py",
+    "tests/conftest.py": "tests/blender/conftest.py",
+    "tests/behavior_viewer/test_graph.py": "tests/blender/behavior_viewer/test_graph.py",
+    "tests/behavior_viewer/test_html_report.py": "tests/blender/behavior_viewer/test_html_report.py",
+    "tests/converter/test_converter_data.py": "tests/blender/converter/test_converter_data.py",
+    "tests/converter/test_converter_e2e.py": "tests/blender/converter/test_converter_e2e.py",
+    "tests/converter/test_finger_frames.py": "tests/blender/converter/test_finger_frames.py",
+    "tests/converter/test_lod_transfer.py": "tests/blender/converter/test_lod_transfer.py",
+    "tests/converter/test_solver.py": "tests/blender/converter/test_solver.py",
+    "tests/converter/test_templates.py": "tests/blender/converter/test_templates.py",
+    "tests/converter/__init__.py": "tests/blender/converter/__init__.py",
+    "tests/raw_control_editor/test_bind_pose_defaults.py": "tests/blender/raw_control_editor/test_bind_pose_defaults.py",
+    "tests/raw_control_editor/test_blend_shape_backsolve.py": "tests/blender/raw_control_editor/test_blend_shape_backsolve.py",
+    "tests/raw_control_editor/test_bone_locking.py": "tests/blender/raw_control_editor/test_bone_locking.py",
+    "tests/raw_control_editor/test_dependency_chain.py": "tests/blender/raw_control_editor/test_dependency_chain.py",
+    "tests/raw_control_editor/test_lbs_forward.py": "tests/blender/raw_control_editor/test_lbs_forward.py",
+    "tests/raw_control_editor/test_mirror_raw_control_name.py": {
+      "matrix": "tests/unit/test_mirror_raw_control_name.py",
+      "live_dna": "tests/blender/raw_control_editor/test_mirror_raw_control_name.py"
+    },
+    "tests/raw_control_editor/test_paste_raw_control.py": "tests/blender/raw_control_editor/test_paste_raw_control.py",
+    "tests/raw_control_editor/test_raw_control_active_channels.py": "tests/blender/raw_control_editor/test_raw_control_active_channels.py",
+    "tests/raw_control_editor/test_shape_key_transfer.py": "tests/blender/raw_control_editor/test_shape_key_transfer.py",
+    "tests/raw_control_editor/test_solver_env_e2e.py": "tests/blender/raw_control_editor/test_solver_env_e2e.py",
+    "tests/raw_control_editor/test_solver_env_index.py": "tests/blender/raw_control_editor/test_solver_env_index.py",
+    "tests/raw_control_editor/test_solver_env_paths.py": "tests/blender/raw_control_editor/test_solver_env_paths.py",
+    "tests/raw_control_editor/test_solver_setup_operator.py": "tests/blender/raw_control_editor/test_solver_setup_operator.py",
+    "tests/raw_control_editor/test_target_mesh_symmetry.py": "tests/blender/raw_control_editor/test_target_mesh_symmetry.py",
+    "tests/raw_control_editor/test_transfer_pose_aware.py": "tests/blender/raw_control_editor/test_transfer_pose_aware.py",
+    "tests/raw_control_editor/test_transfer_shape_from_selected_mesh.py": "tests/blender/raw_control_editor/test_transfer_shape_from_selected_mesh.py",
+    "tests/raw_control_editor/test_transfer_to_head_shape_keys.py": "tests/blender/raw_control_editor/test_transfer_to_head_shape_keys.py",
+    "tests/raw_control_editor/__init__.py": "tests/blender/raw_control_editor/__init__.py",
+    "tests/rbf_editor/test_mirror_rbf_name.py": {
+      "matrix": "tests/unit/test_mirror_rbf_name.py",
+      "live_dna": "tests/blender/rbf_editor/test_mirror_rbf_name.py"
+    },
+    "tests/rbf_editor/test_shape_driven.py": "tests/blender/rbf_editor/test_shape_driven.py",
+    "tests/rbf_editor/test_unapplied_pose_edits.py": "tests/blender/rbf_editor/test_unapplied_pose_edits.py",
+    "tests/shape_key_editor/test_dependency_visibility.py": "tests/blender/shape_key_editor/test_dependency_visibility.py",
+    "tests/shape_key_editor/test_filter_helpers.py": "tests/blender/shape_key_editor/test_filter_helpers.py",
+    "tests/shape_key_editor/test_paste_shape_key_values.py": "tests/blender/shape_key_editor/test_paste_shape_key_values.py",
+    "tests/shape_key_editor/test_rbf_solve.py": "tests/blender/shape_key_editor/test_rbf_solve.py",
+    "tests/shape_key_editor/test_shape_key_delta_writeback.py": "tests/blender/shape_key_editor/test_shape_key_delta_writeback.py",
+    "tests/shape_key_editor/test_shape_key_side_classification.py": {
+      "matrix": "tests/unit/test_shape_key_side_classification.py",
+      "live_dna": "tests/blender/shape_key_editor/test_shape_key_side_classification.py"
+    },
+    "tests/mesh_editor/test_mesh_data_transfer.py": "tests/blender/mesh_editor/test_mesh_data_transfer.py",
+    "tests/mesh_editor/test_symmetry.py": "tests/blender/mesh_editor/test_symmetry.py",
+    "tests/mesh_editor/__init__.py": "tests/blender/mesh_editor/__init__.py"
+  },
+  "functions": {
+    "editors/shared/utilities.py:21": {
+      "name": "_swap_side_token",
+      "old_end": 31
+    },
+    "editors/shared/utilities.py:34": {
+      "name": "regex_side_mirror",
+      "old_end": 59
+    },
+    "editors/shared/utilities.py:62": {
+      "name": "classify_side_by_regex",
+      "old_end": 92
+    },
+    "editors/raw_control_editor/core.py:1299": {
+      "name": "get_mirror_side_replacement",
+      "old_end": 1320
+    },
+    "editors/raw_control_editor/core.py:1323": {
+      "name": "get_mirrored_name",
+      "old_end": 1351
+    },
+    "editors/raw_control_editor/core.py:1358": {
+      "name": "_RAW_CONTROL_PH_SUFFIX_RE",
+      "old_end": 1358
+    },
+    "editors/raw_control_editor/core.py:1359": {
+      "name": "_RAW_CONTROL_WORD_SIDE_RE",
+      "old_end": 1359
+    },
+    "editors/raw_control_editor/core.py:1360": {
+      "name": "_RAW_CONTROL_TRAILING_SIDE_RE",
+      "old_end": 1360
+    },
+    "editors/raw_control_editor/core.py:1362": {
+      "name": "_WORD_SIDE_SWAP",
+      "old_end": 1362
+    },
+    "editors/raw_control_editor/core.py:1363": {
+      "name": "_LETTER_SIDE_SWAP",
+      "old_end": 1363
+    },
+    "editors/raw_control_editor/core.py:1366": {
+      "name": "mirror_raw_control_name",
+      "old_end": 1409
+    },
+    "editors/raw_control_editor/core.py:1412": {
+      "name": "classify_raw_control_side",
+      "old_end": 1430
+    },
+    "editors/rbf_editor/utilities.py:1163": {
+      "name": "rbf_mirror_side_replacement",
+      "old_end": 1187
+    },
+    "editors/rbf_editor/utilities.py:1190": {
+      "name": "rbf_mirrored_name",
+      "old_end": 1212
+    },
+    "editors/rbf_editor/utilities.py:1215": {
+      "name": "can_mirror_rbf_name",
+      "old_end": 1216
+    },
+    "editors/shape_key_editor/properties.py:17": {
+      "name": "DEFAULT_SIDE_MIRROR_REGEX",
+      "old_end": 17
+    },
+    "editors/rbf_editor/properties.py:13": {
+      "name": "DEFAULT_SOLVER_MIRROR_REGEX",
+      "old_end": 13
+    },
+    "editors/rbf_editor/properties.py:14": {
+      "name": "DEFAULT_POSE_MIRROR_REGEX",
+      "old_end": 14
+    },
+    "editors/rbf_editor/properties.py:15": {
+      "name": "DEFAULT_BONE_MIRROR_REGEX",
+      "old_end": 15
+    }
+  },
+  "renamed_identifiers": {
+    "editors/rbf_editor/utilities.py": {
+      "get_mirror_side_replacement": "rbf_mirror_side_replacement",
+      "get_mirrored_name": "rbf_mirrored_name",
+      "can_mirror_name": "can_mirror_rbf_name"
+    }
+  },
+  "declarations": [
+    {
+      "before": "__init__.py",
+      "after": "__init__.py",
+      "name": "bl_info"
+    },
+    {
+      "before": "__init__.py",
+      "after": "__init__.py",
+      "name": "post_setup_scene_callbacks"
+    },
+    {
+      "before": "constants.py",
+      "after": "naming.py",
+      "name": "RAW_CONTROL_PREFIX"
+    }
+  ],
+  "imports": [
+    {
+      "before": [
+        "editors/raw_control_editor/core.py",
+        "import re"
+      ],
+      "after": [
+        "naming.py",
+        "import re"
+      ]
+    },
+    {
+      "before": [
+        "editors/shared/utilities.py",
+        "import re"
+      ],
+      "after": [
+        "naming.py",
+        "import re"
+      ]
+    },
+    {
+      "before": [
+        "editors/rbf_editor/utilities.py",
+        "import re"
+      ],
+      "after": [
+        "naming.py",
+        "import re"
+      ]
+    },
+    {
+      "before": [
+        "__init__.py",
+        "from collections.abc import Callable"
+      ],
+      "after": [
+        "__init__.py",
+        "from collections.abc import Callable"
+      ]
+    },
+    {
+      "before": [
+        "__init__.py",
+        "from . import constants, manual_map, operators, properties, rig_instance, utilities"
+      ],
+      "after": [
+        "registration.py",
+        "from . import constants, manual_map, operators, properties, utilities"
+      ]
+    }
+  ],
+  "reader_aliases": {
+    "rig_instance.py": {
+      "head_driven_bone_names": "self.head_dna_reader",
+      "body_driven_bone_names": "self.body_dna_reader"
+    }
+  },
+  "statements": [
+    {
+      "before": [
+        "runtime/bindings.py",
+        "from ..utilities.reference import resolve_output_target"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "from ..utilities.reference import resolve_output_target as resolve"
+      ],
+      "reason": "Defer the same import to avoid an engine-first import cycle; native undo and output binding cases exercise it."
+    },
+    {
+      "before": [
+        "runtime/bindings.py",
+        "variable.type = \"SINGLE_PROP\""
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "if variable.type != \"SINGLE_PROP\":"
+      ],
+      "reason": "Avoid a redundant RNA write when the default already matches; real driver variable tests verify the final type and target."
+    },
+    {
+      "before": [
+        "runtime/bindings.py",
+        "variable.targets[0].id_type = owner.id_type"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "if target.id_type != owner.id_type:"
+      ],
+      "reason": "Guard the same assignment; real OBJECT and SCENE owner cases cover both outcomes and resolve the variable."
+    },
+    {
+      "before": [
+        "runtime/bindings.py",
+        "variable.targets[0].id = owner"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "target.id = owner"
+      ],
+      "reason": "The same target is retained in a local variable; output binding numerical tests remain."
+    },
+    {
+      "before": [
+        "runtime/bindings.py",
+        "variable.targets[0].data_path = path"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "target.data_path = path"
+      ],
+      "reason": "The same target is retained in a local variable; output binding numerical tests remain."
+    },
+    {
+      "before": [
+        "__init__.py",
+        "\"version\": (0, 15, 1),"
+      ],
+      "after": [
+        "__init__.py",
+        "\"version\": (0, 15, 10),"
+      ],
+      "reason": "Required patch-version metadata update; no conditional behavior."
+    },
+    {
+      "before": [
+        "editors/rbf_editor/operators.py",
+        "toast_success(f\"Duplicated pose '{pose.name}' to '{new_pose_name}'\", duration=2.5)"
+      ],
+      "after": [
+        "editors/rbf_editor/operators.py",
+        "toast_success(f\"Duplicated pose '{source_name}' to '{new_pose_name}'\", duration=2.5)"
+      ],
+      "reason": "Capture the RNA name before a collection mutation can invalidate its wrapper; original duplicate-pose cases remain."
+    },
+    {
+      "before": [
+        "editors/rbf_editor/utilities.py",
+        "return False, f\"Poses '{name}' and '{other_name}' have the same complete driver rotation vector.\""
+      ],
+      "after": [
+        "editors/rbf_editor/utilities.py",
+        "return False, f\"Poses '{name}' and '{other_name}' have duplicate complete driver rotation vectors.\""
+      ],
+      "reason": "Diagnostic wording retains the same rejection branch; existing duplicate-driver validation asserts rejection."
+    },
+    {
+      "before": [
+        "rig_component.py",
+        "def get_shape_key_block(self, mesh_index: int, name: str) -> bpy.types.ShapeKey | None:"
+      ],
+      "after": [
+        "rig_component.py",
+        "def get_shape_key_block("
+      ],
+      "reason": "Resolve the scene mesh map once per synchronous batch. Real bone-only and subsequently loaded mesh tests preserve empty lookup recovery and the existing binding/shape output contracts."
+    },
+    {
+      "before": [
+        "rig_component.py",
+        "obj = self.mesh_index_lookup.get(mesh_index)"
+      ],
+      "after": [
+        "rig_component.py",
+        "obj = (self.mesh_index_lookup if meshes is None else meshes).get(mesh_index)"
+      ],
+      "reason": "Resolve the scene mesh map once per synchronous batch. Real bone-only and subsequently loaded mesh tests preserve empty lookup recovery and the existing binding/shape output contracts."
+    },
+    {
+      "before": [
+        "rig_component.py",
+        "if (block := self.get_shape_key_block(mesh, name)) is not None"
+      ],
+      "after": [
+        "rig_component.py",
+        "if (block := self.get_shape_key_block(mesh, name, meshes=meshes)) is not None"
+      ],
+      "reason": "Resolve the scene mesh map once per synchronous batch. Real bone-only and subsequently loaded mesh tests preserve empty lookup recovery and the existing binding/shape output contracts."
+    },
+    {
+      "before": [
+        "rig_component.py",
+        "block = self.get_shape_key_block(mesh, name)"
+      ],
+      "after": [
+        "rig_component.py",
+        "block = self.get_shape_key_block(mesh, name, meshes=meshes)"
+      ],
+      "reason": "Resolve the scene mesh map once per synchronous batch. Real bone-only and subsequently loaded mesh tests preserve empty lookup recovery and the existing binding/shape output contracts."
+    },
+    {
+      "before": [
+        "rig_component.py",
+        "obj = self.mesh_index_lookup.get(mesh)"
+      ],
+      "after": [
+        "rig_component.py",
+        "obj = meshes.get(mesh)"
+      ],
+      "reason": "Resolve the scene mesh map once per synchronous batch. Real bone-only and subsequently loaded mesh tests preserve empty lookup recovery and the existing binding/shape output contracts."
+    },
+    {
+      "before": [
+        "editors/rbf_editor/core.py",
+        "from typing import Any"
+      ],
+      "after": [
+        "editors/rbf_editor/core.py",
+        "from typing import Any, cast"
+      ],
+      "reason": "Add a type-only cast for the synchronous getter adapter; every original solver pose is compared with an uncached native reader."
+    },
+    {
+      "before": [
+        "rig_instance.py",
+        "for mesh, _, name in self.edit_target.shape_targets()"
+      ],
+      "after": [
+        "rig_instance.py",
+        "for mesh, _, name in component.shape_targets()"
+      ],
+      "function": "sync_shape_key_list",
+      "reason": "One synchronous mesh lookup per refresh; real empty-rig then loaded-key tests check recovery without a persistent cache."
+    },
+    {
+      "before": [
+        "rig_instance.py",
+        "if self.edit_target.get_shape_key_block(mesh, name) is not None"
+      ],
+      "after": [
+        "rig_instance.py",
+        "if component.get_shape_key_block(mesh, name, meshes=meshes) is not None"
+      ],
+      "function": "sync_shape_key_list",
+      "reason": "One synchronous mesh lookup per refresh; real empty-rig then loaded-key tests check recovery without a persistent cache."
+    },
+    {
+      "before": [
+        "rig_instance.py",
+        "self.data.pop(self.edit_target.cache_key(\"shape_key_has_deltas\"), None)"
+      ],
+      "after": [
+        "rig_instance.py",
+        "self.data.pop(component.cache_key(\"shape_key_has_deltas\"), None)"
+      ],
+      "function": "sync_shape_key_list",
+      "reason": "One synchronous mesh lookup per refresh; real empty-rig then loaded-key tests check recovery without a persistent cache."
+    },
+    {
+      "before": [
+        "runtime/bindings.py",
+        "curve = owner.animation_data.drivers.find(path, index=max(0, item[\"index\"]))"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "curve = owners[identity].get((path, max(0, item[\"index\"])))"
+      ],
+      "function": "mute_targets",
+      "reason": "Index each current owner once per call. Real removal, replacement, ownership and array-channel tests retain conditional behavior and prevent stale RNA reuse."
+    },
+    {
+      "function": "digest",
+      "reason": "Scalar array leaves are copied directly; nested containers still receive the same archive-field filter. Mixed nested/scalar contract and complete native graph comparisons remain.",
+      "before": [
+        "dna_io/merged_graph.py",
+        "return [clean(item) for item in value]"
+      ],
+      "after": [
+        "dna_io/merged_graph.py",
+        "return [clean(item) if isinstance(item, (dict, list)) else item for item in value]"
+      ]
+    },
+    {
+      "function": "get_rbf_driver_data",
+      "reason": "Lookup selection now uses per-refresh derived data or the original uncached comprehension; every native pose is compared through both paths.",
+      "before": [
+        "editors/rbf_editor/core.py",
+        "bone_index_lookup = {reader.getJointName(index).strip(): index for index in range(reader.getJointCount())}"
+      ],
+      "after": [
+        "editors/rbf_editor/core.py",
+        "else {reader.getJointName(index).strip(): index for index in range(reader.getJointCount())}"
+      ]
+    },
+    {
+      "function": "get_rbf_driven_data",
+      "reason": "The immutable control set is reused only inside one refresh; direct reads still execute the complete original comprehension.",
+      "before": [
+        "editors/rbf_editor/core.py",
+        "all_controls = {"
+      ],
+      "after": [
+        "editors/rbf_editor/core.py",
+        "else {"
+      ]
+    },
+    {
+      "function": "get_rbf_pose_data",
+      "reason": "The pose coefficient table is computed once before the channel loop; all original scalar values and later refreshes are checked against uncached native reads.",
+      "before": [
+        "editors/rbf_editor/core.py",
+        "item.scalar_value = pose_shapes(reader, pose_index).get(index, 0.0)"
+      ],
+      "after": [
+        "editors/rbf_editor/core.py",
+        "item.scalar_value = scalar_values.get(index, 0.0)"
+      ]
+    },
+    {
+      "function": "pose_shapes",
+      "before": [
+        "editors/rbf_editor/shape_channels.py",
+        "def pose_shapes(reader: Any, pose_index: int) -> dict[int, float]:"
+      ],
+      "after": [
+        "editors/rbf_editor/shape_channels.py",
+        "def pose_shapes("
+      ],
+      "reason": "Add an optional operation-local routing table; existing callers and native numerical oracles retain the uncached default."
+    },
+    {
+      "function": "pose_shapes",
+      "before": [
+        "editors/rbf_editor/shape_channels.py",
+        "for channel, inputs in routes(reader).items()"
+      ],
+      "after": [
+        "editors/rbf_editor/shape_channels.py",
+        "for channel, inputs in table.items()"
+      ],
+      "reason": "Iterate the same complete routing table, computed locally or supplied by the enclosing operation."
+    },
+    {
+      "function": "write",
+      "before": [
+        "editors/rbf_editor/shape_channels.py",
+        "original_poses = {i: pose_shapes(original, i) for i in range(original.getRBFPoseCount())}"
+      ],
+      "after": [
+        "editors/rbf_editor/shape_channels.py",
+        "original_poses = {i: pose_shapes(original, i, channel_routes=old_routes) for i in range(original.getRBFPoseCount())}"
+      ],
+      "reason": "Use the original reader routing table already computed immediately above; writer mutations do not affect that reader and full native round trips remain."
+    },
+    {
+      "function": "set_vertex_groups",
+      "before": [
+        "dna_io/importer.py",
+        "vertex_group_name = self._dna_reader.getJointName(bone_index)"
+      ],
+      "after": [
+        "dna_io/importer.py",
+        "vertex_group_name = joint_names[bone_index]"
+      ],
+      "reason": "Resolve each immutable joint name once per mesh; exact native head/body weight dictionaries, preexisting groups and group replacement are checked."
+    },
+    {
+      "function": "set_vertex_groups",
+      "before": [
+        "dna_io/importer.py",
+        "vertex_group = mesh_object.vertex_groups.get(vertex_group_name)"
+      ],
+      "after": [
+        "dna_io/importer.py",
+        "vertex_group = vertex_groups.get(vertex_group_name)"
+      ],
+      "reason": "Use an operation-local group index instead of a linear RNA search per influence; group order, creation, replacement and all original deformation oracles remain."
+    },
+    {
+      "function": "get_rbf_driven_data",
+      "before": [
+        "editors/rbf_editor/core.py",
+        "for group in range(reader.getJointGroupCount()):"
+      ],
+      "after": [
+        "editors/rbf_editor/core.py",
+        "for group in groups:"
+      ],
+      "reason": "The batch reverse index visits exactly the original matching groups in original order; direct native reads retain the full scan and every pose is compared."
+    },
+    {
+      "function": "mute_targets",
+      "before": [
+        "runtime/bindings.py",
+        "if curve and owned_curve(curve, carrier) and curve.mute != muted:"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "if curve and curve.mute != muted and owned_curve(curve, carrier):"
+      ],
+      "reason": "Skip ownership inspection only when no mute write is needed. All changed writes still validate current ownership; removal, replacement and array-channel contracts remain."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "overlap = np.zeros(self.tri_count, dtype=bool)"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "overlap = np.zeros(candidate.size, dtype=bool)"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "(self.bb_max[:, 0] >= fmin[0])"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "(candidate_max[:, 0] >= fmin[0])"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "& (fmax[0] >= self.bb_min[:, 0])"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "& (fmax[0] >= candidate_min[:, 0])"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "& (self.bb_max[:, 1] >= fmin[1])"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "& (candidate_max[:, 1] >= fmin[1])"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "& (fmax[1] >= self.bb_min[:, 1])"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "& (fmax[1] >= candidate_min[:, 1])"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "nearest_overlapping_triangle",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "candidate = np.nonzero(overlap)[0]"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "candidate = candidate[overlap]"
+      ],
+      "reason": "Conservative grid candidates retain the exact padded-box predicate and sorted source-index tie order. Dense-scan oracle covers boundaries, overlaps, broad, invalid and empty queries; full native all-LOD calibration remains."
+    },
+    {
+      "function": "get_mesh_vertex_groups",
+      "before": [
+        "dna_io/exporter.py",
+        "vertex_group = mesh_object.vertex_groups.get(vertex_group_name)"
+      ],
+      "after": [
+        "dna_io/exporter.py",
+        "vertex_group = groups_by_name.get(vertex_group_name)"
+      ],
+      "reason": "Operation-local RNA group lookup preserves every original weight call, influence order, root joint and zero-weight policy; compact native head/body output rows and removed/replaced groups are checked; all original full export/calibration oracles remain."
+    },
+    {
+      "function": "set_dna_vertex_groups",
+      "before": [
+        "dna_io/exporter.py",
+        "vertex_group = mesh_object.vertex_groups.get(vertex_group_name)"
+      ],
+      "after": [
+        "dna_io/exporter.py",
+        "vertex_group = groups_by_name.get(vertex_group_name)"
+      ],
+      "reason": "Operation-local RNA group lookup preserves every original weight call, influence order, root joint and zero-weight policy; compact native head/body output rows and removed/replaced groups are checked; all original full export/calibration oracles remain."
+    },
+    {
+      "function": "calibrate_vertex_groups",
+      "before": [
+        "dna_io/calibrator.py",
+        "vertex_group = mesh_object.vertex_groups.get(vertex_group_name)"
+      ],
+      "after": [
+        "dna_io/calibrator.py",
+        "vertex_group = groups_by_name.get(vertex_group_name)"
+      ],
+      "reason": "Operation-local RNA group lookup preserves every original weight call, influence order, root joint and zero-weight policy; compact native head/body output rows and removed/replaced groups are checked; all original full export/calibration oracles remain."
+    },
+    {
+      "function": "collection_to_list",
+      "before": [
+        "utilities/misc.py",
+        "def collection_to_list(collection: bpy.types.bpy_prop_collection) -> list:"
+      ],
+      "after": [
+        "utilities/misc.py",
+        "def collection_to_list("
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "collection_to_list",
+      "before": [
+        "utilities/misc.py",
+        "for key, data_type in item.__annotations__.items():"
+      ],
+      "after": [
+        "utilities/misc.py",
+        "for key, kind in _schemas[cls]:"
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "collection_to_list",
+      "before": [
+        "utilities/misc.py",
+        "if data_type.function.__name__ == \"CollectionProperty\":"
+      ],
+      "after": [
+        "utilities/misc.py",
+        "if kind == \"CollectionProperty\":"
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "collection_to_list",
+      "before": [
+        "utilities/misc.py",
+        "data[key] = collection_to_list(getattr(item, key))"
+      ],
+      "after": [
+        "utilities/misc.py",
+        "data[key] = collection_to_list(getattr(item, key), exclude_suffixes=exclude_suffixes, _schemas=_schemas)"
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "collection_to_list",
+      "before": [
+        "utilities/misc.py",
+        "elif data_type.function.__name__ == \"FloatVectorProperty\":"
+      ],
+      "after": [
+        "utilities/misc.py",
+        "elif kind == \"FloatVectorProperty\":"
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "show",
+      "before": [
+        "editors/rbf_editor/preview.py",
+        "data = _authored_data(collection_to_list(instance.rbf_editor.rbf_solver_list))"
+      ],
+      "after": [
+        "editors/rbf_editor/preview.py",
+        "data = collection_to_list(instance.rbf_editor.rbf_solver_list, exclude_suffixes=(\"_active_index\", \"_edited\"))"
+      ],
+      "reason": "One traversal copies all current RNA values. Field schemas are local to that call; optional suffix filtering equals the original recursive authored-data filter, with mutations and removed items checked against the original serializer."
+    },
+    {
+      "function": "cell_of",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "gx = int(np.clip(int((point[0] - self._grid_min[0]) / self._cell_size[0]), 0, self._res - 1))"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "gx = min(max(int((point[0] - self._grid_min[0]) / self._cell_size[0]), 0), self._res - 1)"
+      ],
+      "reason": "Scalar integer clamping preserves the original truncation and inclusive bounds; original NumPy rule checked at every grid boundary, neighboring floats and seeded outside points."
+    },
+    {
+      "function": "cell_of",
+      "before": [
+        "editors/shared/uv_barycentric.py",
+        "gy = int(np.clip(int((point[1] - self._grid_min[1]) / self._cell_size[1]), 0, self._res - 1))"
+      ],
+      "after": [
+        "editors/shared/uv_barycentric.py",
+        "gy = min(max(int((point[1] - self._grid_min[1]) / self._cell_size[1]), 0), self._res - 1)"
+      ],
+      "reason": "Scalar integer clamping preserves the original truncation and inclusive bounds; original NumPy rule checked at every grid boundary, neighboring floats and seeded outside points."
+    },
+    {
+      "function": "install_targets_iter",
+      "before": [
+        "runtime/bindings.py",
+        "for target, _curve in reversed(installed):"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "for target, curve in reversed(installed):"
+      ],
+      "reason": "Rollback removes the exact newly created RNA curves, including an intermediate clone, rather than searching a channel that may temporarily have two curves. Real invalid-index, append cancellation, already-removed output and unrelated-driver contracts cover cleanup; every original ownership and import failure assertion remains."
+    },
+    {
+      "function": "install_targets_iter",
+      "before": [
+        "runtime/bindings.py",
+        "_remove_driver(target.owner, target.path, target.index)"
+      ],
+      "after": [
+        "runtime/bindings.py",
+        "animation.drivers.remove(curve)"
+      ],
+      "reason": "Rollback removes the exact newly created RNA curves, including an intermediate clone, rather than searching a channel that may temporarily have two curves. Real invalid-index, append cancellation, already-removed output and unrelated-driver contracts cover cleanup; every original ownership and import failure assertion remains."
+    }
+  ]
+}
