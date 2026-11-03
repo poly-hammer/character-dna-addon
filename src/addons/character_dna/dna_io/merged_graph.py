@@ -134,7 +134,7 @@ def to_bytes(graph: dict, payload: dict | None = None) -> bytes:
         from .misc import _json_input_stream
 
         (root / "input.json").write_text(raw, encoding="utf-8")
-        stream = _json_input_stream(root / "input.json", None)
+        stream, _ = _json_input_stream(root / "input.json", None)
         reader = dna.JSONStreamReader(stream, None)
         output = dna.FileStream(str(root / "output.dna"), dna.AccessMode_Write, dna.OpenMode_Binary, None)
         writer = dna.BinaryStreamWriter(output)
@@ -392,7 +392,9 @@ def transform(graph: dict, maps: dict, *, inverse: bool = False) -> dict:  # noq
 
 
 def _lod_rows(mapping: dict, lods: list[int]) -> list:
-    return [mapping["indices"][mapping["lods"][lod]] if mapping["lods"] else [] for lod in lods]
+    # Overwrite exports can retain all behavior LODs while supplying geometry
+    # only at LOD0. Missing mapping rows mean no members at those higher LODs.
+    return [mapping["indices"][mapping["lods"][lod]] if lod < len(mapping["lods"]) else [] for lod in lods]
 
 
 def _lod_map(rows: list) -> dict:
@@ -483,6 +485,8 @@ def _weld(head: dict, body: dict, seam: dict) -> tuple[dict, dict]:
 
 def compose(originals: dict, name: str, bridges: list | None = None) -> tuple[dict, dict]:  # noqa: PLR0912, PLR0915
     """Construct a native merged graph at every LOD and record its inverse domains."""
+    from . import mesh_data
+
     for graph in originals.values():
         unexpected = set(graph) - {*LAYERS, "signature", "version", "index"}
         if unexpected:
@@ -492,7 +496,15 @@ def compose(originals: dict, name: str, bridges: list | None = None) -> tuple[di
             raise ValueError("This DNA uses ML operation extensions requiring a version-specific remapper.")
     head_lods = originals["head"]["desc1.1"]["lodCount"]
     body_lods = originals["body"]["desc1.1"]["lodCount"]
-    lods = {"head": list(range(head_lods)), "body": [HEAD_TO_BODY_LOD_MAPPING[index] for index in range(head_lods)]}
+    custom = any(mesh_data.has_custom_topology(mesh_data.graph_reader(originals[kind]), kind) for kind in KINDS)
+    # Behavior slots still need a reversible correspondence, even where no
+    # surface geometry exists. Geometry pairing below uses populated LODs only.
+    lods = {
+        "head": list(range(head_lods)),
+        "body": [
+            min(index, body_lods - 1) if custom else HEAD_TO_BODY_LOD_MAPPING[index] for index in range(head_lods)
+        ],
+    }
     if set(lods["body"]) != set(range(body_lods)):
         raise ValueError("The RigDefinition LOD correspondence does not cover both components.")
     for field in ("translationUnit", "rotationUnit", "coordinateSystem"):
@@ -539,14 +551,28 @@ def compose(originals: dict, name: str, bridges: list | None = None) -> tuple[di
     meshes = list(parts["head"]["geom1.1"]["meshes"])
     merged_names = list(names["head"])
     mesh_maps = {"head": {str(index): [index] for index in range(len(names["head"]))}, "body": {}}
-    necklines = json.loads(HEAD_TO_BODY_EDGE_LOOP_FILE_PATH.read_text())
+    surface_lods = {
+        kind: [
+            lod
+            for lod in range(originals[kind]["desc1.1"]["lodCount"])
+            if f"{kind}_lod{lod}_mesh" in names[kind]
+            and names[kind].index(f"{kind}_lod{lod}_mesh")
+            in _lod_rows(parts[kind]["defn1.1"]["lodMeshMapping"], [lod])[0]
+        ]
+        for kind in KINDS
+    }
+    geometry_lods = mesh_data.pair_lods(surface_lods["head"], surface_lods["body"], custom=custom)
     for lod in range(head_lods):
+        if lod not in geometry_lods:
+            continue
         try:
             head_index = names["head"].index(f"head_lod{lod}_mesh")
-            body_index = names["body"].index(f"body_lod{lods['body'][lod]}_mesh")
+            body_index = names["body"].index(f"body_lod{geometry_lods[lod]}_mesh")
         except ValueError as error:
             raise ValueError(f"Missing required head/body DNA surface for LOD{lod}.") from error
-        seam = {int(key): value for key, value in necklines[str(lod)].items()}
+        seam = mesh_data.graph_seam(
+            originals, head_index, body_index, lod, default_necklines=HEAD_TO_BODY_EDGE_LOOP_FILE_PATH
+        )
         meshes[head_index], vertex_maps = _weld(
             parts["head"]["geom1.1"]["meshes"][head_index], parts["body"]["geom1.1"]["meshes"][body_index], seam
         )
@@ -574,11 +600,16 @@ def compose(originals: dict, name: str, bridges: list | None = None) -> tuple[di
     for lod in range(head_lods):
         row = []
         for kind in KINDS:
-            source_indices = _lod_rows(parts[kind]["defn1.1"]["lodMeshMapping"], [lods[kind][lod]])[0]
+            if kind == "body" and lod not in geometry_lods:
+                continue
+            source_lod = geometry_lods[lod] if kind == "body" else lod
+            source_indices = _lod_rows(parts[kind]["defn1.1"]["lodMeshMapping"], [source_lod])[0]
             for source_index in source_indices:
                 candidates = mesh_maps[kind][str(source_index)]
                 row.extend(
-                    index for index in candidates if len(candidates) == 1 or index == info["surfaces"][lod]["mesh"]
+                    index
+                    for index in candidates
+                    if len(candidates) == 1 or any(s["lod"] == lod and s["mesh"] == index for s in info["surfaces"])
                 )
         mesh_rows.append(list(dict.fromkeys(row)))
     result["defn1.1"]["lodMeshMapping"] = _lod_map(mesh_rows)
@@ -601,6 +632,7 @@ def compose(originals: dict, name: str, bridges: list | None = None) -> tuple[di
     result["mlbh1.0"]["neuralNetworkToMeshRegion"] = membership
     info["bridges"] = clone(bridges or [])
     _embed_bridges(result, originals, info)
+    mesh_data.compose(originals, result, info)
     return result, info
 
 

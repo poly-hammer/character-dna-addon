@@ -5,6 +5,10 @@ XYZ would change additive facial animation, even with matching neutral poses.
 Units remain centimetres and degrees; scene adapters still handle unit scale.
 """
 
+import json
+import re
+import tempfile
+
 from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -17,6 +21,34 @@ if TYPE_CHECKING:
 
 DNA_ROTATION_MODE = "XZY"
 COORDINATE_VERSION = 1
+
+
+def _restore_json_metadata(path: Path, values: list) -> None:
+    """The SDK JSON writer does not escape metadata strings; serialize them here.
+
+    Stream the geometry unchanged, avoiding another in-memory copy of a large
+    JSON DNA just to replace its empty descriptor metadata array.
+    """
+    pattern = re.compile(rb'("metadata"\s*:\s*)\[\s*\]')
+    encoded = json.dumps(values, ensure_ascii=True).encode("ascii")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".dna-metadata-", delete=False) as output:
+            temporary = Path(output.name)
+            replaced = False
+            with path.open("rb") as source:
+                for line in source:
+                    rendered = line
+                    if not replaced and pattern.search(line):
+                        rendered = pattern.sub(lambda match: match[1] + encoded, line, count=1)
+                        replaced = True
+                    output.write(rendered)
+            if not replaced:
+                raise ValueError("DNA JSON descriptor metadata was not found.")
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def validate_rig_basis(rig: "bpy.types.ID | None") -> None:
@@ -44,13 +76,19 @@ def configuration(data_layer: str = "All", *, blender: bool = True) -> "dna.Conf
     return config
 
 
-def transform_reader(reader: Any, *, blender: bool = True, data_layer: str = "All") -> "dna.BinaryStreamReader":
+def transform_reader(
+    reader: Any, *, blender: bool = True, data_layer: str = "All", descriptor_metadata: list | None = None
+) -> "dna.BinaryStreamReader":
     """Convert every known DNA layer through the SDK, including JSON readers."""
     from ..bindings import dna
 
     stream = dna.MemoryStream()
     writer = dna.BinaryStreamWriter(stream)
     writer.setFrom(reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
+    if descriptor_metadata is not None:
+        writer.clearMetaData()
+        for key, value in descriptor_metadata:
+            writer.setMetaData(key, value)
     writer.write()
     if not dna.Status.isOk():
         raise RuntimeError(dna.Status.get().message)
@@ -101,9 +139,16 @@ class CanonicalDNAWriter:
         stream = dna.FileStream(str(self.file_path), dna.AccessMode_Write, dna.OpenMode_Binary, None)
         writer_class = dna.JSONStreamWriter if self.file_format == "json" else dna.BinaryStreamWriter
         output = writer_class(stream)
+        descriptor_metadata = []
         try:
             try:
                 output.setFrom(reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
+                if self.file_format == "json":
+                    descriptor_metadata = [
+                        [reader.getMetaDataKey(i), reader.getMetaDataValue(reader.getMetaDataKey(i))]
+                        for i in range(reader.getMetaDataCount())
+                    ]
+                    output.clearMetaData()
                 output.write()
                 if not dna.Status.isOk():
                     raise RuntimeError(dna.Status.get().message)
@@ -111,6 +156,8 @@ class CanonicalDNAWriter:
                 release_dna_handle(output)
                 release_dna_handle(stream)
                 release_dna_handle(reader)
+            if descriptor_metadata:
+                _restore_json_metadata(self.file_path, descriptor_metadata)
             publish_partition(self.file_path)
         except Exception:
             if previous_partition is not None:

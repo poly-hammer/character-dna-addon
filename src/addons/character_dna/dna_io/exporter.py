@@ -26,6 +26,7 @@ from ..constants import (
 )
 from ..exceptions import InvalidComponentTypeError
 from ..typing import *  # noqa: F403  # noqa: F403
+from . import mesh_data
 from .coordinates import DNA_ROTATION_MODE
 from .misc import get_dna_reader, get_dna_writer
 
@@ -122,6 +123,8 @@ class DNAExporter:
         self._images = []
         self._bone_index_lookup = {}
         self._vertex_color_data = []
+        existing = mesh_data.read(self._dna_reader, self._component_type)
+        self._mesh_metadata_records = {r["mesh_index"]: r for r in existing["meshes"]} if existing else {}
         # (export_mesh_index, blend_shape_channel_index) pairs collected during shape
         # key export so the mesh -> blend-shape channel mapping can be rebuilt.
         self._mesh_blend_shape_channel_pairs: list[tuple[int, int]] = []
@@ -222,6 +225,10 @@ class DNAExporter:
         self._vertex_color_data = [{"indices": [], "values": []} for _ in range(self._dna_reader.getMeshCount())]
 
     def validate(self) -> tuple[bool, str, str, Callable | None]:
+        try:
+            self._topology_type()
+        except ValueError as error:
+            return False, f"Invalid {self._component_type.title()} Topology Type", str(error), None
         if not self._rig_object:
             return (False, "No Rig Object", "No rig object found. Must link a head rig to export DNA.", None)
 
@@ -741,8 +748,45 @@ class DNAExporter:
         self.set_dna_uvs(mesh_index, uvs)
         self.set_dna_vertex_groups(mesh_index, mesh_object)
 
+        position_faces = [[vertex_indices[v] for v in face] for _, face in faces]
+        self._capture_mesh_metadata(mesh_object, mesh_index, real_name, len(vertex_positions), position_faces)
+
         # Now free the BMesh from memory without applying the changes back to the mesh
         bmesh_object.free()
+
+    def _capture_mesh_metadata(self, obj: bpy.types.Object, index: int, name: str, count: int, faces: list) -> None:
+        lods = [lod for lod, objects in self._export_lods.items() if any(mesh == obj for mesh, _ in objects)]
+        self._mesh_metadata_records[index] = mesh_data.capture(
+            obj, index, name, count, faces, lods, colors=self._include_vertex_colors
+        )
+        declared_type = getattr(self._instance.output, f"{self._component_type}_topology_type", "").strip()
+        declared_type = declared_type or mesh_data.type_name(self._dna_reader, self._component_type)
+        if (
+            name.startswith(f"{self._component_type}_lod")
+            and self._mesh_metadata_records[index]["neckline"] is None
+            and declared_type not in ("", "MetaHuman")
+        ):
+            logger.warning(f"{name} has no {mesh_data.SEAM_GROUP}; seam-dependent merge/alignment will require it.")
+
+    def _topology_type(self) -> str:
+        component = self._component_type.title()
+        name = getattr(self._instance.output, f"{self._component_type}_topology_type", "").strip()
+        name = name or mesh_data.type_name(self._dna_reader, self._component_type)
+        if "\0" in name:
+            raise ValueError(f"{component} Topology Type cannot contain a NUL character.")
+        if name:
+            return name
+        lookup = {self._dna_reader.getMeshName(i): i for i in range(self._dna_reader.getMeshCount())}
+        for objects in self._export_lods.values():
+            for obj, _ in objects:
+                real_name = self._explicit_names.get(obj, utilities.remove_instance_prefix(obj.name, self._prefix))
+                index = lookup.get(real_name)
+                actual = mesh_data.topology(len(obj.data.vertices), [list(p.vertices) for p in obj.data.polygons])
+                if index is None or actual != mesh_data.topology(
+                    self._dna_reader.getVertexPositionCount(index), mesh_data.reader_faces(self._dna_reader, index)
+                ):
+                    raise ValueError(f"Set Output > {component} > Topology Type before exporting custom topology")
+        return "MetaHuman"
 
     def _source_mesh_index_by_name(self) -> dict[str, int]:
         """Map every source DNA mesh name to its source mesh index. Used to look up
@@ -968,35 +1012,58 @@ class DNAExporter:
             prepare_export(self._instance, apply=True)
 
     def _export_component_extensions(self) -> None:
-        if not self._instance.get("dna_merge_proxy"):
-            return
         from . import document, metadata
 
+        payloads = {}
         bridges = [
             bridge
-            for bridge in document.collect_scene_bridges(self._instance)
+            for bridge in (
+                document.collect_scene_bridges(self._instance) if self._instance.get("dna_merge_proxy") else []
+            )
             if bridge["source"]["kind"] == self._component_type
         ]
-        if bridges or any(
-            self._dna_reader.getMetaDataKey(index) == document.EXTENSION_PREFIX
-            for index in range(self._dna_reader.getMetaDataCount())
-        ):
-            metadata.write(
-                self._dna_writer,
-                self._dna_reader,
-                {"version": 1, "owner": self._component_type, "scene_bridges": bridges},
-                prefix=document.EXTENSION_PREFIX,
+        if self._instance.get("dna_merge_proxy") and (
+            bridges
+            or any(
+                self._dna_reader.getMetaDataKey(index) == document.EXTENSION_PREFIX
+                for index in range(self._dna_reader.getMetaDataCount())
             )
+        ):
+            # Preserve source extensions when this is not an active scene merge.
+            payloads[document.EXTENSION_PREFIX] = {
+                "version": 1,
+                "owner": self._component_type,
+                "scene_bridges": bridges,
+            }
+        name = self._topology_type()
+        prefix = f"{mesh_data.PREFIX}.{self._component_type}"
+        payloads[prefix] = {
+            "schema": mesh_data.SCHEMA,
+            "component": self._component_type,
+            "space": "component",
+            "meshes": list(self._mesh_metadata_records.values()),
+        }
+        metadata.write_many(
+            self._dna_writer,
+            self._dna_reader,
+            payloads,
+            {
+                f"{mesh_data.TYPE_PREFIX}.schema": str(mesh_data.SCHEMA),
+                mesh_data.type_key(self._component_type): name,
+            },
+        )
 
     def run(self) -> tuple[bool, str, str, Callable | None]:
         self._prepare_merged_export()
         self.initialize_scene_data()
+        self._topology_type()
         if self._instance.output.run_validations:
             valid, title, message, fix = self.validate()
             if not valid:
                 return False, title, message, fix
 
         self._reset_dna_geometry()
+        self._mesh_metadata_records = {}
 
         # init the lod indices
         # TODO: Currently can't change this without messing up the joint behavior.

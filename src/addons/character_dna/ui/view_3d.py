@@ -650,6 +650,10 @@ class CHARACTER_DNA_PT_output_panel(RigInstanceDependentPanel):
             self.layout.label(text="Method:")
             row = self.layout.row()
             row.prop(instance.output, "method", text="")
+            if instance.output.method == "overwrite":
+                split = self.layout.split(factor=0.45)
+                split.label(text="Topology Type:")
+                split.prop(instance.output, f"{instance.editor_component}_topology_type", text="")
 
             row = self.layout.row()
             column = None

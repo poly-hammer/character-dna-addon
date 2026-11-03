@@ -26,6 +26,7 @@ from ..constants import (
     ComponentType,
 )
 from ..typing import *  # noqa: F403
+from . import mesh_data
 from .coordinates import COORDINATE_VERSION, DNA_ROTATION_MODE
 from .misc import get_dna_reader, get_mesh_lods
 
@@ -77,6 +78,9 @@ class DNAImporter:
         self._vertex_color_data = None
         self._default_vertex_color_layout = False
         self._component_type = component_type
+        self._mesh_metadata = mesh_data.read(self._dna_reader, component_type)
+        if self._mesh_metadata is not None and self._mesh_metadata.get("space", "component") != "component":
+            raise ValueError("Project merged DNA before importing component mesh metadata.")
 
     def _get_lod_settings(self) -> list[tuple[int, bool]]:
         return [
@@ -86,6 +90,12 @@ class DNAImporter:
         ]
 
     def initialize_dna_data(self):
+        if hasattr(self._instance, "output"):
+            setattr(
+                self._instance.output,
+                f"{self._component_type}_topology_type",
+                mesh_data.type_name(self._dna_reader, self._component_type),
+            )
         for lod_index, should_import in self._get_lod_settings():
             if should_import:
                 self._import_lods[lod_index] = {}
@@ -498,7 +508,7 @@ class DNAImporter:
         self.set_smooth(bmesh_object)
 
         # Add vertex colors
-        if self._import_properties.import_vertex_colors:
+        if self._import_properties.import_vertex_colors and self._mesh_metadata is None:
             self.set_vertex_colors(mesh_index, bmesh_object)
 
         # Add UVs
@@ -509,7 +519,25 @@ class DNAImporter:
         bmesh_object.free()
 
         # Ensure a single, named color attribute that is both active and active-render
-        self.normalize_color_attributes(mesh)
+        if self._mesh_metadata is None:
+            self.normalize_color_attributes(mesh)
+        else:
+            record = next((r for r in self._mesh_metadata["meshes"] if r["mesh_index"] == mesh_index), None)
+            if record is not None:
+                mesh_data.validate_record(
+                    record,
+                    mesh_data.topology(
+                        self._dna_reader.getVertexPositionCount(mesh_index),
+                        mesh_data.reader_faces(self._dna_reader, mesh_index),
+                    ),
+                )
+                position_ids = sorted(set(self._dna_reader.getVertexLayoutPositionIndices(mesh_index)))
+                if self._import_properties.import_vertex_colors:
+                    mesh_data.apply_colors(mesh, record, position_ids)
+                if record.get("neckline") is not None:
+                    inverse = {dna: local for local, dna in enumerate(position_ids)}
+                    group = mesh_object.vertex_groups.new(name=mesh_data.SEAM_GROUP)
+                    group.add([inverse[v] for v in record["neckline"]], 1.0, "REPLACE")
 
         # The DNA's own normals, which are what makes the head sit seamlessly on the body.
         if self._import_properties.import_normals:

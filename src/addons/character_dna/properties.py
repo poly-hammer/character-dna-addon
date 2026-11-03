@@ -188,6 +188,16 @@ class CharacterOutputProperties(bpy.types.PropertyGroup):
             ),
         ],
     )  # pyright: ignore[reportInvalidTypeForm]
+    head_topology_type: bpy.props.StringProperty(
+        name="Head Topology Type",
+        description="Topology family stored in head DNA metadata, for example, MetaHuman, 3D Scan Store, etc.",
+        default="",
+    )  # pyright: ignore[reportInvalidTypeForm]
+    body_topology_type: bpy.props.StringProperty(
+        name="Body Topology Type",
+        description="Topology family stored in body DNA metadata, for example, MetaHuman, 3D Scan Store, etc.",
+        default="",
+    )  # pyright: ignore[reportInvalidTypeForm]
     format: bpy.props.EnumProperty(
         name="File Format",
         description="The file format to use when output the dna file. Either binary or json",

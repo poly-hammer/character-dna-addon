@@ -49,7 +49,9 @@ def describe(originals: dict, native: dict, indices: dict) -> dict:
     for kind, source in parts.items():
         recipe = {key: graph_io.clone(value) for key, value in source.items() if key not in {*joined, "geom1.1"}}
         recipe["desc1.1"]["metadata"] = [
-            pair for pair in recipe["desc1.1"]["metadata"] if not pair[0].startswith("character_dna.shape_extensions")
+            pair
+            for pair in recipe["desc1.1"]["metadata"]
+            if not pair[0].startswith(("character_dna.shape_extensions", "character_dna.mesh_data"))
         ]
         for layer in joined:
             recipe[layer] = _joined_recipe(parts["head"][layer], parts["body"][layer], kind, [layer])
@@ -154,6 +156,8 @@ def _mesh(native: dict, item: dict, head_item: dict, record: dict | None, kind: 
 
 def project(native: dict, indices: dict, records: dict, *, geometry: bool = True) -> dict:
     """Resolve current native values and invert each recorded component domain."""
+    from . import mesh_data
+
     parts = {}
     for kind, record in records.items():
         result = _resolve(record["recipe"], native)
@@ -191,6 +195,7 @@ def project(native: dict, indices: dict, records: dict, *, geometry: bool = True
             meshes.append(variants[0])
         result["geom1.1"] = {"meshes": meshes}
         parts[kind] = graph_io.transform(result, indices["maps"][kind], inverse=True)
+    mesh_data.project(native, parts, indices)
     return parts
 
 

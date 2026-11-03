@@ -19,6 +19,7 @@ from ..constants import (
     SHAPE_KEY_DELTA_THRESHOLD,
 )
 from ..typing import *  # noqa: F403  # noqa: F403
+from . import mesh_data
 from .exporter import DNAExporter
 from .importer import DNAImporter
 from .misc import get_dna_reader
@@ -79,7 +80,8 @@ class DNACalibrator(DNAExporter, DNAImporter):
         if mesh_name != f"{self._instance.name}_head_lod{lod_index}_mesh":
             return {}
 
-        body_lod_index = HEAD_TO_BODY_LOD_MAPPING.get(lod_index)
+        custom = mesh_data.has_custom_topology(self._dna_reader, "head")
+        body_lod_index = lod_index if custom else HEAD_TO_BODY_LOD_MAPPING.get(lod_index)
         body_mesh_name = f"{self._instance.name}_body_lod{body_lod_index}_mesh"
         body_mesh_lod = bpy.data.objects.get(body_mesh_name)
         if (
@@ -93,6 +95,21 @@ class DNACalibrator(DNAExporter, DNAImporter):
             vertex_indices, vertex_positions = self.get_mesh_vertex_positions(bmesh_object)
             bmesh_object.free()
             vert_lookup = dict(zip(vertex_indices, vertex_positions, strict=False))
+
+            if custom:
+                head = bpy.data.objects.get(mesh_name)
+                head_ring = mesh_data.object_boundary(head) if head else None
+                body_ring = mesh_data.object_boundary(body_mesh_lod)
+                if head_ring is None or body_ring is None:
+                    raise ValueError(f"Both LOD{lod_index} meshes need {mesh_data.SEAM_GROUP} for alignment.")
+                seam = mesh_data.match_boundaries(
+                    head_ring,
+                    body_ring,
+                    [v.co[:] for v in head.data.vertices],
+                    [v.co[:] for v in body_mesh_lod.data.vertices],
+                    tolerance=0.001,
+                )
+                return {h: Vector(vert_lookup[b]) for h, b in seam.items()}
 
             try:
                 return {
@@ -337,8 +354,23 @@ class DNACalibrator(DNAExporter, DNAImporter):
         the same LOD (teeth, eyes, ...) are ignored -- their vertex indices are
         unrelated to the head-to-body mapping."""
         lod_index = utilities.get_lod_index(mesh_name)
-        if lod_index == -1:
+        if lod_index == -1 or mesh_name != f"{self._component_type}_lod{lod_index}_mesh":
             return None
+
+        if mesh_data.has_custom_topology(self._dna_reader, self._component_type):
+            other = "body" if self._component_type == "head" else "head"
+            reference = self._seam_reference_reader()
+            if reference is None:
+                raise ValueError("The other component DNA is required for custom neckline alignment.")
+            try:
+                pairs = mesh_data.reader_seam({self._component_type: self._dna_reader, other: reference}, lod_index)
+                values = list(pairs.items()) if self._component_type == "head" else [(b, h) for h, b in pairs.items()]
+                return f"{other}_lod{lod_index}_mesh", values
+            finally:
+                if self._seam_reference_dna_path is not None:
+                    from .misc import release_dna_handle
+
+                    release_dna_handle(reference)
 
         if self._seam_follower == "head":
             if mesh_name != f"head_lod{lod_index}_mesh":
@@ -691,6 +723,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
     def run(self) -> tuple[bool, str, str, Callable | None]:
         self._prepare_merged_export()
         self.initialize_scene_data()
+        self._topology_type()
         if self._instance.output.run_validations:
             valid, title, message, fix = self.validate()
             if not valid:
@@ -715,6 +748,20 @@ class DNACalibrator(DNAExporter, DNAImporter):
             self.calibrate_bone_transforms()
 
         logger.info(f'Saving DNA to: "{self._target_dna_file}"...')
+        for objects in self._export_lods.values():
+            for obj, _ in objects:
+                name = self._explicit_names.get(obj, utilities.remove_instance_prefix(obj.name, self._prefix))
+                index = next(
+                    (i for i in range(self._dna_reader.getMeshCount()) if self._dna_reader.getMeshName(i) == name), None
+                )
+                if index is not None:
+                    self._capture_mesh_metadata(
+                        obj,
+                        index,
+                        name,
+                        self._dna_reader.getVertexPositionCount(index),
+                        mesh_data.reader_faces(self._dna_reader, index),
+                    )
         self._export_component_extensions()
         self._dna_writer.write()
 

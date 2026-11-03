@@ -57,12 +57,19 @@ def decode(reader: Any, *, prefix: str = PREFIX) -> dict:
 
 def write(writer: Any, reader: Any, payload: dict, *, prefix: str = PREFIX) -> None:
     """Replace only our namespace; never pass nullable/non-string inputs to SWIG."""
+    write_many(writer, reader, {prefix: payload})
+
+
+def write_many(writer: Any, reader: Any, payloads: dict[str, dict], strings: dict[str, str] | None = None) -> None:
+    """Replace related namespaces in one transaction, preserving foreign keys."""
     values = {}
     for index in range(reader.getMetaDataCount()):
         key = reader.getMetaDataKey(index)
-        if key != prefix and not key.startswith(prefix + "."):
+        if not any(key == prefix or key.startswith(prefix + ".") for prefix in payloads):
             values[key] = reader.getMetaDataValue(key)
-    values.update(encode(payload, prefix=prefix))
+    for prefix, payload in payloads.items():
+        values.update(encode(payload, prefix=prefix))
+    values.update(strings or {})
     for key, value in values.items():
         if not isinstance(key, str) or not isinstance(value, str) or "\0" in key or "\0" in value:
             raise ValueError("DNA metadata requires strings without literal NUL characters.")
