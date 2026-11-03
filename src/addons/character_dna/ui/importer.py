@@ -1,4 +1,6 @@
 # standard library imports
+import logging
+
 from pathlib import Path
 
 # third party imports
@@ -9,8 +11,34 @@ from bpy_extras.io_utils import ImportHelper  # type: ignore
 # local imports
 from .. import utilities
 from ..constants import NUMBER_OF_HEAD_LODS, ToolInfo
-from ..dna_io import get_dna_reader
+from ..dna_io import get_dna_reader, release_dna_handle
+from ..dna_io.misc import get_mesh_lods
 from ..typing import *  # noqa: F403
+
+
+logger = logging.getLogger(__name__)
+
+
+def get_import_dna_reader(context: "Context", filepath: str) -> "dna.BinaryStreamReader | None":
+    """Share one lightweight Definition read between the LOD and info panels."""
+    cache = utilities.get_addon_window_manager_properties(context).dna_info
+    path = Path(bpy.path.abspath(filepath))
+    stamp = None
+    try:
+        if filepath and path.suffix.lower() == ".dna" and path.is_file():
+            stat = path.stat()
+            stamp = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        pass
+    if stamp != cache.get("_file_stamp"):
+        release_dna_handle(cache.get("_dna_reader"))
+        cache.update(_file_stamp=stamp, _dna_reader=None)
+        if stamp is not None:
+            try:
+                cache["_dna_reader"] = get_dna_reader(path, file_format="binary", data_layer="Definition")
+            except (OSError, RuntimeError, ValueError) as error:
+                logger.warning(f"Could not read DNA import metadata: {error}")
+    return cache.get("_dna_reader")
 
 
 class CHARACTER_DNA_FILE_DATA_PT_panel(bpy.types.Panel):
@@ -47,9 +75,8 @@ class CHARACTER_DNA_FILE_DATA_PT_panel(bpy.types.Panel):
         #     row.prop(operator, "import_region_vertex_groups") # noqa: ERA001
         row = layout.row()
         row.prop(operator, "import_bone_collections")
-        if stem != "body":
-            row = layout.row()
-            row.prop(operator, "import_vertex_colors")
+        row = layout.row()
+        row.prop(operator, "import_vertex_colors")
         row = layout.row()
         row.prop(operator, "import_materials")
         if stem != "body":
@@ -73,17 +100,20 @@ class CHARACTER_DNA_LODS_PT_panel(bpy.types.Panel):
             return
 
         operator = context.space_data.active_operator  # type: ignore[attr-defined]
-        stem = Path(operator.filepath).stem.lower()
         layout = self.layout
-        row = layout.row()
-        for i in range(NUMBER_OF_HEAD_LODS):
-            if i == 0:
-                row.enabled = False
-            # bodies only have one LOD, so we don't need to show the LODs for them
-            if stem == "body" and i > 3:
-                return
-            row.prop(operator, f"import_lod{i}")
+        reader = get_import_dna_reader(context, operator.filepath)
+        if reader is None:
+            layout.label(text="Select a readable DNA file to view LODs")
+            return
+        lods = get_mesh_lods(reader)
+        if not lods:
+            layout.label(text="No mesh LODs in this DNA file")
+        for i in lods:
+            if i >= NUMBER_OF_HEAD_LODS:
+                continue
             row = layout.row()
+            row.enabled = i != 0
+            row.prop(operator, f"import_lod{i}")
 
 
 class CHARACTER_DNA_EXTRAS_PT_panel(bpy.types.Panel):
@@ -161,21 +191,8 @@ class CHARACTER_DNA_FILE_INFO_PT_panel(bpy.types.Panel):
             return
 
         operator = context.space_data.active_operator  # type: ignore[attr-defined]
-        addon_window_manager_properties = utilities.get_addon_window_manager_properties(context)
-        dna_info = addon_window_manager_properties.dna_info
-
-        if operator.filepath.lower().endswith(".dna") and Path(operator.filepath).exists():
-            if not dna_info["_dna_reader"] or operator.filepath != dna_info["_previous_file_path"]:
-                dna_info["_previous_file_path"] = operator.filepath
-                reader = get_dna_reader(
-                    file_path=Path(operator.filepath), file_format="binary", data_layer="Descriptor"
-                )
-                if not reader:
-                    return
-
-                dna_info["_dna_reader"] = reader  # pyright: ignore[reportArgumentType]
-
-            dna_reader = dna_info["_dna_reader"]
+        dna_reader = get_import_dna_reader(context, operator.filepath)
+        if dna_reader is not None:
             from ..bindings import enums  # type: ignore[reportAttributeAccessIssue]
 
             row = self.layout.row()
@@ -193,6 +210,9 @@ class CHARACTER_DNA_FILE_INFO_PT_panel(bpy.types.Panel):
             row = self.layout.row()
             row.label(text="LOD Count: ")
             row.label(text=str(dna_reader.getLODCount()))
+            row = self.layout.row()
+            row.label(text="Mesh LODs: ")
+            row.label(text=", ".join(str(lod) for lod in get_mesh_lods(dna_reader)) or "None")
             row = self.layout.row()
             row.label(text="Max LOD: ")
             row.label(text=str(dna_reader.getDBMaxLOD()))

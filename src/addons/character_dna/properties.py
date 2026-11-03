@@ -423,7 +423,7 @@ class CharacterWindowManagerProperties(bpy.types.PropertyGroup, CharacterImportP
     """
 
     errors = {}
-    dna_info = {"_previous_file_path": None, "_dna_reader": None}
+    dna_info = {"_file_stamp": None, "_dna_reader": None}
 
     # Global, per-session cache shared across the whole addon.
     data = {}

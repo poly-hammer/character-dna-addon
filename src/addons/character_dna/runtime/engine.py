@@ -1007,6 +1007,7 @@ def mark_authoring_current(instance: Any, component: str) -> None:
     for record in _live_records():
         if _belongs_to(record["carrier"], instance) and record["component"] == component:
             record["authoring_revision"] = record["calls"]
+            record["authoring_state"] = instance.data.get(instance.cache_key(component, "instance"))
 
 
 def synchronize_authoring(instance: Any, component: str, state: Any) -> Any:
@@ -1020,7 +1021,11 @@ def synchronize_authoring(instance: Any, component: str, state: Any) -> Any:
         if record.get("paused"):
             return state
         context = record.get("last_context")
-        if context is None or record.get("authoring_revision") == record["calls"]:
+        # A rebuilt SDK state still needs the current pose even when no native
+        # evaluation has occurred since the previous state was synchronized.
+        if context is None or (
+            record.get("authoring_revision") == record["calls"] and record.get("authoring_state") is state
+        ):
             return state
         controls = context.get("preview_controls") or _module.control_snapshot(context["session"])
         for index, value in enumerate(controls["gui"]):
@@ -1031,6 +1036,7 @@ def synchronize_authoring(instance: Any, component: str, state: Any) -> Any:
         manager = instance.data.get(instance.cache_key(component, "manager"))
         manager.calculate(state)
         record["authoring_revision"] = record["calls"]
+        record["authoring_state"] = state
         return state
     return state
 

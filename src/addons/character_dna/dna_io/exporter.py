@@ -476,20 +476,44 @@ class DNAExporter:
 
         return uv_indices, uv_positions
 
-    def set_dna_vertex_colors(self, mesh_index: int, bmesh_object: bmesh.types.BMesh):
-        vertex_color_indices = list(range(len(bmesh_object.verts)))
+    def set_dna_vertex_colors(self, mesh_index: int, bmesh_object: bmesh.types.BMesh, mesh_name: str):
+        vertex_color_indices = [-1] * len(bmesh_object.verts)
         vertex_color_values = []
-        color_layer = (
-            bmesh_object.loops.layers.color.get(VERTEX_COLOR_ATTRIBUTE_NAME) or bmesh_object.loops.layers.color.active
+        color_faces = []
+        byte_layers = bmesh_object.loops.layers.color
+        float_layers = bmesh_object.loops.layers.float_color
+        color_layer, data_type = next(
+            (
+                (layer, kind)
+                for layer, kind in (
+                    (byte_layers.get(VERTEX_COLOR_ATTRIBUTE_NAME), "BYTE_COLOR"),
+                    (float_layers.get(VERTEX_COLOR_ATTRIBUTE_NAME), "FLOAT_COLOR"),
+                    (byte_layers.active, "BYTE_COLOR"),
+                    (float_layers.active, "FLOAT_COLOR"),
+                )
+                if layer is not None
+            ),
+            (None, "BYTE_COLOR"),
         )
         if color_layer:
             for face in bmesh_object.faces:
+                face_colors = []
                 for loop in face.loops:
-                    vertex_color_indices[loop.vert.index] = loop.index
+                    # BMLoop.index may be stale after splitting UV islands. Use
+                    # the array we are writing, not Blender's cached loop index.
+                    index = len(vertex_color_values)
+                    vertex_color_indices[loop.vert.index] = index
+                    face_colors.append(index)
                     vertex_color_values.append(list(loop[color_layer][:]))
+                color_faces.append(face_colors)
 
-            self._vertex_color_data[mesh_index]["indices"] = vertex_color_indices
-            self._vertex_color_data[mesh_index]["values"] = vertex_color_values
+            self._vertex_color_data[mesh_index] = {
+                "mesh_name": mesh_name,
+                "data_type": data_type,
+                "indices": vertex_color_indices,
+                "values": vertex_color_values,
+                "faces": color_faces,
+            }
 
     def set_dna_vertex_positions(
         self,
@@ -599,7 +623,9 @@ class DNAExporter:
 
     def save_vertex_colors(self):
         if self._include_vertex_colors:
-            vertex_colors_file = self._target_dna_file.parent / f"{self._prefix}_vertex_colors.json"
+            # Bind colors to the DNA file, so head/body exports cannot overwrite
+            # each other's sidecars and renaming a rig does not lose its colors.
+            vertex_colors_file = self._target_dna_file.with_name(f"{self._target_dna_file.stem}_vertex_colors.json")
             with vertex_colors_file.open("w") as f:
                 json.dump(self._vertex_color_data, f)
                 logger.info(f'Vertex colors exported successfully to: "{vertex_colors_file}"')
@@ -700,7 +726,7 @@ class DNAExporter:
 
         # Set the vertex color data so it can be saved to JSON later
         if self._include_vertex_colors:
-            self.set_dna_vertex_colors(mesh_index=mesh_index, bmesh_object=bmesh_object)
+            self.set_dna_vertex_colors(mesh_index=mesh_index, bmesh_object=bmesh_object, mesh_name=real_name)
 
         # Set the vertex layout so DNA knows how to read the vertex,
         # normal, and uv data from their respective arrays

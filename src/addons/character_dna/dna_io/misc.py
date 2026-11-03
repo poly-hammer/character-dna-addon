@@ -138,6 +138,14 @@ def get_dna_reader(
     return reader
 
 
+def get_mesh_lods(reader: "dna.BinaryStreamReader") -> list[int]:
+    """LOD slots containing meshes; retained behavior slots can be empty.
+
+    Requires Definition (or All), rather than Descriptor alone.
+    """
+    return [lod for lod in range(reader.getLODCount()) if len(reader.getMeshIndicesForLOD(lod))]
+
+
 def get_dna_writer(file_path: Path, file_format: FileFormat = "binary") -> CanonicalDNAWriter:
     file_path = Path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)

@@ -18,7 +18,6 @@ from ..constants import (
     CUSTOM_BONE_SHAPE_SCALE,
     EXTRA_BONES,
     FIRST_BONE_HEIGHT,
-    MESH_VERTEX_COLORS_FILE_NAME,
     MESH_VERTEX_COLORS_FILE_PATH,
     NUMBER_OF_HEAD_LODS,
     SHAPE_KEY_BASIS_NAME,
@@ -28,7 +27,7 @@ from ..constants import (
 )
 from ..typing import *  # noqa: F403
 from .coordinates import COORDINATE_VERSION, DNA_ROTATION_MODE
-from .misc import get_dna_reader
+from .misc import get_dna_reader, get_mesh_lods
 
 
 logger = logging.getLogger(__name__)
@@ -52,9 +51,9 @@ class DNAImporter:
         self._linear_modifier = linear_modifier
 
         if component_type == "head":
-            self.source_dna_file = Path(bpy.path.abspath(str(dna_file_path) or instance.head_dna_file_path))
+            self.source_dna_file = Path(bpy.path.abspath(str(dna_file_path or instance.head_dna_file_path)))
         elif component_type == "body":
-            self.source_dna_file = Path(bpy.path.abspath(str(dna_file_path) or instance.body_dna_file_path))
+            self.source_dna_file = Path(bpy.path.abspath(str(dna_file_path or instance.body_dna_file_path)))
 
         # Determine the file format of the DNA file
         file_format = "binary" if (dna_file_path or self.source_dna_file).suffix.lower() == ".dna" else "json"
@@ -75,12 +74,16 @@ class DNAImporter:
         self._index_to_face = {}
         self._vert_index_to_dna_index = {}
         self._face_index_to_dna_index = {}
-        self._vertex_color_data = []
+        self._vertex_color_data = None
         self._default_vertex_color_layout = False
         self._component_type = component_type
 
     def _get_lod_settings(self) -> list[tuple[int, bool]]:
-        return [(i, getattr(self._import_properties, f"import_lod{i}")) for i in range(NUMBER_OF_HEAD_LODS)]
+        return [
+            (i, getattr(self._import_properties, f"import_lod{i}"))
+            for i in get_mesh_lods(self._dna_reader)
+            if i < NUMBER_OF_HEAD_LODS
+        ]
 
     def initialize_dna_data(self):
         for lod_index, should_import in self._get_lod_settings():
@@ -124,20 +127,46 @@ class DNAImporter:
         return indices, positions
 
     def get_dna_vertex_colors(self, mesh_index: int) -> tuple[list[int], list[list[float]]]:
-        if self._component_type == "body":
-            return [], []
-
         # Avoid loading the vertex colors multiple times
-        if not self._vertex_color_data:
-            vertex_colors_file = self.source_dna_file.parent / f"{self._prefix}_{MESH_VERTEX_COLORS_FILE_NAME}"
-            if not vertex_colors_file.exists():
+        if self._vertex_color_data is None:
+            self._vertex_color_data = []
+            folder = self.source_dna_file.parent
+            candidates = [folder / f"{self.source_dna_file.stem}_vertex_colors.json"]
+            # Older exports used the character name, independently of the DNA
+            # filename. The manifest also survives renaming an imported instance.
+            if self._component_type == "head":
+                names = [self._prefix]
+                manifest = folder / "ExportManifest.json"
+                if manifest.is_file():
+                    try:
+                        name = json.loads(manifest.read_text()).get("metaHumanName")
+                        if name and Path(name).name == name:
+                            names.append(name)
+                    except (OSError, ValueError, AttributeError):
+                        logger.warning(f"Could not read vertex color export metadata: {manifest}")
+                for name in names:
+                    candidates.extend(
+                        [folder / f"{name}_vertex_colors.json", folder / f"{name}_head_vertex_colors.json"]
+                    )
+            vertex_colors_file = next((path for path in candidates if path.is_file()), None)
+            if vertex_colors_file is None and self._component_type == "head":
                 vertex_colors_file = MESH_VERTEX_COLORS_FILE_PATH
                 self._default_vertex_color_layout = True
+            if vertex_colors_file is not None:
+                with vertex_colors_file.open() as file:
+                    self._vertex_color_data = json.load(file)
 
-            with vertex_colors_file.open() as file:
-                self._vertex_color_data = json.load(file)
-
+        if mesh_index >= len(self._vertex_color_data):
+            return [], []
         data = self._vertex_color_data[mesh_index]
+        if data.get("mesh_name", self._dna_reader.getMeshName(mesh_index)) != self._dna_reader.getMeshName(mesh_index):
+            logger.warning(f"Vertex color mesh identity does not match mesh {mesh_index}; skipping colors.")
+            return [], []
+        if self._default_vertex_color_layout and len(data["indices"]) != self._dna_reader.getVertexPositionCount(
+            mesh_index
+        ):
+            logger.warning(f"Bundled vertex colors do not match the topology of mesh {mesh_index}; skipping colors.")
+            return [], []
         return (data["indices"], data["values"])
 
     def get_dna_vertex_normals(self, mesh_index: int) -> dict[int, Vector]:
@@ -370,39 +399,49 @@ class DNAImporter:
             logger.debug(f"No vertex colors found for mesh index {mesh_index}. Skipping vertex color import.")
             return
 
-        color_layer = bmesh_object.loops.layers.color.get(
-            VERTEX_COLOR_ATTRIBUTE_NAME
-        ) or bmesh_object.loops.layers.color.new(VERTEX_COLOR_ATTRIBUTE_NAME)
+        data = self._vertex_color_data[mesh_index]
+        positions = self._dna_reader.getVertexLayoutPositionIndices(mesh_index)
+        color_faces = data.get("faces")
+        # Validate before creating a layer: a stale sidecar must not partially
+        # paint a different topology. Legacy sidecars address DNA layouts, while
+        # bundled colors address positions and new sidecars preserve each corner.
+        assignments = []
+        try:
+            if color_faces is not None and len(color_faces) != self._dna_reader.getFaceCount(mesh_index):
+                raise ValueError("face count differs")
+            for face_index, face in self._index_to_face.items():
+                layouts = self._dna_reader.getFaceVertexLayoutIndices(mesh_index, face_index)
+                if color_faces is not None:
+                    indices = color_faces[face_index]
+                else:
+                    indices = [
+                        vertex_color_indices[positions[layout] if self._default_vertex_color_layout else layout]
+                        for layout in layouts
+                    ]
+                by_vertex = {}
+                for layout, index in zip(layouts, indices, strict=True):
+                    if not 0 <= index < len(vertex_color_values):
+                        raise ValueError("color index out of range")
+                    value = vertex_color_values[index]
+                    if len(value) != 4 or not all(math.isfinite(channel) for channel in value):
+                        raise ValueError("invalid RGBA value")
+                    by_vertex[bmesh_object.verts[positions[layout]]] = value
+                assignments.append((face_index, [by_vertex[loop.vert] for loop in face.loops]))
+        except (IndexError, KeyError, ValueError, TypeError) as error:
+            logger.warning(f"Invalid vertex colors for mesh {mesh_index}: {error}; skipping colors.")
+            return
 
-        if self._default_vertex_color_layout:
-            # The bundled default layout is keyed by the standard MetaHuman mesh
-            # ordering/vertex counts; when it is applied to a custom (overwrite)
-            # DNA whose mesh set or topology differs, the lookups can fall out of
-            # range. Guard every access so a mismatched layout skips gracefully
-            # instead of raising and dropping the whole mesh from the import.
-            vertex_count = len(bmesh_object.verts)
-            index_count = len(vertex_color_indices)
-            value_count = len(vertex_color_values)
-            for vertex_index in self._dna_reader.getVertexLayoutPositionIndices(mesh_index):
-                if vertex_index >= vertex_count or vertex_index >= index_count:
-                    continue
-                color_index = vertex_color_indices[vertex_index]
-                if color_index >= value_count:
-                    continue
-                vert = bmesh_object.verts[vertex_index]
-                value = vertex_color_values[color_index]
-                for loop in vert.link_loops:
-                    loop[color_layer] = Vector(value)
-
-        # Todo: Implement the custom vertex color layout from exported JSON file
-        # else:  # noqa: ERA001
-        #     for face in bmesh_object.faces:
-        #         face_vert_indices = [v.index for v in face.verts]  # noqa: ERA001
-        #         dna_face_vert_indices = self._dna_reader.getFaceVertexLayoutIndices(mesh_index, face.index)  # noqa: E501, ERA001
-        #         lookup = dict(zip(face_vert_indices, dna_face_vert_indices))  # noqa: ERA001
-        #         for loop in face.loops:
-        #             vertex_color_index = vertex_color_indices[lookup[loop.vert.index]]  # noqa: ERA001
-        #             loop[color_layer] = Vector(vertex_color_values[vertex_color_index])  # noqa: ERA001
+        layers = (
+            bmesh_object.loops.layers.float_color
+            if data.get("data_type") == "FLOAT_COLOR"
+            else bmesh_object.loops.layers.color
+        )
+        color_layer = layers.get(VERTEX_COLOR_ATTRIBUTE_NAME) or layers.new(VERTEX_COLOR_ATTRIBUTE_NAME)
+        # Adding a BMesh custom-data layer reallocates loops. Reacquire them
+        # instead of retaining BMLoop references across layers.new().
+        for face_index, values in assignments:
+            for loop, value in zip(self._index_to_face[face_index].loops, values, strict=True):
+                loop[color_layer] = value
 
     def normalize_color_attributes(self, mesh: bpy.types.Mesh):
         """Ensure the mesh has a single color attribute named"""
@@ -459,8 +498,7 @@ class DNAImporter:
         self.set_smooth(bmesh_object)
 
         # Add vertex colors
-        # Todo: See if we can import vertex colors on all LODs.
-        if self._import_properties.import_vertex_colors and lod_index == 0 and self._component_type == "head":
+        if self._import_properties.import_vertex_colors:
             self.set_vertex_colors(mesh_index, bmesh_object)
 
         # Add UVs
