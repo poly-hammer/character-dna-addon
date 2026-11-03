@@ -164,15 +164,21 @@ class RigComponent:
         """Resolve stable scene IDs even while writeback has released cached readers."""
         if reader is None:
             return {}
+        scene_objects = self.instance.id_data.objects
         # Imported metadata survives user renames. Names support older blends.
         tagged = {
             obj.get("ca_dna_mesh_index"): obj
-            for obj in bpy.data.objects
+            for obj in scene_objects
             if obj.type == "MESH" and obj.get("ca_dna_rig") == self.rig and obj.get("ca_dna_component") == self.kind
         }
         result = {}
         for index in range(reader.getMeshCount()):
-            obj = tagged.get(index) or bpy.data.objects.get(f"{self.instance.name}_{reader.getMeshName(index)}")
+            # The explicitly linked main mesh can replace the imported template.
+            # Retained IDs outside this scene must never steal its shape bindings.
+            if index == 0 and self.mesh and self.mesh.name in scene_objects:
+                obj = self.mesh
+            else:
+                obj = tagged.get(index) or scene_objects.get(f"{self.instance.name}_{reader.getMeshName(index)}")
             if obj is not None:
                 result[index] = obj
         return result
