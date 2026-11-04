@@ -452,11 +452,14 @@ def _weld(head: dict, body: dict, seam: dict) -> tuple[dict, dict]:
     result = {
         **body,
         "positions": {axis: list(values) for axis, values in body["positions"].items()},
-        "skinWeights": list(body["skinWeights"]),
+        "skinWeights": [{"weights": [], "jointIndices": []} for _ in range(count)],
     }
     for axis in ("xs", "ys", "zs"):
         result["positions"][axis] += [value for index, value in enumerate(head["positions"][axis]) if index not in seam]
-    result["skinWeights"] += [weights for index, weights in enumerate(head["skinWeights"]) if index not in seam]
+    for kind, mesh in (("body", body), ("head", head)):
+        for index, weights in enumerate(mesh["skinWeights"]):
+            if kind != "head" or index not in seam:
+                result["skinWeights"][maps[kind][index]] = weights
     result["maximumInfluencePerVertex"] = max(head["maximumInfluencePerVertex"], body["maximumInfluencePerVertex"])
     result["normals"] = _join(head["normals"], body["normals"])
     result["textureCoordinates"] = _join(head["textureCoordinates"], body["textureCoordinates"])

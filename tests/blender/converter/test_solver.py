@@ -188,6 +188,7 @@ def test_seam_adjustment_is_opt_in_and_moves_only_the_boundary(enabled):
         rows={"head": {"mapping": "head_lod0_mesh"}, "body": {"mapping": "body_lod0_mesh"}},
         targets={"head": np.zeros((24049, 3), dtype=np.float32), "body": base.copy()},
         objects={"body": obj},
+        seam=get_head_to_body_edge_loop_mapping()["0"],
         report={"warnings": []},
         operator=SimpleNamespace(_properties=SimpleNamespace(adjust_seam=enabled)),
     )

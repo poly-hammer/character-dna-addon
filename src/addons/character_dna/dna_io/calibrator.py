@@ -19,7 +19,7 @@ from ..constants import (
     SHAPE_KEY_DELTA_THRESHOLD,
 )
 from ..typing import *  # noqa: F403  # noqa: F403
-from . import mesh_data
+from . import mesh_data, vertex_indices as position_indices
 from .exporter import DNAExporter
 from .importer import DNAImporter
 from .misc import get_dna_reader
@@ -55,10 +55,10 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 mesh_index = mesh_index_lookup.get(real_name)
                 if mesh_index is None:
                     continue
-                dna_vertex_count = len(self._dna_reader.getVertexPositionXs(mesh_index))
-                scene_vertex_count = len(mesh_object.data.vertices)
-                if scene_vertex_count != dna_vertex_count:
-                    mismatched.append(f'"{mesh_object.name}" has {scene_vertex_count}, DNA has {dna_vertex_count}')
+                try:
+                    position_indices.for_mesh(self._dna_reader, mesh_index, mesh_object.data)
+                except ValueError as error:
+                    mismatched.append(str(error))
 
         if mismatched:
             return (
@@ -167,6 +167,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 bmesh_object.free()
 
                 # Read these from the DNA file and modify these arrays so that they match the vertex indices match
+                dna_indices = position_indices.for_mesh(self._dna_reader, mesh_index, mesh_object.data)
                 x_values = self._dna_reader.getVertexPositionXs(mesh_index)
                 y_values = self._dna_reader.getVertexPositionYs(mesh_index)
                 z_values = self._dna_reader.getVertexPositionZs(mesh_index)
@@ -181,19 +182,18 @@ class DNACalibrator(DNAExporter, DNAImporter):
                     continue
 
                 for vertex_index in vertex_indices:
+                    dna_index = dna_indices[vertex_index]
                     # See if we can get the vertex position from the body mesh lookup first,
                     # so that we have an exact match
                     vertex_position = body_mesh_lookup.get(int(vertex_index), Vector(vertex_positions[vertex_index]))
-                    dna_vertex_position = Vector(
-                        (x_values[vertex_index], y_values[vertex_index], z_values[vertex_index])
-                    )
+                    dna_vertex_position = Vector((x_values[dna_index], y_values[dna_index], z_values[dna_index]))
                     delta = vertex_position - dna_vertex_position
                     # This ensures that we only modify the vertex positions that are different to
                     # avoid floating value drift
                     if delta.length > 1e-6:
-                        x_values[vertex_index] = vertex_position.x
-                        y_values[vertex_index] = vertex_position.y
-                        z_values[vertex_index] = vertex_position.z
+                        x_values[dna_index] = vertex_position.x
+                        y_values[dna_index] = vertex_position.y
+                        z_values[dna_index] = vertex_position.z
 
                 positions = [[x, y, z] for x, y, z in zip(x_values, y_values, z_values, strict=False)]
                 self._dna_writer.setVertexPositions(meshIndex=mesh_index, positions=positions)
@@ -506,6 +506,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 vertex_indices, _ = self.get_mesh_vertex_positions(bmesh_object)
                 bmesh_object.free()
 
+                dna_indices = position_indices.for_mesh(self._dna_reader, mesh_index, mesh_object.data)
                 for index in range(self._dna_reader.getBlendShapeTargetCount(mesh_index)):
                     channel_index = self._dna_reader.getBlendShapeChannelIndex(mesh_index, index)
                     shape_key_name = self._dna_reader.getBlendShapeChannelName(channel_index)
@@ -526,6 +527,18 @@ class DNACalibrator(DNAExporter, DNAImporter):
 
                     dna_delta_vertex_indices = []
                     dna_delta_values = []
+                    visible = set(dna_indices)
+                    original_ids = self._dna_reader.getBlendShapeTargetVertexIndices(mesh_index, index)
+                    original_deltas = zip(
+                        self._dna_reader.getBlendShapeTargetDeltaXs(mesh_index, index),
+                        self._dna_reader.getBlendShapeTargetDeltaYs(mesh_index, index),
+                        self._dna_reader.getBlendShapeTargetDeltaZs(mesh_index, index),
+                        strict=True,
+                    )
+                    for dna_index, delta in zip(original_ids, original_deltas, strict=True):
+                        if dna_index not in visible:
+                            dna_delta_vertex_indices.append(dna_index)
+                            dna_delta_values.append(list(delta))
 
                     # the new shape key is the dna shape key with the deltas from the blender shape key applied
                     for vertex_index in vertex_indices:
@@ -540,7 +553,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
                             # Apply the coordinate system conversion and linear modifier for the
                             # scene units to the delta
                             converted_delta = new_delta / self._linear_modifier
-                            dna_delta_vertex_indices.append(vertex_index)
+                            dna_delta_vertex_indices.append(dna_indices[vertex_index])
                             # The DNA writer's typemap requires a list of [x, y, z] lists of plain
                             # Python floats (matching ``setVertexPositions``); tuples or mathutils
                             # scalars are rejected with a SystemError/TypeError.
@@ -608,9 +621,8 @@ class DNACalibrator(DNAExporter, DNAImporter):
                     )
                     continue
 
-                self._dna_writer.clearSkinWeights(meshIndex=mesh_index)
-                if mesh_object.data.vertices:
-                    self._dna_writer.setSkinWeightsValues(mesh_index, len(mesh_object.data.vertices) - 1, [])
+                dna_indices = position_indices.for_mesh(self._dna_reader, mesh_index, mesh_object.data)
+                # Patch visible vertices; preserve weights on unused DNA slots.
                 groups_by_name = {group.name: group for group in mesh_object.vertex_groups}
                 # Create a lookup table for the vertex group names by their index
                 vertex_group_lookup = {
@@ -636,10 +648,10 @@ class DNACalibrator(DNAExporter, DNAImporter):
                             weights.append(weight)
 
                     self._dna_writer.setSkinWeightsJointIndices(
-                        meshIndex=mesh_index, vertexIndex=vertex.index, jointIndices=bone_indices
+                        meshIndex=mesh_index, vertexIndex=dna_indices[vertex.index], jointIndices=bone_indices
                     )
                     self._dna_writer.setSkinWeightsValues(
-                        meshIndex=mesh_index, vertexIndex=vertex.index, weights=weights
+                        meshIndex=mesh_index, vertexIndex=dna_indices[vertex.index], weights=weights
                     )
 
     def calibrate_bone_transforms(self):

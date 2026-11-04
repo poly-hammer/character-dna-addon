@@ -198,20 +198,23 @@ def capture(
 ) -> dict:
     """Bind Blender data to final DNA positions and corners after UV splitting."""
     mesh = obj.data
+    used = sorted({v for face in faces for v in face})
+    position_ids = used if len(used) == len(mesh.vertices) else list(range(len(mesh.vertices)))
+    neckline = object_boundary(obj)
     record = {
         "mesh_index": mesh_index,
         "name": name,
         "lods": lods,
         "topology": topology(vertex_count, faces),
         "colors": [],
-        "neckline": object_boundary(obj),
+        "neckline": [position_ids[v] for v in neckline] if neckline is not None else None,
     }
     if len(faces) != len(mesh.polygons):
         raise ValueError("Mesh metadata requires the exported face correspondence.")
     if colors:
         corners = []
         for poly, face in zip(mesh.polygons, faces, strict=True):
-            by_vertex = {mesh.loops[i].vertex_index: i for i in poly.loop_indices}
+            by_vertex = {position_ids[mesh.loops[i].vertex_index]: i for i in poly.loop_indices}
             corners.extend(by_vertex[v] for v in face)
         for attr in mesh.color_attributes:
             byte = attr.data_type == "BYTE_COLOR"
@@ -219,7 +222,7 @@ def capture(
             attr.data.foreach_get("color_srgb" if byte else "color", values)
             values = values.reshape(-1, 4)
             indices = (
-                np.arange(len(mesh.vertices), dtype=np.uint32)
+                np.asarray(position_ids, dtype=np.uint32)
                 if attr.domain == "POINT"
                 else np.arange(len(corners), dtype=np.uint32)
             )

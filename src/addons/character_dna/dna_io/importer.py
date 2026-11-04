@@ -252,9 +252,10 @@ class DNAImporter:
         # Blender's linear name lookup for every influence on every vertex.
         joint_names = {}
         vertex_groups = {group.name: group for group in mesh_object.vertex_groups}
+        position_ids = sorted(set(self._dna_reader.getVertexLayoutPositionIndices(mesh_index)))
         for vertex in mesh_object.data.vertices:
-            vertex_bone_indices = self._dna_reader.getSkinWeightsJointIndices(mesh_index, vertex.index)
-            vertex_weights = self._dna_reader.getSkinWeightsValues(mesh_index, vertex.index)
+            vertex_bone_indices = self._dna_reader.getSkinWeightsJointIndices(mesh_index, position_ids[vertex.index])
+            vertex_weights = self._dna_reader.getSkinWeightsValues(mesh_index, position_ids[vertex.index])
 
             for bone_index, weight in zip(vertex_bone_indices, vertex_weights, strict=False):
                 if bone_index not in joint_names:
@@ -330,6 +331,9 @@ class DNAImporter:
         # sort the vertices so that they are in the same order as the DNA file
         bmesh_object.verts.sort(key=lambda v: self._vert_index_to_dna_index[v.index])
         bmesh_object.verts.ensure_lookup_table()
+        bmesh_object.verts.index_update()
+        self._index_to_vert = {dna: bmesh_object.verts[local] for local, dna in enumerate(sorted(self._index_to_vert))}
+        self._vert_index_to_dna_index = {vert.index: dna for dna, vert in self._index_to_vert.items()}
 
     def set_mesh_face_layout(self, mesh_index: int, bmesh_object: bmesh.types.BMesh):
         vertex_indices = self._dna_reader.getVertexLayoutPositionIndices(mesh_index)
@@ -338,7 +342,7 @@ class DNAImporter:
             try:
                 face = bmesh_object.faces.new(
                     [
-                        bmesh_object.verts[vertex_indices[i]]
+                        self._index_to_vert[vertex_indices[i]]
                         for i in self._dna_reader.getFaceVertexLayoutIndices(mesh_index, index)
                     ]
                 )
@@ -400,7 +404,7 @@ class DNAImporter:
                     value = vertex_color_values[index]
                     if len(value) != 4 or not all(math.isfinite(channel) for channel in value):
                         raise ValueError("invalid RGBA value")
-                    by_vertex[bmesh_object.verts[positions[layout]]] = value
+                    by_vertex[self._index_to_vert[positions[layout]]] = value
                 assignments.append((face_index, [by_vertex[loop.vert] for loop in face.loops]))
         except (IndexError, KeyError, ValueError, TypeError) as error:
             logger.warning(f"Invalid vertex colors for mesh {mesh_index}: {error}; skipping colors.")

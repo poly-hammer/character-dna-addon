@@ -305,8 +305,15 @@ def apply_blend_shape_deltas(
 
     scaled = deltas * linear_modifier
 
+    if vertex_count != reader.getVertexPositionCount(mesh_index):
+        used = sorted(set(reader.getVertexLayoutPositionIndices(mesh_index)))
+        if len(used) != vertex_count:
+            raise ValueError(f"{mesh_object.name} no longer has its DNA topology")
+        inverse = {dna: local for local, dna in enumerate(used)}
+        vertex_indices = np.asarray([inverse.get(int(v), -1) for v in vertex_indices], dtype=np.int64)
+
     # guard against vertex indices that no longer exist on the base mesh
-    valid = vertex_indices < vertex_count
+    valid = (vertex_indices >= 0) & (vertex_indices < vertex_count)
     if not valid.all():
         logger.warning(
             f'Some vertex indices are missing for shape key "{name}". '

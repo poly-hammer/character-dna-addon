@@ -112,10 +112,12 @@ def test_custom_template_save_load_and_relative_links(setup_scene, tmp_path):
     assert str(obj.name) not in path.read_text()
     assert templates.current_dna_files(props)["head"] == tmp_path / "head.dna"
     props.extra_meshes[2].fit_method = "WRAP"
+    props.extra_meshes[2].transfer_material = True
     assert bpy.ops.character_dna.converter_template(action="SAVE") == {"FINISHED"}
     props.template = str(templates.BUNDLED_TEMPLATES[0])
     props.template = str(path)
     assert props.extra_meshes[2].fit_method == "WRAP"
+    assert props.extra_meshes[2].transfer_material is True
     assert next(item for item in props.extra_meshes if item.role == "head").scene_object == obj
 
 
@@ -235,6 +237,19 @@ class Layout:
             return SimpleNamespace() if name == "operator" else self
 
         return draw
+
+
+@pytest.mark.parametrize("method", ["WRAP", "RELATIVE"])
+@pytest.mark.parametrize("input_layout", ["SPLIT", "JOINED"])
+def test_transfer_material_checkbox_is_only_shown_for_wrap(setup_scene, method, input_layout):
+    props, _ = setup_scene
+    props.input_layout = input_layout
+    props.extra_meshes_index = 0
+    props.extra_meshes[0].fit_method = method
+    layout = Layout()
+    ui.CHARACTER_DNA_PT_converter_config._draw_active_extra_mesh(layout, props)
+    fields = [args[1] for name, args, _ in layout.calls if name == "prop"]
+    assert ("transfer_material" in fields) == (method == "WRAP")
 
 
 @pytest.mark.parametrize("preset,count", [(0, 2), (1, 5), (2, 10)])
