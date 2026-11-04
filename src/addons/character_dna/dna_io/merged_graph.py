@@ -146,14 +146,12 @@ def to_bytes(graph: dict, payload: dict | None = None) -> bytes:
                 writer.setJointGroupInputIndices(index, group["inputIndices"])
             _float_fields(graph, writer=writer)
             native_geometry.write(writer, graph["geom1.1"])
-            for key, value in graph["desc1.1"]["metadata"]:
-                if not isinstance(key, str) or not isinstance(value, str) or "\0" in key or "\0" in value:
-                    raise ValueError("DNA metadata requires strings without literal NUL characters.")
-                writer.setMetaData(key, value)
+            values = dict(graph["desc1.1"]["metadata"])
             if payload is not None:
-                # Keep foreign metadata written above when replacing our namespace.
-                for key, value in metadata.encode(payload).items():
-                    writer.setMetaData(key, value)
+                values.update(metadata.encode(payload))
+            metadata.validate_fields(values)
+            for key, value in values.items():
+                writer.setMetaData(key, value)
             writer.write()
             _status()
         finally:

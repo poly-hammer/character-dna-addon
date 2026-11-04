@@ -1195,7 +1195,60 @@ class MigrateLegacyData(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class SendToMetaHumanCreator(bpy.types.Operator):
+class TopologyTypeExportConfirmation:
+    """Confirm differing component types before starting an overwrite export."""
+
+    _pending_topology_confirmation: tuple | None = None
+
+    def invoke(self, context: "Context", event: bpy.types.Event) -> set[str]:
+        self._pending_topology_confirmation = None
+        return self.execute(context)
+
+    def cancel(self, context: "Context") -> None:
+        self._pending_topology_confirmation = None
+
+    def _confirm_topology_types(self, context: "Context", instance: "RigInstance | None") -> set[str] | None:
+        from .dna_io import mesh_data
+
+        if not instance or instance.output.method != "overwrite" or not instance.head_mesh or not instance.body_mesh:
+            self._pending_topology_confirmation = None
+            return None
+        names = []
+        for kind in ("head", "body"):
+            name = getattr(instance.output, f"{kind}_topology_type").strip()
+            if not name:
+                name = mesh_data.type_name(instance.component(kind).dna_reader, kind)
+            names.append(name)
+        # Missing types retain the component-specific validation error.
+        if not all(names) or names[0] == names[1]:
+            self._pending_topology_confirmation = None
+            return None
+        signature = (instance.as_pointer(), *names)
+        if self._pending_topology_confirmation == signature:
+            # Blender calls execute again only after the dialog is confirmed.
+            # Consume the confirmation so it cannot authorize a later export.
+            self._pending_topology_confirmation = None
+            return None
+        if bpy.app.background:
+            self.report({"ERROR"}, "Head and Body have different Topology Types. Confirm the export in Blender's UI.")
+            return {"CANCELLED"}
+        self._pending_topology_confirmation = signature
+        return context.window_manager.invoke_props_dialog(  # pyright: ignore[reportReturnType]
+            self, title="Different Topology Types", confirm_text="Export Anyway", cancel_default=True, width=500
+        )
+
+    def draw(self, context: "Context") -> None:
+        if not self.layout or not self._pending_topology_confirmation:
+            return
+        _, head, body = self._pending_topology_confirmation
+        self.layout.label(text="Head and Body have different Topology Types.", icon="ERROR")
+        self.layout.label(text=f"Head: {head}")
+        self.layout.label(text=f"Body: {body}")
+        self.layout.separator()
+        self.layout.label(text="Export with these different types, or cancel to correct them.")
+
+
+class SendToMetaHumanCreator(TopologyTypeExportConfirmation, bpy.types.Operator):
     """Exports the DNA head and body components, as well as, textures in a format supported by MetaHuman Creator."""
 
     bl_idname = f"{ToolInfo.NAME}.send_to_meta_human_creator"
@@ -1203,6 +1256,9 @@ class SendToMetaHumanCreator(bpy.types.Operator):
 
     def execute(self, context: "Context") -> set[str]:
         instance = callbacks.get_active_rig_instance()
+        confirmation = self._confirm_topology_types(context, instance)
+        if confirmation is not None:
+            return confirmation
         if instance:
             # store the current auto evaluate settings
             auto_evaluate_head = instance.auto_evaluate_head
@@ -1308,7 +1364,7 @@ class SendToMetaHumanCreator(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class ExportSelectedComponent(bpy.types.Operator):
+class ExportSelectedComponent(TopologyTypeExportConfirmation, bpy.types.Operator):
     """Export only the selected component to a single DNA file. No textures or supporting files will be exported."""
 
     bl_idname = f"{ToolInfo.NAME}.export_selected_component"
@@ -1316,6 +1372,9 @@ class ExportSelectedComponent(bpy.types.Operator):
 
     def execute(self, context: "Context") -> set[str]:
         instance = callbacks.get_active_rig_instance()
+        confirmation = self._confirm_topology_types(context, instance)
+        if confirmation is not None:
+            return confirmation
         if not instance:
             self.report(
                 {"ERROR"},

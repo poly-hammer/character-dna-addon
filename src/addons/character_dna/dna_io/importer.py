@@ -76,9 +76,9 @@ class DNAImporter:
         self._vert_index_to_dna_index = {}
         self._face_index_to_dna_index = {}
         self._vertex_color_data = None
-        self._default_vertex_color_layout = False
         self._component_type = component_type
-        self._mesh_metadata = mesh_data.read(self._dna_reader, component_type)
+        self._custom_topology = mesh_data.has_custom_topology(self._dna_reader, component_type)
+        self._mesh_metadata = mesh_data.read(self._dna_reader, component_type) if self._custom_topology else None
         if self._mesh_metadata is not None and self._mesh_metadata.get("space", "component") != "component":
             raise ValueError("Project merged DNA before importing component mesh metadata.")
 
@@ -137,34 +137,12 @@ class DNAImporter:
         return indices, positions
 
     def get_dna_vertex_colors(self, mesh_index: int) -> tuple[list[int], list[list[float]]]:
-        # Avoid loading the vertex colors multiple times
+        """Read only the bundled MetaHuman head colors, addressed by DNA position."""
+        if self._custom_topology or self._component_type != "head":
+            return [], []
         if self._vertex_color_data is None:
-            self._vertex_color_data = []
-            folder = self.source_dna_file.parent
-            candidates = [folder / f"{self.source_dna_file.stem}_vertex_colors.json"]
-            # Older exports used the character name, independently of the DNA
-            # filename. The manifest also survives renaming an imported instance.
-            if self._component_type == "head":
-                names = [self._prefix]
-                manifest = folder / "ExportManifest.json"
-                if manifest.is_file():
-                    try:
-                        name = json.loads(manifest.read_text()).get("metaHumanName")
-                        if name and Path(name).name == name:
-                            names.append(name)
-                    except (OSError, ValueError, AttributeError):
-                        logger.warning(f"Could not read vertex color export metadata: {manifest}")
-                for name in names:
-                    candidates.extend(
-                        [folder / f"{name}_vertex_colors.json", folder / f"{name}_head_vertex_colors.json"]
-                    )
-            vertex_colors_file = next((path for path in candidates if path.is_file()), None)
-            if vertex_colors_file is None and self._component_type == "head":
-                vertex_colors_file = MESH_VERTEX_COLORS_FILE_PATH
-                self._default_vertex_color_layout = True
-            if vertex_colors_file is not None:
-                with vertex_colors_file.open() as file:
-                    self._vertex_color_data = json.load(file)
+            with MESH_VERTEX_COLORS_FILE_PATH.open() as file:
+                self._vertex_color_data = json.load(file)
 
         if mesh_index >= len(self._vertex_color_data):
             return [], []
@@ -172,9 +150,7 @@ class DNAImporter:
         if data.get("mesh_name", self._dna_reader.getMeshName(mesh_index)) != self._dna_reader.getMeshName(mesh_index):
             logger.warning(f"Vertex color mesh identity does not match mesh {mesh_index}; skipping colors.")
             return [], []
-        if self._default_vertex_color_layout and len(data["indices"]) != self._dna_reader.getVertexPositionCount(
-            mesh_index
-        ):
+        if len(data["indices"]) != self._dna_reader.getVertexPositionCount(mesh_index):
             logger.warning(f"Bundled vertex colors do not match the topology of mesh {mesh_index}; skipping colors.")
             return [], []
         return (data["indices"], data["values"])
@@ -411,23 +387,12 @@ class DNAImporter:
 
         data = self._vertex_color_data[mesh_index]
         positions = self._dna_reader.getVertexLayoutPositionIndices(mesh_index)
-        color_faces = data.get("faces")
-        # Validate before creating a layer: a stale sidecar must not partially
-        # paint a different topology. Legacy sidecars address DNA layouts, while
-        # bundled colors address positions and new sidecars preserve each corner.
+        # Validate before creating a layer; bundled colors address DNA positions.
         assignments = []
         try:
-            if color_faces is not None and len(color_faces) != self._dna_reader.getFaceCount(mesh_index):
-                raise ValueError("face count differs")
             for face_index, face in self._index_to_face.items():
                 layouts = self._dna_reader.getFaceVertexLayoutIndices(mesh_index, face_index)
-                if color_faces is not None:
-                    indices = color_faces[face_index]
-                else:
-                    indices = [
-                        vertex_color_indices[positions[layout] if self._default_vertex_color_layout else layout]
-                        for layout in layouts
-                    ]
+                indices = [vertex_color_indices[positions[layout]] for layout in layouts]
                 by_vertex = {}
                 for layout, index in zip(layouts, indices, strict=True):
                     if not 0 <= index < len(vertex_color_values):
@@ -508,7 +473,7 @@ class DNAImporter:
         self.set_smooth(bmesh_object)
 
         # Add vertex colors
-        if self._import_properties.import_vertex_colors and self._mesh_metadata is None:
+        if self._import_properties.import_vertex_colors and not self._custom_topology:
             self.set_vertex_colors(mesh_index, bmesh_object)
 
         # Add UVs
@@ -519,9 +484,9 @@ class DNAImporter:
         bmesh_object.free()
 
         # Ensure a single, named color attribute that is both active and active-render
-        if self._mesh_metadata is None:
+        if not self._custom_topology:
             self.normalize_color_attributes(mesh)
-        else:
+        elif self._mesh_metadata is not None:
             record = next((r for r in self._mesh_metadata["meshes"] if r["mesh_index"] == mesh_index), None)
             if record is not None:
                 mesh_data.validate_record(
@@ -538,6 +503,11 @@ class DNAImporter:
                     inverse = {dna: local for local, dna in enumerate(position_ids)}
                     group = mesh_object.vertex_groups.new(name=mesh_data.SEAM_GROUP)
                     group.add([inverse[v] for v in record["neckline"]], 1.0, "REPLACE")
+        elif self._import_properties.import_vertex_colors:
+            logger.warning(
+                f"Custom {self._component_type} DNA has no embedded mesh metadata; "
+                f"importing {mesh_name} without colors."
+            )
 
         # The DNA's own normals, which are what makes the head sit seamlessly on the body.
         if self._import_properties.import_normals:

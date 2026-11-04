@@ -23,6 +23,7 @@ from character_dna.dna_io import (
     release_dna_handle,
 )
 from character_dna.editors.converter import scene_colors, scene_merge
+from fixtures.rigs import RigProfile
 
 
 @pytest.fixture
@@ -69,7 +70,6 @@ def export_surface(surface, source, target, kind="head"):
     )
     exporter = DNAExporter(instance, 100, component_type=kind, file_name=target.name)
     try:
-        exporter._vertex_color_data = [{"indices": [], "values": []}]
         surface.name = f"Custom_{kind}_lod0_mesh"
         exporter._export_mesh(surface, 0)
         exporter._export_component_extensions()
@@ -87,6 +87,7 @@ def test_embedded_export_import_without_sidecars(tmp_path, surface, kind, domain
     source = write_surface(tmp_path / "source.dna", component=kind, lod_count=4 if kind == "body" else 8)
     target = tmp_path / f"{kind}.dna"
     export_surface(surface, source, target, kind)
+    assert not list(tmp_path.glob("*_vertex_colors.json"))
     # A conflicting sidecar must not win over embedded data.
     (tmp_path / f"{kind}_vertex_colors.json").write_text("invalid JSON ignored")
     instance = SimpleNamespace(
@@ -341,3 +342,61 @@ def test_scene_merge_colors_and_edited_split(surface):
         bpy.data.meshes.remove(other_mesh)
         if baseline:
             bpy.data.meshes.remove(baseline)
+
+
+@pytest.mark.parametrize("kind", ["head", "body"])
+def test_full_export_writes_colors_only_inside_dna(tmp_path, rig_factory, compact_dna, kind):
+    with rig_factory.lease(RigProfile(asset=str(compact_dna)), tmp_path) as instance:
+        instance.output.method = "overwrite"
+        instance.output.run_validations = False
+        setattr(instance.output, f"{kind}_topology_type", "Custom")
+        expected = add_colors(getattr(instance, f"{kind}_mesh").data, "CORNER", "BYTE_COLOR")
+        target = tmp_path / "metadata-export"
+        target.mkdir()
+        instance.output.folder_path = str(target)
+        exporter = DNAExporter(instance, 100, component_type=kind, file_name=f"{kind}.dna", textures=False)
+        try:
+            assert exporter.run()[0]
+        finally:
+            release_dna_handle(exporter._dna_writer)
+            release_dna_handle(exporter._dna_reader)
+        assert [p.name for p in target.iterdir()] == [f"{kind}.dna"]
+        reader = get_dna_reader(target / f"{kind}.dna")
+        try:
+            assert mesh_data.read(reader, kind)["meshes"][0]["colors"] == expected
+        finally:
+            release_dna_handle(reader)
+
+
+@pytest.mark.parametrize(
+    "dtype,values", [("<u4", [-1]), ("<u4", [2**32]), ("<u4", [1.5]), ("|u1", [256]), ("<f4", [1e40])]
+)
+def test_metadata_array_rejects_overflow(dtype, values):
+    with pytest.raises(ValueError, match="range"):
+        mesh_data.pack(values, dtype)
+
+
+def test_large_color_array_uses_bounded_fields_and_native_roundtrip(tmp_path):
+    from character_dna.bindings import dna
+
+    data = np.random.default_rng(7).random((100000, 4)).astype(np.float32)
+    payload = {"colors": mesh_data.pack(data, "<f4")}
+    encoded = metadata.encode(payload, prefix="test.colors")
+    header = json.loads(encoded["test.colors"])
+    assert header["chunks"] > 1
+    assert all(len(value) <= metadata.CHUNK_BYTES for key, value in encoded.items() if key != "test.colors")
+    source = get_dna_reader(write_surface(tmp_path / "source.dna"))
+    writer = get_dna_writer(tmp_path / "colors.dna")
+    try:
+        writer.setFrom(source, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
+        metadata.write_many(writer, source, {"test.colors": payload})
+        writer.write()
+    finally:
+        release_dna_handle(writer)
+        release_dna_handle(source)
+    reader = get_dna_reader(tmp_path / "colors.dna", data_layer="Descriptor")
+    try:
+        result = metadata.decode(reader, prefix="test.colors")
+        np.testing.assert_array_equal(mesh_data.unpack(result["colors"]), data)
+    finally:
+        release_dna_handle(reader)

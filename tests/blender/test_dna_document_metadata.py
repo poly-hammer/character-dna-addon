@@ -2,6 +2,8 @@
 
 import json
 
+from unittest.mock import Mock
+
 import pytest
 
 from character_dna.dna_io import metadata
@@ -41,6 +43,49 @@ def test_metadata_rejects_corruption(damage):
     values[metadata.PREFIX] = json.dumps(header)
     with pytest.raises(ValueError):
         metadata.decode(Reader(values))
+
+
+def test_metadata_checks_encoded_size_before_native_write(monkeypatch):
+    monkeypatch.setattr(metadata, "MAX_ENCODED_BYTES", 8)
+    with pytest.raises(ValueError, match="encoded payload budget"):
+        metadata.encode({"color": [0, 1, 0, 1]})
+
+
+@pytest.mark.parametrize("limit", ["MAX_METADATA_BYTES", "MAX_METADATA_ENTRIES", "UINT32_MAX"])
+def test_metadata_limits_include_foreign_fields_without_mutating_writer(monkeypatch, limit):
+    monkeypatch.setattr(metadata, limit, 1)
+    reader = Mock()
+    reader.getMetaDataCount.return_value = 1
+    reader.getMetaDataKey.return_value = "foreign"
+    reader.getMetaDataValue.return_value = "preserve me"
+    writer = Mock()
+    with pytest.raises(ValueError):
+        metadata.write_many(writer, reader, {}, {"new": "value"})
+    writer.clearMetaData.assert_not_called()
+    writer.setMetaData.assert_not_called()
+
+
+def test_metadata_rejects_oversized_chunks(monkeypatch):
+    values = metadata.encode({"colors": list(range(100))})
+    monkeypatch.setattr(metadata, "CHUNK_BYTES", 8)
+    with pytest.raises(ValueError, match="chunk"):
+        metadata.decode(Reader(values))
+
+
+def test_file_size_budget_does_not_overwrite_destination(tmp_path, monkeypatch):
+    from character_dna.dna_io import get_dna_writer, release_dna_handle
+
+    path = tmp_path / "head.dna"
+    path.write_bytes(b"existing export")
+    writer = get_dna_writer(path)
+    try:
+        writer.setName("Metadata limit check")
+        monkeypatch.setattr(metadata, "MAX_DOCUMENT_BYTES", 1)
+        with pytest.raises(ValueError, match="file-size budget"):
+            writer.write()
+        assert path.read_bytes() == b"existing export"
+    finally:
+        release_dna_handle(writer)
 
 
 def test_native_graph_preserves_quoted_foreign_metadata(tmp_path):

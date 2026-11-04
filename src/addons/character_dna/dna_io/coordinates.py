@@ -121,6 +121,7 @@ class CanonicalDNAWriter:
     def write(self) -> None:
         from ..bindings import dna
         from ..runtime.engine import invalidate_model_file
+        from . import metadata
         from .document import partition_backup, publish_partition, validate_write
         from .misc import release_dna_handle
 
@@ -130,6 +131,8 @@ class CanonicalDNAWriter:
         self.writer.write()
         if not dna.Status.isOk():
             raise RuntimeError(dna.Status.get().message)
+        if self.stream.size() >= metadata.MAX_DOCUMENT_BYTES:
+            raise ValueError("DNA exceeds the supported file-size budget (2 GiB by default).")
         self.stream.seek(0)
         reader = dna.BinaryStreamReader(self.stream, configuration(blender=False), None)
         reader.read()

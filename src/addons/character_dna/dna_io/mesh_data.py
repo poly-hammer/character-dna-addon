@@ -66,11 +66,27 @@ def set_graph_payload(graph: dict, kind: str, payload: dict, name: str) -> None:
     values = {k: v for k, v in graph["desc1.1"]["metadata"] if k != prefix and not k.startswith(prefix + ".")}
     values.update(metadata.encode(payload, prefix=prefix))
     values.update({f"{TYPE_PREFIX}.schema": str(SCHEMA), type_key(kind): name})
+    metadata.validate_fields(values)
     graph["desc1.1"]["metadata"] = list(values.items())
 
 
 def pack(values: Any, dtype: str) -> dict:
-    array = np.asarray(values, dtype=dtype)
+    if dtype not in ("|u1", "<f4", "<u4"):
+        raise ValueError("Unsupported mesh metadata array type.")
+    source = np.asarray(values)
+    target = np.dtype(dtype)
+    if source.size * target.itemsize > metadata.MAX_PAYLOAD_BYTES:
+        raise ValueError("Mesh metadata array exceeds the memory budget.")
+    if not np.isfinite(source).all():
+        raise ValueError("Non-finite mesh metadata value.")
+    if target.kind == "u" and (
+        np.any(source < 0) or np.any(source > np.iinfo(target).max) or np.any(source != np.floor(source))
+    ):
+        raise ValueError(f"Mesh metadata value is outside the {dtype} integer range.")
+    with np.errstate(over="ignore"):
+        array = source.astype(target, copy=False)
+    if not np.isfinite(array).all():
+        raise ValueError("Mesh metadata value exceeds float32 range.")
     return {"dtype": dtype, "shape": list(array.shape), "data": base64.b64encode(array.tobytes()).decode("ascii")}
 
 
@@ -86,6 +102,9 @@ def unpack(record: dict) -> np.ndarray:
     dtype = np.dtype(record["dtype"])
     if count * dtype.itemsize > metadata.MAX_PAYLOAD_BYTES:
         raise ValueError("Mesh metadata array exceeds the memory budget.")
+    expected = count * dtype.itemsize
+    if len(record["data"]) != 4 * ((expected + 2) // 3):
+        raise ValueError("Truncated or oversized mesh metadata array.")
     raw = base64.b64decode(record["data"], validate=True)
     if len(raw) != count * dtype.itemsize:
         raise ValueError("Truncated mesh metadata array.")
@@ -129,7 +148,8 @@ def validate_record(record: dict, fingerprint: dict) -> None:
         if color["values"]["dtype"] != dtype or color["color_space"] != space:
             raise ValueError("Invalid color attribute encoding.")
         if (
-            values.shape != (len(indices), 4)
+            color["indices"]["dtype"] != "<u4"
+            or values.shape != (len(indices), 4)
             or indices.ndim != 1
             or np.any(indices >= count)
             or len(np.unique(indices)) != len(indices)

@@ -9,7 +9,8 @@ import bpy
 import numpy as np
 import pytest
 
-from character_dna.dna_io import DNAExporter, DNAImporter, get_dna_reader, get_dna_writer, release_dna_handle
+from character_dna.bindings import dna
+from character_dna.dna_io import DNAExporter, DNAImporter, get_dna_reader, get_dna_writer, mesh_data, release_dna_handle
 from constants import TEST_DNA_FOLDER
 
 
@@ -70,29 +71,38 @@ def test_export_import_corner_colors(tmp_path, data_type, uv_seam):
         head_mesh=obj,
         head_rig=None,
         head_dna_file_path=str(source),
-        output=SimpleNamespace(folder_path=str(tmp_path), format="binary"),
+        output=SimpleNamespace(folder_path=str(tmp_path), format="binary", head_topology_type="Custom"),
+        get=lambda *_: None,
     )
     exporter = DNAExporter(instance, 100, file_name="head.dna", reader=reader, vertex_groups=False)
-    exporter._vertex_color_data = [{"indices": [], "values": []}]
     importer = None
-    imported_bm = None
+    imported = None
     imported_mesh = None
     try:
         exporter._export_mesh(obj, 0)
+        exporter._export_component_extensions()
         exporter._dna_writer.write()
-        exporter.save_vertex_colors()
-        importer, imported_bm = import_surface(tmp_path / "head.dna")
-        imported_mesh = bpy.data.meshes.new("imported_colors")
-        imported_bm.to_mesh(imported_mesh)
+        assert not list(tmp_path.glob("*_vertex_colors.json"))
+        path = tmp_path / "head.dna"
+        options = SimpleNamespace(
+            import_vertex_colors=True,
+            import_vertex_groups=False,
+            import_normals=False,
+            **{f"import_lod{i}": True for i in range(8)},
+        )
+        importer = DNAImporter(SimpleNamespace(name="Imported", head_dna_file_path=str(path)), options, 0.01)
+        importer.initialize_dna_data()
+        imported = importer.create_mesh_object(0, "head_lod0_mesh")
+        imported_mesh = imported.data
         result = imported_mesh.color_attributes["Color"]
         assert result.domain == "CORNER"
         assert result.data_type == data_type
         np.testing.assert_allclose([tuple(datum.color) for datum in result.data], expected, atol=1e-7)
-        assert not importer._default_vertex_color_layout
+        assert importer._custom_topology
         assert importer._get_lod_settings() == [(0, True)]
     finally:
-        if imported_bm is not None:
-            imported_bm.free()
+        if imported is not None:
+            bpy.data.objects.remove(imported, do_unlink=True)
         if importer is not None:
             release_dna_handle(importer._dna_reader)
         release_dna_handle(exporter._dna_writer)
@@ -103,20 +113,16 @@ def test_export_import_corner_colors(tmp_path, data_type, uv_seam):
             bpy.data.meshes.remove(imported_mesh)
 
 
-@pytest.mark.parametrize("filename", ["Original_vertex_colors.json", "Original_head_vertex_colors.json"])
-def test_legacy_export_uses_layout_ids_and_manifest(tmp_path, filename):
+@pytest.mark.parametrize(
+    "filename", ["head_vertex_colors.json", "Original_vertex_colors.json", "Original_head_vertex_colors.json"]
+)
+def test_sidecars_are_ignored(tmp_path, filename):
     path = write_surface(tmp_path / "head.dna")
     (tmp_path / "ExportManifest.json").write_text(json.dumps({"metaHumanName": "Original"}))
-    palette = [[1, 0, 0, 1], [0, 1, 0, 1], [0, 0, 1, 0.5], [1, 1, 0, 1], [0, 1, 1, 1], [1, 0, 1, 1]]
-    (tmp_path / filename).write_text(json.dumps([{"indices": list(range(6)), "values": palette}]))
+    (tmp_path / filename).write_text("invalid JSON must never be read")
     importer, bm = import_surface(path)
     try:
-        layer = bm.loops.layers.color["Color"]
-        for face in bm.faces:
-            layouts = importer._dna_reader.getFaceVertexLayoutIndices(0, face.index)
-            for loop, index in zip(face.loops, layouts, strict=True):
-                np.testing.assert_allclose(tuple(loop[layer]), palette[index], atol=1 / 255)
-        assert not importer._default_vertex_color_layout
+        assert not bm.loops.layers.color.keys()
     finally:
         bm.free()
         release_dna_handle(importer._dna_reader)
@@ -131,10 +137,12 @@ def test_custom_topology_without_sidecar_does_not_get_template_colors(tmp_path):
         release_dna_handle(importer._dna_reader)
 
 
-def test_standard_metahuman_keeps_bundled_position_colors():
-    importer, bm = import_surface(TEST_DNA_FOLDER / "ada" / "head.dna")
+@pytest.mark.parametrize("topology_type", ["", "MetaHuman"])
+def test_standard_metahuman_keeps_bundled_position_colors(tmp_path, topology_type):
+    path = tagged_head(tmp_path, topology_type, invalid_metadata=True)
+    importer, bm = import_surface(path)
     try:
-        assert importer._default_vertex_color_layout
+        assert not importer._custom_topology
         indices, values = importer.get_dna_vertex_colors(0)
         positions = importer._dna_reader.getVertexLayoutPositionIndices(0)
         layer = bm.loops.layers.color["Color"]
@@ -151,32 +159,28 @@ def test_standard_metahuman_keeps_bundled_position_colors():
         release_dna_handle(importer._dna_reader)
 
 
-def test_head_body_sidecars_do_not_overwrite_each_other(tmp_path):
-    for component, color in [("head", [0, 1, 0, 1]), ("body", [0, 0, 1, 1])]:
-        path = write_surface(tmp_path / f"{component}.dna", component=component)
-        exporter = DNAExporter.__new__(DNAExporter)
-        exporter._include_vertex_colors = True
-        exporter._target_dna_file = path
-        exporter._prefix = "Original"
-        exporter._vertex_color_data = [{"indices": [0] * 6, "values": [color]}]
-        exporter.save_vertex_colors()
-    for component, color in [("head", [0, 1, 0, 1]), ("body", [0, 0, 1, 1])]:
-        importer, bm = import_surface(tmp_path / f"{component}.dna", component=component)
-        try:
-            layer = bm.loops.layers.color["Color"]
-            assert all(tuple(loop[layer]) == tuple(color) for face in bm.faces for loop in face.loops)
-        finally:
-            bm.free()
-            release_dna_handle(importer._dna_reader)
+def tagged_head(tmp_path, topology_type, *, invalid_metadata=False):
+    reader = get_dna_reader(TEST_DNA_FOLDER / "ada" / "head.dna")
+    path = tmp_path / "head.dna"
+    writer = get_dna_writer(path)
+    try:
+        writer.setFrom(reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
+        writer.setMetaData(mesh_data.type_key("head"), topology_type)
+        if invalid_metadata:
+            writer.setMetaData(mesh_data.PREFIX + ".head", "invalid JSON must never be read for MetaHuman")
+        writer.write()
+    finally:
+        release_dna_handle(writer)
+        release_dna_handle(reader)
+    return path
 
 
-def test_invalid_color_sidecar_is_not_partially_applied(tmp_path):
-    path = write_surface(tmp_path / "head.dna")
-    (tmp_path / "head_vertex_colors.json").write_text(
-        json.dumps([{"indices": [0, 0, 9, 0, 0, 0], "values": [[1, 0, 0, 1]]}])
-    )
+def test_custom_without_metadata_never_falls_back_even_with_default_vertex_count(tmp_path):
+    path = tagged_head(tmp_path, "Custom")
+    (tmp_path / "head_vertex_colors.json").write_text("invalid JSON must never be read")
     importer, bm = import_surface(path)
     try:
+        assert importer._custom_topology
         assert not bm.loops.layers.color.keys()
     finally:
         bm.free()
