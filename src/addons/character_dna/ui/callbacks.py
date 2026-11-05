@@ -623,6 +623,14 @@ def set_active_lod(self: "CharacterViewOptionsProperties", value: int):
             and scene_object.type == "MESH"
             and not is_readonly_id(scene_object)
         ):
+            visibility = scene_object.get("dna_converter_visibility")
+            if visibility is not None:
+                lod = HEAD_TO_BODY_LOD_MAPPING.get(value) if visibility["component"] == "body" else value
+                inactive = visibility["lod"] != lod
+                scene_object.hide_viewport = bool(visibility["hide_viewport"])
+                scene_object.hide_render = inactive or bool(visibility["hide_render"])
+                set_hidden(scene_object, inactive or bool(visibility["hide_viewport"]))
+                continue
             ignored_names = [
                 f"{instance.name}_eyeshell_lod{value}_mesh",
                 f"{instance.name}_eyeEdge_lod{value}_mesh",
@@ -637,7 +645,11 @@ def set_active_lod(self: "CharacterViewOptionsProperties", value: int):
     # un-hide the body lod. There are 2 head lods per body lod
     body_lod_index = HEAD_TO_BODY_LOD_MAPPING.get(value)
     body_lod_object = bpy.data.objects.get(f"{instance.name}_body_lod{body_lod_index}_mesh")
-    if body_lod_object and not is_readonly_id(body_lod_object):
+    if (
+        body_lod_object
+        and not is_readonly_id(body_lod_object)
+        and body_lod_object.get("dna_converter_visibility") is None
+    ):
         set_hidden(body_lod_object, False)
     if instance.get("dna_merge_proxy"):
         from ..editors.converter.scene_merge import sync_visibility

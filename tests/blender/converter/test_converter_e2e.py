@@ -57,7 +57,7 @@ def configure_template(props, folder, preset="basic", components=("head", "body"
     return {item.role: item for item in props.extra_meshes}
 
 
-def test_convert_meshes_to_dna(
+def test_convert_meshes_to_dna(  # noqa: PLR0915 - complete conversion contract
     load_mhc_conformed_topology_meshes,
     base_dna_folder,
     temp_folder: Path,
@@ -82,12 +82,18 @@ def test_convert_meshes_to_dna(
 
     # Interactive conversion yields to timers before finalization; background
     # conversion does not. Reproduce the deferred native binding at that boundary.
+    from character_dna.components.base import CharacterComponentBase
     from character_dna.editors.converter.pipeline import Transition, positions
     from character_dna.runtime import controller, engine
 
     commit_transition = Transition.commit
     input_positions = {obj: positions(obj) for obj in (rows["head"].scene_object, rows["body"].scene_object)}
     phases = []
+
+    def unexpected_texture_loading(*_args):
+        pytest.fail("Converter imports must not load texture maps from folders")
+
+    monkeypatch.setattr(CharacterComponentBase, "_set_image_textures", unexpected_texture_loading)
 
     def commit_with_native_bindings(transition):
         controller.reconcile()
@@ -105,6 +111,7 @@ def test_convert_meshes_to_dna(
 
     for obj, before in input_positions.items():
         np.testing.assert_array_equal(positions(obj), before)
+        assert obj.hide_get() and obj.hide_render
     assert phases[0] == "Fit supplied surfaces"
     assert "Fit head joints" in phases
     assert not list(temp_folder.rglob("ConversionReport.json"))
@@ -116,6 +123,10 @@ def test_convert_meshes_to_dna(
     instance = bpy.context.scene.character_dna.rig_instance_list.get(name)  # type: ignore[attr-defined]
     assert instance is not None, "Rig instance should be created"
     assert instance.name == name, f"Instance name should be {name}"
+    eye_edge = bpy.data.objects[f"{name}_eyeEdge_lod0_mesh"]
+    assert eye_edge.hide_viewport and eye_edge.hide_get() and eye_edge.hide_render
+    instance.view_options.active_lod = "lod0"
+    assert eye_edge.hide_viewport and eye_edge.hide_get() and eye_edge.hide_render
 
     assert instance.head_rig is not None, "Head rig should be created"
     assert instance.head_mesh is not None, "Head mesh should be created"
@@ -162,10 +173,16 @@ def test_failure_restores_owned_data_without_removing_unrelated_objects(
     props = get_converter_properties()
     rows = configure_template(props, base_dna_folder, components=("head",))
     head = rows["head"].scene_object
+    material = bpy.data.materials.new("Cancellation source")
+    material.use_fake_user = True
+    head.data.materials.clear()
+    head.data.materials.append(material)
+    rows["head"].material_source = head
     props.new_name = "CancelledConversion"
     props.new_folder = str(tmp_path)
     original = positions(head)
     was_hidden = head.hide_get()
+    was_render_disabled = head.hide_render
     wm = get_addon_window_manager_properties()
     previous_evaluation = wm.evaluate_dependency_graph
     wm.evaluate_dependency_graph = False
@@ -173,6 +190,8 @@ def test_failure_restores_owned_data_without_removing_unrelated_objects(
     unrelated = []
 
     def interrupted(_transition):
+        copied = bpy.data.materials.get("CancelledConversion_head_shader")
+        assert copied is not None and copied != material
         obj = bpy.data.objects.new("UnrelatedDuringConversion", None)
         bpy.context.scene.collection.objects.link(obj)
         unrelated.append(obj)
@@ -186,13 +205,18 @@ def test_failure_restores_owned_data_without_removing_unrelated_objects(
 
         np.testing.assert_array_equal(positions(head), original)
         assert head.hide_get() == was_hidden
+        assert head.hide_render == was_render_disabled
         assert wm.evaluate_dependency_graph is False
         assert bpy.data.objects.get("UnrelatedDuringConversion") is unrelated[0]
         assert not any(obj.name.startswith("CancelledConversion_") for obj in bpy.data.objects)
+        assert not bpy.data.materials.get("CancelledConversion_head_shader")
+        assert head.data.materials[0] == material
+        assert material.use_fake_user
         assert not bpy.context.scene.character_dna.rig_instance_list.get("CancelledConversion")
         assert (tmp_path / "head.dna").read_bytes() == b"original output"
     finally:
         wm.evaluate_dependency_graph = previous_evaluation
+        bpy.data.materials.remove(material, do_unlink=True)
         for obj in unrelated:
             bpy.data.objects.remove(obj, do_unlink=True)
 

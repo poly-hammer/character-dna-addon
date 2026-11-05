@@ -53,6 +53,8 @@ class CharacterComponentBase(metaclass=ABCMeta):
         dna_import_properties: "CharacterImportProperties | None" = None,
         component_type: ComponentType = "head",
         focus_on_import: bool = True,
+        material_import_exclusions: set[str] | None = None,
+        load_texture_maps: bool = True,
     ):
         # make sure dna file path is a Path object
         dna_file_path = Path(bpy.path.abspath(str(dna_file_path))) if dna_file_path else None
@@ -65,6 +67,8 @@ class CharacterComponentBase(metaclass=ABCMeta):
         self._angle_modifier = None
         self._component_type = component_type
         self._focus_on_import = focus_on_import
+        self._material_import_exclusions = set(material_import_exclusions or ())
+        self._load_texture_maps = load_texture_maps
 
         # determine the asset root folder based on the dna file path
         self.asset_root_folder = None
@@ -106,12 +110,16 @@ class CharacterComponentBase(metaclass=ABCMeta):
             elif component_type == "body":
                 self.rig_instance.body_dna_file_path = str(dna_file_path)
 
-        if (not self.dna_import_properties or not self.dna_import_properties.alternate_maps_folder) and dna_file_path:
-            self.maps_folder = dna_file_path.parent / "Maps"
-            if not self.maps_folder.exists():
-                self.maps_folder = dna_file_path.parent / "maps"
-        elif self.dna_import_properties and self.dna_import_properties.alternate_maps_folder:
-            self.maps_folder = Path(self.dna_import_properties.alternate_maps_folder)
+        self.maps_folder = None
+        if load_texture_maps:
+            if (
+                not self.dna_import_properties or not self.dna_import_properties.alternate_maps_folder
+            ) and dna_file_path:
+                self.maps_folder = dna_file_path.parent / "Maps"
+                if not self.maps_folder.exists():
+                    self.maps_folder = dna_file_path.parent / "maps"
+            elif self.dna_import_properties and self.dna_import_properties.alternate_maps_folder:
+                self.maps_folder = Path(self.dna_import_properties.alternate_maps_folder)
 
         file_path = dna_file_path or self.dna_file_path
         # Only set when the DNA is actually on disk, so every reader access has to tolerate None.
@@ -430,17 +438,20 @@ class CharacterComponentBase(metaclass=ABCMeta):
                         logger.error(f"Failed to set colorspace for {node.image.name}: {error}")  # type: ignore[attr-defined]
 
         # load the placeholder mask/topology textures and fix up the texture logic node groups
-        utilities.setup_texture_logic_node_groups(self.component_type)  # pyright: ignore[reportArgumentType]
+        primary = HEAD_MATERIAL_NAME if self.component_type == "head" else BODY_MATERIAL_NAME
+        if any(material.name == f"{self.name}_{primary}" for material in materials):
+            utilities.setup_texture_logic_node_groups(self.component_type)  # pyright: ignore[reportArgumentType]
 
-    def _purge_existing_materials(self):
+    def _purge_existing_materials(self, shader_names: set[str] | None = None):
         shader_mapping = HEAD_MESH_SHADER_MAPPING if self.component_type == "head" else BODY_MESH_SHADER_MAPPING
-        for material_name in shader_mapping.values():
+        shader_names = set(shader_mapping.values()) if shader_names is None else shader_names
+        for material_name in shader_names:
             material = bpy.data.materials.get(f"{self.name}_{material_name}")
             if material:
                 bpy.data.materials.remove(material)
 
         shared_constants = utilities.get_topology_texture_constants()
-        if self.component_type == "head":
+        if self.component_type == "head" and HEAD_MATERIAL_NAME in shader_names:
             masks_image = bpy.data.images.get(MASKS_TEXTURE)
             if masks_image:
                 bpy.data.images.remove(masks_image)
@@ -450,7 +461,7 @@ class CharacterComponentBase(metaclass=ABCMeta):
                 if head_topology_image:
                     bpy.data.images.remove(head_topology_image)
 
-        elif self.component_type == "body":
+        elif self.component_type == "body" and BODY_MATERIAL_NAME in shader_names:
             if shared_constants:
                 body_topology_image = bpy.data.images.get(shared_constants.BODY_TOPOLOGY_TEXTURE)
                 if body_topology_image:
@@ -489,10 +500,16 @@ class CharacterComponentBase(metaclass=ABCMeta):
         # to the scene collection.
         bpy.context.view_layer.active_layer_collection = bpy.context.view_layer.layer_collection  # pyright: ignore[reportOptionalMemberAccess]
 
-        # remove existing matching materials for this face to avoid duplicates being imported
-        self._purge_existing_materials()
-
         shader_mapping = HEAD_MESH_SHADER_MAPPING if self.component_type == "head" else BODY_MESH_SHADER_MAPPING
+        targets = self._material_import_targets(shader_mapping)
+        excluded = self._material_import_exclusions
+        shader_mapping = {
+            key: shader
+            for key, shader in shader_mapping.items()
+            if targets[key] or not any(mesh.startswith(key) for mesh in excluded)
+        }
+        # Transferred meshes never receive an imported placeholder or maps-folder textures.
+        self._purge_existing_materials(set(shader_mapping.values()))
         for key, material_name in shader_mapping.items():
             material = bpy.data.materials.get(material_name)
             if not material:
@@ -539,12 +556,11 @@ class CharacterComponentBase(metaclass=ABCMeta):
                     for node in material.node_tree.nodes:
                         if node.type == "UVMAP":
                             node.uv_map = UV_MAP_NAME  # type: ignore[attr-defined]
-                for mesh_object in bpy.data.objects:
-                    if mesh_object.name.startswith(f"{self.name}_{key}"):
-                        if mesh_object.data.materials:  # type: ignore[attr-defined]
-                            mesh_object.data.materials[0] = material  # type: ignore[attr-defined]
-                        else:
-                            mesh_object.data.materials.append(material)  # type: ignore[attr-defined]
+                for mesh_object in targets[key]:
+                    if mesh_object.data.materials:  # type: ignore[attr-defined]
+                        mesh_object.data.materials[0] = material  # type: ignore[attr-defined]
+                    else:
+                        mesh_object.data.materials.append(material)  # type: ignore[attr-defined]
 
             if material:
                 materials.append(material)
@@ -553,12 +569,25 @@ class CharacterComponentBase(metaclass=ABCMeta):
         utilities.set_viewport_shading("MATERIAL")
 
         # set the image textures to match
-        self._set_image_textures(materials)
+        if self._load_texture_maps:
+            self._set_image_textures(materials)
         # prefix the material image names with the metahuman name
         for material in materials:
             utilities.prefix_material_image_names(material=material, prefix=self.name)
 
         return materials
+
+    def _material_import_targets(self, shader_mapping: dict[str, str]) -> dict[str, list[bpy.types.Object]]:
+        """Exclude converter material-source bindings before importing any shaders."""
+        excluded = {f"{self.name}_{mesh}" for mesh in self._material_import_exclusions}
+        return {
+            key: [
+                obj
+                for obj in bpy.data.objects
+                if obj.type == "MESH" and obj.name.startswith(f"{self.name}_{key}") and obj.name not in excluded
+            ]
+            for key in shader_mapping
+        }
 
     def validate_conversion(
         self, mesh_object: bpy.types.Object, tolerance: float = DEFAULT_UV_TOLERANCE

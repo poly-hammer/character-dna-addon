@@ -112,12 +112,14 @@ def test_custom_template_save_load_and_relative_links(setup_scene, tmp_path):
     assert str(obj.name) not in path.read_text()
     assert templates.current_dna_files(props)["head"] == tmp_path / "head.dna"
     props.extra_meshes[2].fit_method = "WRAP"
-    props.extra_meshes[2].transfer_material = True
+    props.extra_meshes[2].material_source = obj
     assert bpy.ops.character_dna.converter_template(action="SAVE") == {"FINISHED"}
     props.template = str(templates.BUNDLED_TEMPLATES[0])
     props.template = str(path)
     assert props.extra_meshes[2].fit_method == "WRAP"
-    assert props.extra_meshes[2].transfer_material is True
+    assert props.extra_meshes[2].material_source == obj
+    assert "transfer_material" not in path.read_text()
+    assert "material_source" not in path.read_text()
     assert next(item for item in props.extra_meshes if item.role == "head").scene_object == obj
 
 
@@ -144,7 +146,10 @@ def test_new_template_operator_links_arbitrary_dna_and_preserves_installation(se
 
 
 def test_custom_template_selection_survives_blend_storage(setup_scene, tmp_path):
-    props, _ = setup_scene
+    props, source_object = setup_scene
+    props.extra_meshes[0].material_source = source_object
+    props.extra_meshes[0].hide_viewport = True
+    props.extra_meshes[0].hide_render = False
     path = tmp_path / "stored-template.json"
     templates.save_template(props, path)
     blend = tmp_path / "template-scene.blend"
@@ -158,6 +163,9 @@ def test_custom_template_selection_survives_blend_storage(setup_scene, tmp_path)
         assert loaded.template_file == str(path)
         assert templates.current_dna_files(loaded) == templates.current_dna_files(props)
         assert len(loaded.extra_meshes) == 10
+        assert loaded.extra_meshes[0].material_source in restored.objects.values()
+        assert loaded.extra_meshes[0].material_source.type == "MESH"
+        assert loaded.extra_meshes[0].hide_viewport and not loaded.extra_meshes[0].hide_render
         assert dna_components.raw_paths(loaded) == dna_components.raw_paths(props)
     finally:
         objects = list(restored.objects)
@@ -241,7 +249,7 @@ class Layout:
 
 @pytest.mark.parametrize("method", ["WRAP", "RELATIVE"])
 @pytest.mark.parametrize("input_layout", ["SPLIT", "JOINED"])
-def test_transfer_material_checkbox_is_only_shown_for_wrap(setup_scene, method, input_layout):
+def test_relationships_expose_material_and_visibility_settings(setup_scene, method, input_layout):
     props, _ = setup_scene
     props.input_layout = input_layout
     props.extra_meshes_index = 0
@@ -249,7 +257,133 @@ def test_transfer_material_checkbox_is_only_shown_for_wrap(setup_scene, method, 
     layout = Layout()
     ui.CHARACTER_DNA_PT_converter_config._draw_active_extra_mesh(layout, props)
     fields = [args[1] for name, args, _ in layout.calls if name == "prop"]
-    assert ("transfer_material" in fields) == (method == "WRAP")
+    assert {"material_source", "hide_viewport", "hide_render"} <= set(fields)
+    assert "transfer_material" not in fields
+
+
+@pytest.mark.parametrize("input_layout", ["SPLIT", "JOINED"])
+def test_previous_material_checkbox_migrates_once(setup_scene, input_layout):
+    props, obj = setup_scene
+    props.input_layout = input_layout
+    props.joined_mesh = obj
+    item = next(item for item in props.extra_meshes if item.role == "head")
+    item.scene_object = obj if input_layout == "SPLIT" else None
+    item.transfer_material = True
+    templates.migrate(props)
+    assert item.material_source == obj
+    assert not item.transfer_material
+    item.material_source = None
+    templates.migrate(props)
+    assert item.material_source is None
+
+
+def test_material_picker_accepts_shared_wrap_source_and_rejects_non_mesh(setup_scene):
+    props, obj = setup_scene
+    poll = ConverterExtraMeshItem.__annotations__["material_source"].keywords["poll"]
+    props.extra_meshes[0].scene_object = obj
+    props.extra_meshes[0].material_source = obj
+    assert poll(props.extra_meshes[1], obj)
+    empty = bpy.data.objects.new("Non-mesh material source", None)
+    try:
+        assert not poll(props.extra_meshes[1], empty)
+    finally:
+        bpy.data.objects.remove(empty)
+
+
+@pytest.mark.parametrize("preset", templates.BUNDLED_TEMPLATES)
+def test_template_controls_eye_edge_visibility(setup_scene, preset, tmp_path):
+    props, _ = setup_scene
+    props.template = str(preset)
+    item = next(item for item in props.extra_meshes if item.role == "eye_edge")
+    expected = preset.name.startswith("metahuman_")
+    assert item.hide_viewport == item.hide_render == expected
+    # Save independent user choices, then reload and migrate without resetting them.
+    item.hide_viewport, item.hide_render = True, False
+    path = tmp_path / "visibility.json"
+    templates.save_template(props, path)
+    saved = next(row for row in json.loads(path.read_text())["meshes"] if row["id"] == "eye_edge")
+    assert saved["hide_viewport"] is True and saved["hide_render"] is False
+    templates.migrate(props)
+    item = next(item for item in props.extra_meshes if item.role == "eye_edge")
+    assert item.hide_viewport is True and item.hide_render is False
+
+
+@pytest.mark.parametrize("field", ["hide_viewport", "hide_render"])
+def test_visibility_configuration_rejects_non_boolean(field):
+    recipe = templates.default_template()
+    recipe["meshes"][0][field] = "false"
+    with pytest.raises(ValueError, match=f"{field} must be a boolean"):
+        templates.validate_template(recipe)
+
+
+@pytest.mark.parametrize("preset", templates.BUNDLED_TEMPLATES)
+def test_old_scene_visibility_migrates_once_from_template(setup_scene, preset):
+    props, _ = setup_scene
+    props.template = str(preset)
+    item = next(item for item in props.extra_meshes if item.role == "eye_edge")
+    item.property_unset("hide_viewport")
+    item.property_unset("hide_render")
+    recipe = json.loads(props.template_data)
+    for row in recipe["meshes"]:
+        row.pop("hide_viewport", None)
+        row.pop("hide_render", None)
+    props.template_data = json.dumps(recipe)
+    templates.migrate(props)
+    assert item.hide_viewport == item.hide_render == preset.name.startswith("metahuman_")
+    item.hide_viewport = item.hide_render = False
+    templates.migrate(props)
+    assert not item.hide_viewport and not item.hide_render
+
+
+@pytest.mark.parametrize(
+    "mesh,component", [("eyeEdge_lod0_mesh", "head"), ("body_lod0_mesh", "body"), ("custom_surface", "head")]
+)
+@pytest.mark.parametrize("hidden,render_disabled", [(False, False), (True, False), (False, True), (True, True)])
+def test_output_visibility_survives_lod_switches(setup_scene, mesh, component, hidden, render_disabled):
+    from character_dna.editors.converter.pipeline import ConversionPipeline
+    from character_dna.ui.callbacks import set_active_lod
+
+    _, obj = setup_scene
+    obj.name = f"Visibility_{mesh}"
+    instance = bpy.context.scene.character_dna.rig_instance_list.add()
+    instance.name = "Visibility"
+    obj.hide_viewport = obj.hide_render = True
+    pipeline = SimpleNamespace(
+        objects={"mesh": obj},
+        rows={"mesh": {"component": component, "hide_viewport": hidden, "hide_render": render_disabled}},
+        operator=SimpleNamespace(_rig_instance=instance),
+    )
+    ConversionPipeline.apply_visibility(pipeline)
+    assert obj.hide_viewport == obj.hide_get() == hidden
+    assert obj.hide_render == render_disabled
+    # Exercise the LOD handler without loading DNA just to populate the picker.
+    set_active_lod(instance.view_options, 2)
+    assert obj.hide_get() and obj.hide_render
+    set_active_lod(instance.view_options, 0)
+    assert obj.hide_viewport == obj.hide_get() == hidden
+    assert obj.hide_render == render_disabled
+
+
+@pytest.mark.parametrize("hidden,render_disabled", [(False, False), (True, False), (False, True), (True, True)])
+def test_merged_surface_obeys_component_visibility(setup_scene, hidden, render_disabled):
+    from character_dna.editors.converter.scene_merge import sync_visibility
+
+    _, head = setup_scene
+    body, surface = head.copy(), head.copy()
+    for obj in (body, surface):
+        bpy.context.scene.collection.objects.link(obj)
+    try:
+        head["dna_converter_visibility"] = {"hide_viewport": hidden, "hide_render": render_disabled}
+        surface["dna_merge_head"], surface["dna_merge_body"] = head, body
+        registry = {"dna_merged_surfaces": {"0": surface}}
+        instance = SimpleNamespace(get=registry.get, view_options=SimpleNamespace(active_lod="lod0"))
+        sync_visibility(instance)
+        assert surface.hide_viewport == surface.hide_get() == hidden
+        assert surface.hide_render == render_disabled
+        assert head.hide_get() and body.hide_get() and head.hide_render and body.hide_render
+    finally:
+        for obj in (body, surface):
+            bpy.data.objects.remove(obj, do_unlink=True)
 
 
 @pytest.mark.parametrize("preset,count", [(0, 2), (1, 5), (2, 10)])
