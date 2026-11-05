@@ -305,7 +305,7 @@ def test_custom_mesh_names_and_all_supplied_anatomy(  # noqa: PLR0915
         assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
         assert not list(tmp_path.rglob("ConversionReport.json"))
         report = conversion_diagnostics
-        for role in (row["id"] for row in recipe["meshes"] if row["method"] == "WRAP"):
+        for role in (row["id"] for row in recipe["meshes"] if row["method"] == "COPY"):
             assert report["meshes"][role]["status"] == "provided"
             assert report["meshes"][role]["export_max_error_m"] < 2e-6
         exported = get_dna_reader(tmp_path / "head.dna")

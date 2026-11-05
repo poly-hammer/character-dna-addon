@@ -1,4 +1,4 @@
-"""Wrap materials follow corresponding faces and preserve input datablocks."""
+"""Copied materials follow corresponding faces and preserve input datablocks."""
 
 from types import SimpleNamespace
 
@@ -46,7 +46,7 @@ def test_materials_follow_reordered_faces_and_resolve_object_overrides(scene_mes
     target = create("Converted", points, faces)
     source_points = np.empty((6, 3))
     source_points[permutation] = points
-    source = create("Wrap", source_points, [permutation[f].tolist() for f in faces[::-1]])
+    source = create("Input", source_points, [permutation[f].tolist() for f in faces[::-1]])
     for obj in (source, target):
         uv = [tuple(obj.data.vertices[v].co[:2]) for face in obj.data.polygons for v in face.vertices]
         obj.data.uv_layers.new().data.foreach_set("uv", np.asarray(uv).ravel())
@@ -100,7 +100,7 @@ def test_component_subset_uses_full_body_face_assignments(scene_meshes):
     assert component.data.polygons[0].material_index == 0
 
 
-@pytest.mark.parametrize("method", ["WRAP", "RELATIVE"])
+@pytest.mark.parametrize("method", ["COPY", "RELATIVE"])
 @pytest.mark.parametrize("enabled", [True, False])
 def test_transfer_is_opt_in_for_each_relationship(scene_meshes, method, enabled):
     create, material = scene_meshes
@@ -115,7 +115,7 @@ def test_transfer_is_opt_in_for_each_relationship(scene_meshes, method, enabled)
         material_sources={"head": source} if enabled else {},
         operator=SimpleNamespace(_properties=SimpleNamespace(new_name="Test"), _owned={"materials": set()}),
     )
-    if method == "WRAP":
+    if method == "COPY":
         ConversionPipeline._transfer_materials(pipeline, "head", source, np.arange(3))
     else:
         ConversionPipeline._transfer_materials(pipeline, "head")
@@ -187,19 +187,19 @@ def test_shader_names_follow_constants(mesh_name, expected):
 def test_independent_material_source_needs_no_topology_match_for_uniform_material(scene_meshes):
     create, material = scene_meshes
     points, faces = [(0, 0, 0), (1, 0, 0), (0, 1, 0)], [[0, 1, 2]]
-    wrap, target = create("Wrap", points, faces), create("Target", points, faces)
+    input_mesh, target = create("Input", points, faces), create("Target", points, faces)
     source = create("Material source", [*points, (1, 1, 0)], [[0, 1, 3, 2]])
     original = material("Source material")
     source.data.materials.append(original)
     instance = SimpleNamespace()
     owned = {"materials": set()}
     pipeline = SimpleNamespace(
-        rows={"head": {"method": "WRAP", "mesh": "head_lod0_mesh", "component": "head"}},
+        rows={"head": {"method": "COPY", "mesh": "head_lod0_mesh", "component": "head"}},
         objects={"head": target},
         material_sources={"head": source},
         operator=SimpleNamespace(_properties=SimpleNamespace(new_name="Test"), _rig_instance=instance, _owned=owned),
     )
-    ConversionPipeline._transfer_materials(pipeline, "head", wrap, np.arange(3))
+    ConversionPipeline._transfer_materials(pipeline, "head", input_mesh, np.arange(3))
     assert target.data.materials[0].name == "Test_head_shader"
     assert instance.head_material == target.data.materials[0]
     assert owned["materials"] == {target.data.materials[0]}

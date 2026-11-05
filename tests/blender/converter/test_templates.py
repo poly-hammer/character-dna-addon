@@ -42,17 +42,84 @@ def test_presets_share_dna_and_keep_all_relationships(setup_scene, preset, count
     assert props.template_file == str(path)
     assert props.template_name == f"MetaHuman ({preset.title()})"
     assert len(props.extra_meshes) == 10
-    assert sum(item.fit_method == "WRAP" for item in props.extra_meshes) == count
+    assert sum(item.fit_method == "COPY" for item in props.extra_meshes) == count
     assert next(item for item in props.extra_meshes if item.role == "head").scene_object == obj
     files = templates.current_dna_files(props)
     assert files == templates.resolve_dna_files(templates.default_template())
     assert all(path.is_file() for path in files.values())
 
 
+def test_scan_store_requires_six_accessory_copy_inputs(setup_scene):
+    props, _ = setup_scene
+    props.template = str(templates.BUNDLED_TEMPLATES[-1])
+    assert props.input_layout == "JOINED"
+    assert {item.dna_mesh_name for item in templates.input_rows(props)} == {
+        "teeth_lod0_mesh",
+        "eyeLeft_lod0_mesh",
+        "eyeRight_lod0_mesh",
+        "eyeLensLeft_lod0_mesh",
+        "eyeLensRight_lod0_mesh",
+        "eyeEdge_lod0_mesh",
+    }
+    assert {item.role for item in props.extra_meshes if item.fit_method == "RELATIVE"} == {"brows", "eyelashes"}
+    assert all(item.fit_method == "COPY" for item in templates.input_rows(props))
+    assert {item.role: item.mesh_part for item in templates.input_rows(props)} == {
+        "eye_left": "LEFT",
+        "eye_right": "RIGHT",
+        "lens_left": "LEFT",
+        "lens_right": "RIGHT",
+        "teeth": "FULL",
+        "eye_edge": "FULL",
+    }
+    layout = Layout()
+    ui.CHARACTER_DNA_PT_converter.draw(SimpleNamespace(layout=layout), bpy.context)
+    fields = [args[1] for name, args, _ in layout.calls if name == "prop"]
+    assert fields.count("scene_object") == 6 and fields.count("joined_mesh") == 1
+
+
+def test_legacy_json_method_loads_and_saves_as_copy(setup_scene, tmp_path):
+    props, obj = setup_scene
+    recipe = templates.default_template("advanced")
+    for row in recipe["meshes"]:
+        if row["method"] == "COPY":
+            row["method"] = "WRAP"
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(recipe))
+    props.extra_meshes[0].scene_object = obj
+    props.extra_meshes[0].material_source = obj
+    templates.load_template(props, path)
+    assert sum(item.fit_method == "COPY" for item in props.extra_meshes) == 5
+    assert props.extra_meshes[0].scene_object == props.extra_meshes[0].material_source == obj
+    assert '"WRAP"' in path.read_text()  # Loading does not overwrite the user's file.
+    templates.save_template(props, path)
+    saved = json.loads(path.read_text())
+    assert {row["method"] for row in saved["meshes"]} == {"COPY", "RELATIVE"}
+
+
+@pytest.mark.parametrize("stored_method", [0, "WRAP"])
+def test_old_scene_methods_migrate_without_changing_bindings(setup_scene, stored_method):
+    props, obj = setup_scene
+    item = props.extra_meshes[0]
+    item.scene_object = item.material_source = obj
+    item.property_unset("fit_method")
+    item["fit_method"] = stored_method
+    item.hide_render = True
+    props.template_data = props.template_data.replace('"COPY"', '"WRAP"')
+    templates.migrate(props)
+    assert item.fit_method == "COPY" and item.get("fit_method") == 0
+    assert item.scene_object == item.material_source == obj and item.hide_render
+    assert '"WRAP"' not in props.template_data
+    assert props.extra_meshes[2].fit_method == "RELATIVE"
+
+
 @pytest.mark.parametrize("preset", templates.BUNDLED_TEMPLATES)
 def test_target_picker_excludes_other_assignments_and_releases_cleared_meshes(setup_scene, preset):
     props, obj = setup_scene
     props.template = str(preset)
+    props.input_layout = "SPLIT"
+    for item in props.extra_meshes:
+        item.fit_method = "COPY"
+        item.mesh_part = "FULL"
     poll = ConverterExtraMeshItem.__annotations__["scene_object"].keywords["poll"]
     for assigned in props.extra_meshes:
         assigned.scene_object = obj
@@ -60,6 +127,59 @@ def test_target_picker_excludes_other_assignments_and_releases_cleared_meshes(se
             assert poll(candidate, obj) == (candidate == assigned)
         assigned.scene_object = None
         assert all(poll(candidate, obj) for candidate in props.extra_meshes)
+
+
+@pytest.mark.parametrize("first", ["FULL", "LEFT", "RIGHT"])
+@pytest.mark.parametrize("second", ["FULL", "LEFT", "RIGHT"])
+def test_side_sharing_matches_picker_and_conversion_validation(setup_scene, first, second):
+    props, obj = setup_scene
+    a, b = props.extra_meshes[:2]
+    a.mesh_part, b.mesh_part = first, second
+    a.scene_object = obj
+    poll = ConverterExtraMeshItem.__annotations__["scene_object"].keywords["poll"]
+    allowed = first != "FULL" and second != "FULL"
+    assert poll(b, obj) == allowed
+    # Scripts can bypass PointerProperty polling; conversion must reject conflicts too.
+    b.scene_object = obj
+    if allowed:
+        templates.validate_input_bindings(props)
+    else:
+        with pytest.raises(ValueError, match="Full inputs are exclusive"):
+            templates.validate_input_bindings(props)
+    a.scene_object = None
+    assert poll(b, obj)
+
+
+def test_merged_source_is_exclusive_and_inactive_rows_do_not_reserve_inputs(setup_scene):
+    from character_dna.editors.converter.properties import ConverterProperties
+
+    props, obj = setup_scene
+    props.template = str(templates.BUNDLED_TEMPLATES[-1])
+    rows = {item.role: item for item in props.extra_meshes}
+    poll = ConverterExtraMeshItem.__annotations__["scene_object"].keywords["poll"]
+    full_body_poll = ConverterProperties.__annotations__["joined_mesh"].keywords["poll"]
+    rows["head"].scene_object = obj  # Stale split target, inactive in merged layout.
+    rows["brows"].scene_object = obj  # Relative fits have no target binding.
+    assert poll(rows["eye_left"], obj) and full_body_poll(props, obj)
+    rows["eye_left"].scene_object = obj
+    assert not full_body_poll(props, obj)
+    props.joined_mesh = obj
+    assert not poll(rows["eye_left"], obj)
+    with pytest.raises(ValueError, match="Full inputs are exclusive"):
+        templates.validate_input_bindings(props)
+
+
+def test_mesh_part_defaults_and_legacy_scenes_remain_full(setup_scene):
+    props, _ = setup_scene
+    assert all(item.mesh_part == "FULL" for item in props.extra_meshes)
+    for item in props.extra_meshes:
+        item.property_unset("mesh_part")
+    templates.migrate(props)
+    assert all(row["mesh_part"] == "FULL" for row in templates.from_properties(props)["meshes"])
+    recipe = templates.default_template()
+    recipe["meshes"][0]["mesh_part"] = "INVALID"
+    with pytest.raises(ValueError, match="Invalid mesh part"):
+        templates.validate_template(recipe)
 
 
 def test_target_picker_rejects_non_mesh_objects(setup_scene):
@@ -111,12 +231,14 @@ def test_custom_template_save_load_and_relative_links(setup_scene, tmp_path):
     assert json.loads(path.read_text())["dna_files"]["head"] == "../head.dna"
     assert str(obj.name) not in path.read_text()
     assert templates.current_dna_files(props)["head"] == tmp_path / "head.dna"
-    props.extra_meshes[2].fit_method = "WRAP"
+    props.extra_meshes[2].fit_method = "COPY"
+    props.extra_meshes[2].mesh_part = "RIGHT"
     props.extra_meshes[2].material_source = obj
     assert bpy.ops.character_dna.converter_template(action="SAVE") == {"FINISHED"}
     props.template = str(templates.BUNDLED_TEMPLATES[0])
     props.template = str(path)
-    assert props.extra_meshes[2].fit_method == "WRAP"
+    assert props.extra_meshes[2].fit_method == "COPY"
+    assert props.extra_meshes[2].mesh_part == "RIGHT"
     assert props.extra_meshes[2].material_source == obj
     assert "transfer_material" not in path.read_text()
     assert "material_source" not in path.read_text()
@@ -150,8 +272,12 @@ def test_custom_template_selection_survives_blend_storage(setup_scene, tmp_path)
     props.extra_meshes[0].material_source = source_object
     props.extra_meshes[0].hide_viewport = True
     props.extra_meshes[0].hide_render = False
+    props.extra_meshes[0].mesh_part = "LEFT"
     path = tmp_path / "stored-template.json"
     templates.save_template(props, path)
+    # Existing .blend files store the original operation as enum integer zero.
+    props.extra_meshes[0]["fit_method"] = 0
+    props.template_data = props.template_data.replace('"COPY"', '"WRAP"')
     blend = tmp_path / "template-scene.blend"
     bpy.data.libraries.write(str(blend), {bpy.context.scene})
     with bpy.data.libraries.load(str(blend)) as (source, destination):
@@ -159,6 +285,10 @@ def test_custom_template_selection_survives_blend_storage(setup_scene, tmp_path)
     restored = destination.scenes[0]
     try:
         loaded = restored.character_dna.converter
+        templates.migrate(loaded)
+        assert loaded.extra_meshes[0].fit_method == "COPY"
+        assert loaded.extra_meshes[0].mesh_part == "LEFT"
+        assert '"WRAP"' not in loaded.template_data
         assert loaded.template == str(path)
         assert loaded.template_file == str(path)
         assert templates.current_dna_files(loaded) == templates.current_dna_files(props)
@@ -178,7 +308,7 @@ def test_custom_template_selection_survives_blend_storage(setup_scene, tmp_path)
 
 
 @pytest.mark.parametrize("missing", [row["id"] for row in templates.default_template()["meshes"]])
-def test_every_wrap_target_is_required_before_import(setup_scene, tmp_path, monkeypatch, missing):
+def test_every_copy_target_is_required_before_import(setup_scene, tmp_path, monkeypatch, missing):
     props, obj = setup_scene
     props.template = str(templates.BUNDLED_TEMPLATES[2])
     for item in props.extra_meshes:
@@ -196,6 +326,25 @@ def test_every_wrap_target_is_required_before_import(setup_scene, tmp_path, monk
     assert set(bpy.data.objects) == before
     assert not list(tmp_path.iterdir())
     assert not props.convert_is_running
+
+
+@pytest.mark.parametrize("missing", ["teeth", "eye_left", "eye_right", "lens_left", "lens_right", "eye_edge"])
+def test_scan_store_accessory_targets_are_required_before_import(setup_scene, tmp_path, monkeypatch, missing):
+    props, obj = setup_scene
+    props.template = str(templates.BUNDLED_TEMPLATES[-1])
+    props.joined_mesh = obj
+    for item in templates.input_rows(props):
+        item.scene_object = None if item.role == missing else obj
+    props.new_name, props.new_folder = "RequiredScanInputs", str(tmp_path)
+
+    def unexpected_import(*_args):
+        pytest.fail("Missing accessory targets must fail before DNA import")
+
+    monkeypatch.setattr(CHARACTER_DNA_OT_convert_to_dna, "_import_component", unexpected_import)
+    mesh = next(item.dna_mesh_name for item in props.extra_meshes if item.role == missing)
+    with pytest.raises(RuntimeError, match=f"Copy to Target requires a target mesh for: {mesh}"):
+        bpy.ops.character_dna.convert_to_dna()
+    assert not list(tmp_path.iterdir())
 
 
 def test_previous_primary_inputs_migrate_once_without_losing_settings(setup_scene):
@@ -216,7 +365,7 @@ def test_previous_primary_inputs_migrate_once_without_losing_settings(setup_scen
     assert len(rows) == len(props.extra_meshes) == 10
     assert rows["head"].scene_object == rows["body"].scene_object == obj
     assert rows["head"].dna_mesh_name == "scan_head"
-    assert rows["teeth"].fit_method == "WRAP"
+    assert rows["teeth"].fit_method == "COPY"
     assert props.template == "__scene__"
     assert templates.from_properties(props)["dna_files"]
 
@@ -247,7 +396,7 @@ class Layout:
         return draw
 
 
-@pytest.mark.parametrize("method", ["WRAP", "RELATIVE"])
+@pytest.mark.parametrize("method", ["COPY", "RELATIVE"])
 @pytest.mark.parametrize("input_layout", ["SPLIT", "JOINED"])
 def test_relationships_expose_material_and_visibility_settings(setup_scene, method, input_layout):
     props, _ = setup_scene
@@ -259,6 +408,7 @@ def test_relationships_expose_material_and_visibility_settings(setup_scene, meth
     fields = [args[1] for name, args, _ in layout.calls if name == "prop"]
     assert {"material_source", "hide_viewport", "hide_render"} <= set(fields)
     assert "transfer_material" not in fields
+    assert ("mesh_part" in fields) == (method == "COPY" and input_layout == "SPLIT")
 
 
 @pytest.mark.parametrize("input_layout", ["SPLIT", "JOINED"])
@@ -277,7 +427,7 @@ def test_previous_material_checkbox_migrates_once(setup_scene, input_layout):
     assert item.material_source is None
 
 
-def test_material_picker_accepts_shared_wrap_source_and_rejects_non_mesh(setup_scene):
+def test_material_picker_accepts_shared_input_source_and_rejects_non_mesh(setup_scene):
     props, obj = setup_scene
     poll = ConverterExtraMeshItem.__annotations__["material_source"].keywords["poll"]
     props.extra_meshes[0].scene_object = obj
@@ -387,7 +537,7 @@ def test_merged_surface_obeys_component_visibility(setup_scene, hidden, render_d
 
 
 @pytest.mark.parametrize("preset,count", [(0, 2), (1, 5), (2, 10)])
-def test_panel_exposes_wrap_targets_and_only_custom_save(setup_scene, tmp_path, preset, count):
+def test_panel_exposes_copy_targets_and_only_custom_save(setup_scene, tmp_path, preset, count):
     props, _ = setup_scene
     props.template = str(templates.BUNDLED_TEMPLATES[preset])
     layout = Layout()
@@ -537,7 +687,7 @@ def test_template_save_preserves_dynamic_component_paths(setup_scene, tmp_path, 
 def test_component_failure_stops_conversion_before_import(setup_scene, tmp_path, monkeypatch, invalid):
     props, obj = setup_scene
     for item in props.extra_meshes:
-        if item.fit_method == "WRAP":
+        if item.fit_method == "COPY":
             item.scene_object = obj
     props.new_name, props.new_folder = "InvalidComponent", str(tmp_path)
     if invalid == "missing_file":

@@ -1,7 +1,7 @@
 """Tests for the converter's headless data plumbing.
 
 These exercise only the pure parsing helpers (CSV vertex->bone maps and the
-centroid JSON). End-to-end framing, UV-wrapping and bone fitting need a live
+centroid JSON). End-to-end framing, vertex copying and bone fitting need a live
 Blender session with the rig template meshes and are covered by manual probes
 under ``scratches/``."""
 

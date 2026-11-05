@@ -32,7 +32,7 @@ def meshes():
         bpy.data.meshes.remove(mesh, do_unlink=True)
 
 
-def test_reordered_wrap_with_locally_changed_uvs(meshes):
+def test_reordered_input_with_locally_changed_uvs(meshes):
     points = [(x, y, 0) for y in range(2) for x in range(4)]
     faces = [[i, i + 1, i + 5, i + 4] for i in range(3)]
     uv = np.array([points[v][:2] for face in faces for v in face], dtype=float).reshape(3, 4, 2)
@@ -43,7 +43,7 @@ def test_reordered_wrap_with_locally_changed_uvs(meshes):
     order = [2, 0, 1]
     source_uv = uv[order].copy()
     source_uv[0, 1] += 0.001
-    source = meshes("wrap", transformed, [permutation[faces[i]].tolist() for i in order], source_uv)
+    source = meshes("input", transformed, [permutation[faces[i]].tolist() for i in order], source_uv)
     mapping, report = correspondence.match(source, target)
     np.testing.assert_array_equal(mapping, permutation)
     assert report["uv_max_error"] > 0.001
@@ -191,6 +191,6 @@ def test_scene_binding_failure_rolls_back_published_files(tmp_path):
 
 
 def test_joined_input_ignores_stale_component_pointers():
-    rows = [SimpleNamespace(role=role, fit_method="WRAP") for role in ("head", "body", "teeth")]
+    rows = [SimpleNamespace(role=role, fit_method="COPY") for role in ("head", "body", "teeth")]
     props = SimpleNamespace(input_layout="JOINED", extra_meshes=rows)
     assert [item.role for item in templates.input_rows(props)] == ["teeth"]

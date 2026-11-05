@@ -17,8 +17,8 @@ def test_source_collection_includes_materials_without_validating_their_transform
         input_layout=layout,
         joined_mesh=joined,
         extra_meshes=[
-            SimpleNamespace(role="head", fit_method="WRAP", scene_object=head, material_source=material),
-            SimpleNamespace(role="body", fit_method="WRAP", scene_object=body, material_source=material),
+            SimpleNamespace(role="head", fit_method="COPY", scene_object=head, material_source=material),
+            SimpleNamespace(role="body", fit_method="COPY", scene_object=body, material_source=material),
             SimpleNamespace(role="teeth", fit_method="RELATIVE", scene_object=unused, material_source=head),
         ],
     )
@@ -37,7 +37,7 @@ def test_cleanup_hides_sources_only_on_success(outcome):
     scene = bpy.data.scenes.new("Source visibility")
     bpy.context.window.scene = scene
     mesh = bpy.data.meshes.new("Source visibility mesh")
-    objects = [bpy.data.objects.new(name, mesh) for name in ("Wrap", "Material source", "Unrelated")]
+    objects = [bpy.data.objects.new(name, mesh) for name in ("Input", "Material source", "Unrelated")]
     for obj in objects:
         scene.collection.objects.link(obj)
     target, material, unrelated = objects
