@@ -13,13 +13,7 @@ CENTER_NAME = "CTRL_C_eyesAim"
 
 
 def install(face: bpy.types.Object | None) -> None:
-    """Blend the eye spaces, preserving the independent controls below them.
-
-    Unreal's Face_ControlBoard_CtrlRig lerps each initial eye space (projected
-    under the current central aim) to the central aim transform. Copy Transforms
-    performs that blend in Blender's C++ evaluator before the RigLogic eye solve.
-    Its influence uses a simple expression, also evaluated without Python.
-    """
+    """Blend the eye spaces, preserving the independent controls below them."""
     if not face or not face.pose or face.library or face.override_library or not face.is_editable:
         return
     switch = face.pose.bones.get(SWITCH_NAME)

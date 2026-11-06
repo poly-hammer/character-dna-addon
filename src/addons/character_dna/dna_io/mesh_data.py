@@ -1,4 +1,4 @@
-"""Versioned component-owned colors, boundaries, and converter masks in DNA metadata.
+"""Versioned component-owned UVs, colors, boundaries, and converter masks in DNA metadata.
 
 Colors address DNA positions or face corners, never UV layout IDs. A merged
 document carries explicit bindings back to each component's original topology.
@@ -14,6 +14,7 @@ from typing import Any
 
 import numpy as np
 
+from ..constants import UV_MAP_NAME
 from . import metadata
 
 
@@ -149,6 +150,7 @@ def graph_faces(mesh: dict) -> list[list[int]]:
 def validate_record(record: dict, fingerprint: dict) -> None:
     if record["topology"] != fingerprint:
         raise ValueError(f"Mesh metadata topology mismatch for {record['name']}; re-export this mesh.")
+    _validate_uv_layers(record, fingerprint)
     for color in record["colors"]:
         values = unpack(color["values"])
         indices = unpack(color["indices"])
@@ -202,6 +204,101 @@ def validate_record(record: dict, fingerprint: dict) -> None:
             raise ValueError(f"Invalid converter preservation group: {name}")
 
 
+def _validate_uv_layers(record: dict, fingerprint: dict) -> None:
+    layers = record.get("uv_layers")
+    if layers is None:
+        return
+    if not isinstance(layers, list) or not layers or any(not isinstance(layer, dict) for layer in layers):
+        raise ValueError("Invalid UV layer metadata.")
+    names = [layer.get("name") for layer in layers]
+    if any(not isinstance(name, str) or not name or "\0" in name for name in names) or len(set(names)) != len(names):
+        raise ValueError("UV layer names must be nonempty and unique.")
+    for flag in ("primary", "active", "render"):
+        if any(type(layer.get(flag)) is not bool for layer in layers) or sum(layer[flag] for layer in layers) != 1:
+            raise ValueError(f"UV layers require exactly one {flag} layer.")
+    count = record.get("binding", {}).get("topology", fingerprint)["corners"]
+    for layer in layers:
+        if layer["primary"]:
+            if "indices" in layer or "values" in layer:
+                raise ValueError("Primary UV coordinates belong in the native DNA stream.")
+            continue
+        indices, values = unpack(layer["indices"]), unpack(layer["values"])
+        if (
+            layer["indices"]["dtype"] != "<u4"
+            or layer["values"]["dtype"] != "<f4"
+            or indices.shape != (count,)
+            or values.shape != (count, 2)
+            or len(np.unique(indices)) != count
+            or np.any(indices >= fingerprint["corners"])
+        ):
+            raise ValueError("Invalid UV layer corner indices or coordinates.")
+
+
+def primary_uv_layer(mesh: Any) -> Any:
+    """Keep the canonical diffuse map stable while artists select other UV layers."""
+    return (
+        mesh.uv_layers.get(UV_MAP_NAME)
+        or next((layer for layer in mesh.uv_layers if layer.active_render), None)
+        or mesh.uv_layers.active
+    )
+
+
+def corner_order(mesh: Any, faces: list, position_ids: list[int]) -> list[int]:
+    """Map DNA face-corner order to Blender loops, including sparse DNA positions."""
+    corners = []
+    for poly, face in zip(mesh.polygons, faces, strict=True):
+        by_vertex = {position_ids[mesh.loops[i].vertex_index]: i for i in poly.loop_indices}
+        if len(face) != len(poly.loop_indices) or set(face) != set(by_vertex):
+            raise ValueError("Mesh metadata requires matching face-corner topology.")
+        corners.extend(by_vertex[v] for v in face)
+    return corners
+
+
+def _capture_uv_layers(mesh: Any, corners: list[int]) -> list[dict]:
+    primary = primary_uv_layer(mesh)
+    layers = []
+    for layer in mesh.uv_layers:
+        record = {
+            "name": layer.name,
+            "primary": layer == primary,
+            "active": layer == mesh.uv_layers.active,
+            "render": layer.active_render,
+        }
+        if layer != primary:
+            values = np.empty(len(mesh.loops) * 2, dtype=np.float32)
+            layer.data.foreach_get("uv", values)
+            record.update(
+                indices=pack(np.arange(len(corners)), "<u4"), values=pack(values.reshape(-1, 2)[corners], "<f4")
+            )
+        layers.append(record)
+    return layers
+
+
+def apply_uv_layers(mesh: Any, record: dict, corners: list[int]) -> None:
+    """Restore named extra UVs and layer selections around the native primary map."""
+    layers = record.get("uv_layers")
+    if layers is None:
+        return
+    primary = np.empty(len(mesh.loops) * 2, dtype=np.float32)
+    mesh.uv_layers.active.data.foreach_get("uv", primary)
+    for layer in list(mesh.uv_layers):
+        mesh.uv_layers.remove(layer)
+    for layer in layers:
+        uv = mesh.uv_layers.new(name=layer["name"], do_init=False)
+        if uv is None or uv.name != layer["name"]:
+            raise ValueError(f"Blender could not restore UV layer: {layer['name']}")
+        values = primary.copy()
+        if not layer["primary"]:
+            values = values.reshape(-1, 2)
+            values[np.asarray(corners)[unpack(layer["indices"])]] = unpack(layer["values"])
+        uv.data.foreach_set("uv", values.reshape(-1))
+    for layer in layers:
+        if layer["active"]:
+            mesh.uv_layers.active = mesh.uv_layers[layer["name"]]
+        if layer["render"]:
+            mesh.uv_layers[layer["name"]].active_render = True
+
+
 def ordered_boundary(faces: list, vertices: set[int]) -> list[int]:
     """Order exactly one closed boundary, rejecting branches and disconnected rings."""
     edges = Counter(tuple(sorted((a, b))) for face in faces for a, b in zip(face, [*face[1:], face[0]], strict=True))
@@ -251,6 +348,9 @@ def capture(
     }
     if len(faces) != len(mesh.polygons):
         raise ValueError("Mesh metadata requires the exported face correspondence.")
+    corners = corner_order(mesh, faces, position_ids)
+    if mesh.uv_layers:
+        record["uv_layers"] = _capture_uv_layers(mesh, corners)
     groups = {group.index: group.name for group in obj.vertex_groups if is_exclusion_group(group.name)}
     if groups:
         record["exclusions"] = {name: [] for name in groups.values()}
@@ -268,10 +368,6 @@ def capture(
                     mask["vertices"].append(position_ids[vertex.index])
                     mask["weights"].append(float(assignment.weight))
     if colors:
-        corners = []
-        for poly, face in zip(mesh.polygons, faces, strict=True):
-            by_vertex = {position_ids[mesh.loops[i].vertex_index]: i for i in poly.loop_indices}
-            corners.extend(by_vertex[v] for v in face)
         for attr in mesh.color_attributes:
             byte = attr.data_type == "BYTE_COLOR"
             values = np.empty(len(attr.data) * 4, dtype=np.float32)
@@ -452,6 +548,9 @@ def compose(originals: dict, merged: dict, indices: dict) -> None:
                 record["name"] = merged["defn1.1"]["meshNames"][destination]
                 mesh = merged["geom1.1"]["meshes"][destination]
                 record["topology"] = topology(len(mesh["positions"]["xs"]), graph_faces(mesh))
+                for layer in record.get("uv_layers", []):
+                    if not layer["primary"]:
+                        layer["indices"] = pack(unpack(layer["indices"]) + offset, "<u4")
                 for color in record["colors"]:
                     old = unpack(color["indices"])
                     color["indices"] = pack(
@@ -488,6 +587,9 @@ def project(native: dict, parts: dict, indices: dict) -> None:
             surface = next((s for s in indices["surfaces"] if s["mesh"] == record["mesh_index"]), None)
             vertices = surface["vertices"][kind] if surface else list(range(binding["topology"]["vertices"]))
             inverse = {v: i for i, v in enumerate(vertices)}
+            for layer in record.get("uv_layers", []):
+                if not layer["primary"]:
+                    layer["indices"] = pack(unpack(layer["indices"]).astype(np.int64) - binding["corner_offset"], "<u4")
             for color in record["colors"]:
                 old = unpack(color["indices"])
                 color["indices"] = pack(

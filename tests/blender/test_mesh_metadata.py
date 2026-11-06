@@ -358,7 +358,7 @@ def test_json_dna_preserves_structured_metadata(tmp_path):
 
 
 @pytest.mark.parametrize("lods", [(0,), (0, 2)])
-def test_native_merge_split_metadata_and_sparse_lods(tmp_path, surface, compact_dna_asset, lods):
+def test_native_merge_split_metadata_and_sparse_lods(tmp_path, surface, compact_dna_asset, lods):  # noqa: PLR0915 - native merge/edit/split round trip
     add_colors(surface.data, "CORNER", "BYTE_COLOR")
     graphs = {}
     for kind in ("head", "body"):
@@ -385,6 +385,17 @@ def test_native_merge_split_metadata_and_sparse_lods(tmp_path, surface, compact_
                 "colors": [],
                 "exclusions": {"EXCLUDE_Test": [0, 2]},
                 "preservations": {"PRESERVE_Test": {"vertices": [0, 2], "weights": [0.125, 0.875]}},
+                "uv_layers": [
+                    {"name": "DiffuseUV", "primary": True, "active": False, "render": True},
+                    {
+                        "name": "HeadOnly",
+                        "primary": False,
+                        "active": True,
+                        "render": False,
+                        "indices": mesh_data.pack([0, 1, 2], "<u4"),
+                        "values": mesh_data.pack(np.arange(6).reshape(3, 2) + (10 if kind == "body" else 0), "<f4"),
+                    },
+                ],
             }
             mesh["positions"] = {"xs": [0, 2, 0], "ys": [150, 150, 151], "zs": [0, 0, 0]}
             color = scene_colors.snapshot(surface.data)[0]
@@ -403,6 +414,11 @@ def test_native_merge_split_metadata_and_sparse_lods(tmp_path, surface, compact_
         )
         graphs[kind] = graph
     native, indices = merged_graph.compose(graphs, "Custom")
+    for kind, offset in (("head", 0), ("body", 3)):
+        payload = mesh_data.read(mesh_data.graph_reader(native), kind)
+        for record in payload["meshes"]:
+            mesh_data.validate_record(record, record["topology"])
+            np.testing.assert_array_equal(mesh_data.unpack(record["uv_layers"][1]["indices"]), np.arange(3) + offset)
     assert [s["lod"] for s in indices["surfaces"]] == list(lods)
     for lod in range(8):
         assert bool(merged_graph._lod_rows(native["defn1.1"]["lodMeshMapping"], [lod])[0]) == (lod in lods)
@@ -414,12 +430,18 @@ def test_native_merge_split_metadata_and_sparse_lods(tmp_path, surface, compact_
     values[0] = [12, 34, 56, 78]
     color["values"] = mesh_data.pack(values, "|u1")
     payload["meshes"][0]["preservations"]["PRESERVE_Test"]["weights"][0] = 0.25
+    payload["meshes"][0]["uv_layers"][1]["values"] = mesh_data.pack([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]], "<f4")
     mesh_data.set_graph_payload(native, "head", payload, "Changed Head Type")
     projected = partitions.project(native, indices, ownership)
     record = mesh_data.read(mesh_data.graph_reader(projected["head"]), "head")["meshes"][0]
     np.testing.assert_array_equal(mesh_data.unpack(record["colors"][0]["values"])[0], [12, 34, 56, 78])
     assert mesh_data.type_name(mesh_data.graph_reader(projected["head"]), "head") == "Changed Head Type"
     assert record["exclusions"] == {"EXCLUDE_Test": [0, 2]}
+    np.testing.assert_array_equal(mesh_data.unpack(record["uv_layers"][1]["indices"]), [0, 1, 2])
+    np.testing.assert_array_equal(
+        mesh_data.unpack(record["uv_layers"][1]["values"]),
+        np.array([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]], dtype=np.float32),
+    )
     assert record["preservations"] == {"PRESERVE_Test": {"vertices": [0, 2], "weights": [0.25, 0.875]}}
     assert mesh_data.read(mesh_data.graph_reader(projected["body"]), "body") == mesh_data.read(
         mesh_data.graph_reader(graphs["body"]), "body"

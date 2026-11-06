@@ -13,6 +13,7 @@ def main() -> None:
     parser.add_argument("--target", type=Path, default=resources / "dna/3d_scan_store/full_body")
     parser.add_argument("--profile", default="3d_scan_store/full_body")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--pose", action="store_true", help="Also transfer the reviewed anatomical pose landmarks")
     arguments = parser.parse_args(sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else [])
     sys.path.insert(0, str(resources.parents[3]))
     from character_dna.editors.shared.mapping_transfer import generate
@@ -26,6 +27,10 @@ def main() -> None:
         destination,
         arguments.profile,
     )
+    if arguments.pose:
+        from character_dna.editors.shared.pose_transfer import generate as generate_pose
+
+        generate_pose(arguments.reference / "body.dna", arguments.target / "body.dna", destination, arguments.profile)
 
 
 if __name__ == "__main__":

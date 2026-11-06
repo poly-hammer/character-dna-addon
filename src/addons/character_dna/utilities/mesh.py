@@ -375,8 +375,8 @@ def copy_mesh(
     return mesh_object_copy
 
 
-def split_mesh_along_uv_islands(bmesh_object: bmesh.types.BMesh) -> dict[int, int]:
-    uv_layer = bmesh_object.loops.layers.uv.active
+def split_mesh_along_uv_islands(bmesh_object: bmesh.types.BMesh, uv_name: str | None = None) -> dict[int, int]:
+    uv_layer = bmesh_object.loops.layers.uv.get(uv_name) if uv_name else bmesh_object.loops.layers.uv.active
     _uv_border_verts = []
 
     if not uv_layer:

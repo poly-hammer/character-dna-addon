@@ -457,8 +457,10 @@ class DNAExporter:
         return vertex_groups
 
     @staticmethod
-    def get_mesh_vertex_uvs(bmesh_object: bmesh.types.BMesh) -> tuple[list[int], list[list[float]]]:
-        uv_layer = bmesh_object.loops.layers.uv.active
+    def get_mesh_vertex_uvs(
+        bmesh_object: bmesh.types.BMesh, uv_name: str | None = None
+    ) -> tuple[list[int], list[list[float]]]:
+        uv_layer = bmesh_object.loops.layers.uv.get(uv_name) if uv_name else bmesh_object.loops.layers.uv.active
         if not uv_layer:
             return [], []
 
@@ -658,8 +660,12 @@ class DNAExporter:
         # Set the mesh name
         self._dna_writer.setMeshName(index=mesh_index, name=real_name)
         bmesh_object = self.get_bmesh(mesh_object)
+        primary_uv = mesh_data.primary_uv_layer(mesh_object.data)
+        uv_name = primary_uv.name if primary_uv is not None else None
         # Split the mesh along UV islands so that we have all the UV loop indices needed for each vertex index
-        split_to_original_vert_lookup = utilities.split_mesh_along_uv_islands(bmesh_object=bmesh_object)
+        split_to_original_vert_lookup = utilities.split_mesh_along_uv_islands(
+            bmesh_object=bmesh_object, uv_name=uv_name
+        )
 
         vertex_indices, vertex_positions = self.get_mesh_vertex_positions(
             bmesh_object=bmesh_object, duplicate_lookup=split_to_original_vert_lookup
@@ -669,7 +675,7 @@ class DNAExporter:
             split_normals=split_normals,
             duplicate_lookup=split_to_original_vert_lookup,
         )
-        uv_indices, uvs = self.get_mesh_vertex_uvs(bmesh_object=bmesh_object)
+        uv_indices, uvs = self.get_mesh_vertex_uvs(bmesh_object=bmesh_object, uv_name=uv_name)
         faces = self.get_mesh_faces(bmesh_object=bmesh_object)
 
         # Set the vertex color data so it can be saved to JSON later

@@ -79,11 +79,13 @@ class DNAImporter:
         self._vertex_color_data = None
         self._component_type = component_type
         self._custom_topology = mesh_data.has_custom_topology(self._dna_reader, component_type)
-        self._mesh_metadata = (
-            mesh_data.read(self._dna_reader, component_type)
-            if self._custom_topology or self._import_template_data
-            else None
-        )
+        try:
+            self._mesh_metadata = mesh_data.read(self._dna_reader, component_type)
+        except ValueError:
+            if self._custom_topology or self._import_template_data:
+                raise
+            logger.warning("Invalid optional mesh metadata; importing the native UV map and bundled colors only.")
+            self._mesh_metadata = None
         if self._mesh_metadata is not None and self._mesh_metadata.get("space", "component") != "component":
             raise ValueError("Project merged DNA before importing component mesh metadata.")
 
@@ -487,6 +489,33 @@ class DNAImporter:
                 color_attributes.render_color_index = index
                 break
 
+    def _apply_mesh_metadata(self, mesh_index: int, mesh_object: bpy.types.Object) -> None:
+        """Apply optional UV layers, custom colors, and the topology boundary."""
+        mesh = mesh_object.data
+        record = next((r for r in (self._mesh_metadata or {}).get("meshes", []) if r["mesh_index"] == mesh_index), None)
+        if not self._custom_topology:
+            self.normalize_color_attributes(mesh)
+        if record is None:
+            if self._custom_topology and self._mesh_metadata is None and self._import_properties.import_vertex_colors:
+                logger.warning(
+                    f"Custom {self._component_type} DNA has no embedded mesh metadata; importing without colors."
+                )
+            return
+        position_ids = sorted(set(self._dna_reader.getVertexLayoutPositionIndices(mesh_index)))
+        faces = mesh_data.reader_faces(self._dna_reader, mesh_index)
+        mesh_data.validate_record(
+            record, mesh_data.topology(self._dna_reader.getVertexPositionCount(mesh_index), faces)
+        )
+        if self._custom_topology:
+            if self._import_properties.import_vertex_colors:
+                mesh_data.apply_colors(mesh, record, position_ids)
+            if record.get("neckline") is not None:
+                inverse = {dna: local for local, dna in enumerate(position_ids)}
+                group = mesh_object.vertex_groups.new(name=mesh_data.SEAM_GROUP)
+                group.add([inverse[v] for v in record["neckline"]], 1.0, "REPLACE")
+        if "uv_layers" in record:
+            mesh_data.apply_uv_layers(mesh, record, mesh_data.corner_order(mesh, faces, position_ids))
+
     def create_mesh_object(self, lod_index: int, mesh_name: str) -> bpy.types.Object:
         name = f"{self._prefix}_{mesh_name}"
         mesh_index = self._import_lods[lod_index][mesh_name]["mesh_index"]
@@ -535,31 +564,7 @@ class DNAImporter:
         bmesh_object.to_mesh(mesh)
         bmesh_object.free()
 
-        # Ensure a single, named color attribute that is both active and active-render
-        if not self._custom_topology:
-            self.normalize_color_attributes(mesh)
-        elif self._mesh_metadata is not None:
-            record = next((r for r in self._mesh_metadata["meshes"] if r["mesh_index"] == mesh_index), None)
-            if record is not None:
-                mesh_data.validate_record(
-                    record,
-                    mesh_data.topology(
-                        self._dna_reader.getVertexPositionCount(mesh_index),
-                        mesh_data.reader_faces(self._dna_reader, mesh_index),
-                    ),
-                )
-                position_ids = sorted(set(self._dna_reader.getVertexLayoutPositionIndices(mesh_index)))
-                if self._import_properties.import_vertex_colors:
-                    mesh_data.apply_colors(mesh, record, position_ids)
-                if record.get("neckline") is not None:
-                    inverse = {dna: local for local, dna in enumerate(position_ids)}
-                    group = mesh_object.vertex_groups.new(name=mesh_data.SEAM_GROUP)
-                    group.add([inverse[v] for v in record["neckline"]], 1.0, "REPLACE")
-        elif self._import_properties.import_vertex_colors:
-            logger.warning(
-                f"Custom {self._component_type} DNA has no embedded mesh metadata; "
-                f"importing {mesh_name} without colors."
-            )
+        self._apply_mesh_metadata(mesh_index, mesh_object)
 
         # The DNA's own normals, which are what makes the head sit seamlessly on the body.
         if self._import_properties.import_normals:
