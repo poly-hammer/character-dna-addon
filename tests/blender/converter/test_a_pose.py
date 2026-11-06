@@ -172,6 +172,37 @@ def test_worker_roundtrip_cleanup_and_cancel():
     job.close()
 
 
+def test_worker_interpreter_preserves_active_environment(monkeypatch, tmp_path):
+    from character_dna.editors.converter import pose_job
+
+    active = tmp_path / "python.exe"
+    active.touch()
+    bundled = tmp_path / "bundled-python.exe"
+    monkeypatch.setattr(pose_job.sys, "executable", str(active))
+    monkeypatch.setattr(pose_job, "locate_blender_python", lambda: bundled)
+    assert pose_job.worker_python() == active
+    monkeypatch.setattr(pose_job.sys, "executable", str(tmp_path / "blender.exe"))
+    assert pose_job.worker_python() == bundled
+
+
+def test_worker_dependency_failure_is_reported(tmp_path):
+    import subprocess
+
+    from pathlib import Path
+
+    from character_dna.editors.converter import pose_job
+
+    worker = Path(pose_job.__file__).with_name("pose_worker.py")
+    # Disable site-packages to reproduce the original missing-NumPy startup.
+    result = subprocess.run(  # noqa: S603 - fixed bundled worker in an isolated test folder
+        [str(pose_job.worker_python()), "-S", str(worker), str(tmp_path)], check=False, timeout=30
+    )
+    assert result.returncode == 1
+    error = json.loads((tmp_path / "error.json").read_text(encoding="utf-8"))
+    assert "numpy" in error["message"]
+    assert "ModuleNotFoundError" in error["traceback"]
+
+
 def test_contacts_reject_new_crossing_but_allow_existing():
     before = np.array([[-1, -1, 0], [1, -1, 0], [0, 1, 0], [0, 0, 1], [0.2, 0, 2], [-0.2, 0, 2]], dtype=float)
     after = before.copy()

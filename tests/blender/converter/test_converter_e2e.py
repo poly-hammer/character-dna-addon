@@ -51,6 +51,8 @@ def configure_template(props, folder, preset="basic", components=("head", "body"
     recipe = default_template(preset)
     recipe["dna_files"] = {kind: str(folder / f"{kind}.dna") for kind in components}
     recipe["meshes"] = [row for row in recipe["meshes"] if row["component"] in components]
+    # Head-only fixtures exercise fitting/publication without a body pose model.
+    recipe["normalize_to_a_pose"] = "body" in components
     apply_template(props, recipe)
     for item in props.extra_meshes:
         item.scene_object = bpy.data.objects.get(item.dna_mesh_name) if item.role in components else None
@@ -78,6 +80,9 @@ def test_convert_meshes_to_dna(  # noqa: PLR0915 - complete conversion contract
     properties.new_name = name
     properties.new_folder = str(output_folder)
     properties.validate_uvs = False
+    # This contract copies the already-conformed observations without changing
+    # their pose. Pose normalization has its own end-to-end contracts below.
+    properties.normalize_to_a_pose = False
     properties.constrain_head_to_body = True
 
     # Interactive conversion yields to timers before finalization; background
@@ -162,6 +167,72 @@ def test_convert_meshes_to_dna(  # noqa: PLR0915 - complete conversion contract
     assert _blend_shape_delta_count(output_folder / "head.dna") == 0, (
         "zero_shape_deltas should clear every blend shape delta in the converted head DNA"
     )
+
+
+def test_template_pose_normalization_roundtrip(
+    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, conversion_diagnostics
+):
+    import numpy as np
+
+    from character_dna.dna_io import get_dna_reader, release_dna_handle
+    from character_dna.dna_io.mesh_data import reader_faces
+    from character_dna.editors.converter.pipeline import positions, write_positions
+
+    props = get_converter_properties()
+    rows = configure_template(props, base_dna_folder, components=("body",))
+    body = rows["body"].scene_object
+    reader = get_dna_reader(base_dna_folder / "body.dna")
+    try:
+        index = next(i for i in reader.getMeshIndicesForLOD(0) if reader.getMeshName(i) == "body_lod0_mesh")
+        ids = sorted({v for face in reader_faces(reader, index) for v in face})
+        reference = (
+            np.column_stack(
+                (
+                    reader.getVertexPositionXs(index),
+                    reader.getVertexPositionYs(index),
+                    reader.getVertexPositionZs(index),
+                )
+            )[ids]
+            * 0.01
+        )
+        write_positions(body, reference)
+    finally:
+        release_dna_handle(reader)
+    original = positions(body)
+    props.new_name = "PoseNormalizationRoundtrip"
+    props.new_folder = str(tmp_path)
+    props.validate_uvs = False
+    assert props.normalize_to_a_pose
+    assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
+    assert conversion_diagnostics["a_pose"]["status"] == "already_template"
+    assert conversion_diagnostics["meshes"]["body"]["export_max_error_m"] < 2e-6
+    np.testing.assert_array_equal(positions(body), original)
+    assert (tmp_path / "body.dna").is_file()
+    assert not list(tmp_path.rglob("ConversionReport.json"))
+
+
+def test_pose_quality_failure_rolls_back_conversion(load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path):
+    import numpy as np
+
+    from character_dna.editors.converter.pipeline import positions
+
+    props = get_converter_properties()
+    rows = configure_template(props, base_dna_folder)
+    props.new_name = "RejectedPose"
+    props.new_folder = str(tmp_path)
+    props.validate_uvs = False
+    assert props.normalize_to_a_pose
+    before = {row.scene_object: positions(row.scene_object) for role, row in rows.items() if role in {"head", "body"}}
+    (tmp_path / "head.dna").write_bytes(b"previous output")
+    # These conformed observations cannot be normalized by the current solver
+    # without a local fold. Keep the guard, and prove it fails transactionally.
+    with pytest.raises(RuntimeError, match="inverted a local surface triangle"):
+        bpy.ops.character_dna.convert_to_dna()
+    for obj, original in before.items():
+        np.testing.assert_array_equal(positions(obj), original)
+        assert not obj.hide_get()
+    assert (tmp_path / "head.dna").read_bytes() == b"previous output"
+    assert not bpy.context.scene.character_dna.rig_instance_list.get("RejectedPose")
 
 
 def test_failure_restores_owned_data_without_removing_unrelated_objects(
@@ -283,7 +354,13 @@ def test_custom_mesh_names_and_all_supplied_anatomy(  # noqa: PLR0915
         created.append((old_name, obj, positions(obj)))
     release_dna_handle(reader)
     (base_dna_folder / "renamed.dna").replace(path)
-    recipe = default_template(preset)
+    # The bundled Exact preset was retired. Keep the all-supplied-anatomy case
+    # as an explicit custom recipe, including every COPY/export assertion below.
+    recipe = default_template("advanced")
+    if preset == "exact":
+        for row in recipe["meshes"]:
+            row["method"] = "COPY"
+    recipe["normalize_to_a_pose"] = False
     recipe["meshes"] = [row for row in recipe["meshes"] if row["component"] == "head"]
     recipe["dna_files"] = {"head": str(path)}
     for row in recipe["meshes"]:

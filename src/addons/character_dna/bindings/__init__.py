@@ -29,6 +29,14 @@ _dll_directories: dict = globals().get("_dll_directories", {})
 _loading_depth = 0
 
 
+def load_converter_core(rootdir: str | Path | None = None) -> types.ModuleType:
+    """Load the Rust editor extension through the package-scoped bindings loader."""
+    module = IsolatedModuleLoader.load_module("character_dna_core", rootdir)
+    if getattr(module, "api_version", None) != 1:
+        raise ImportError("Character DNA Core API is incompatible; install matching bindings and restart Blender")
+    return module
+
+
 def _module_path(name: str, folder: Path) -> Path:
     for suffix in (".py", *importlib.machinery.EXTENSION_SUFFIXES):
         path = folder / (name + suffix)
