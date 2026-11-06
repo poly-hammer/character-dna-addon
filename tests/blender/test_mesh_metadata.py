@@ -11,6 +11,7 @@ import pytest
 from test_vertex_color_roundtrip import write_surface
 
 from character_dna.dna_io import (
+    DNACalibrator,
     DNAExporter,
     DNAImporter,
     document,
@@ -136,6 +137,7 @@ def test_metadata_namespaces_preserve_foreign_and_extensions(tmp_path):
     finally:
         release_dna_handle(writer)
         release_dna_handle(reader)
+
     reader = get_dna_reader(tmp_path / "updated.dna", data_layer="Descriptor")
     try:
         assert reader.getMetaDataValue("foreign") == "unchanged"
@@ -143,6 +145,188 @@ def test_metadata_namespaces_preserve_foreign_and_extensions(tmp_path):
             assert metadata.decode(reader, prefix=prefix) == expected
     finally:
         release_dna_handle(reader)
+
+
+def test_exclusion_masks_capture_sparse_positions_and_survive_reexport(surface):
+    group = surface.vertex_groups.new(name="EXCLUDE_Tongue")
+    group.add([0, 2], 1, "REPLACE")
+    faces = [[0, 2, 5], [0, 5, 7]]
+    record = mesh_data.capture(surface, 0, "head_lod0_mesh", 8, faces, [0], colors=False)
+    assert record["exclusions"] == {"EXCLUDE_Tongue": [0, 5]}
+    surface.vertex_groups.remove(group)  # Normal imports do not recreate masks.
+    exporter = SimpleNamespace(
+        _export_lods={0: [(surface, 0)]},
+        _include_vertex_colors=False,
+        _mesh_metadata_records={0: record},
+        _component_type="head",
+        _instance=SimpleNamespace(output=SimpleNamespace(head_topology_type="Custom")),
+    )
+    DNAExporter._capture_mesh_metadata(exporter, surface, 0, "head_lod0_mesh", 8, faces)
+    assert exporter._mesh_metadata_records[0]["exclusions"] == {"EXCLUDE_Tongue": [0, 5]}
+    # An empty authoring group explicitly clears a mask without recreating it on import.
+    surface.vertex_groups.new(name="EXCLUDE_Tongue")
+    DNAExporter._capture_mesh_metadata(exporter, surface, 0, "head_lod0_mesh", 8, faces)
+    assert exporter._mesh_metadata_records[0]["exclusions"] == {"EXCLUDE_Tongue": []}
+    surface.vertex_groups.remove(surface.vertex_groups["EXCLUDE_Tongue"])
+    exporter._mesh_metadata_records[0] = record
+    DNAExporter._capture_mesh_metadata(exporter, surface, 0, "head_lod0_mesh", 9, faces)
+    assert "exclusions" not in exporter._mesh_metadata_records[0]
+
+
+def test_exclusion_group_exports_to_dna_metadata_without_becoming_a_joint(tmp_path, surface):
+    group = surface.vertex_groups.new(name="EXCLUDE_Tongue")
+    group.add([1, 2], 0.25, "REPLACE")
+    source = write_surface(tmp_path / "exclusion-source.dna")
+    target = tmp_path / "exclusion-export.dna"
+    export_surface(surface, source, target)
+    reader = get_dna_reader(target)
+    try:
+        record = mesh_data.record_for(reader, "head", 0)
+        assert record["exclusions"] == {"EXCLUDE_Tongue": [1, 2]}
+        assert all(not mesh_data.is_exclusion_group(reader.getJointName(i)) for i in range(reader.getJointCount()))
+    finally:
+        release_dna_handle(reader)
+
+
+def test_preservation_weights_capture_sparse_positions_and_authored_overrides(surface):
+    group = surface.vertex_groups.new(name="PRESERVE_MouthPocket")
+    group.add([0], 0.015362793579697609, "REPLACE")
+    group.add([2], 0.9, "REPLACE")
+    group.add([3], 0, "REPLACE")
+    faces = [[0, 2, 5], [0, 5, 7]]
+    expected = {"vertices": [0, 5], "weights": [group.weight(0), group.weight(2)]}
+    record = mesh_data.capture(surface, 0, "head_lod0_mesh", 8, faces, [0], colors=False)
+    assert record["preservations"] == {group.name: expected}
+    surface.vertex_groups.remove(group)
+    exporter = SimpleNamespace(
+        _export_lods={0: [(surface, 0)]},
+        _include_vertex_colors=False,
+        _mesh_metadata_records={},
+        _source_mesh_metadata={"head_lod0_mesh": record},
+        _component_type="head",
+        _instance=SimpleNamespace(output=SimpleNamespace(head_topology_type="Custom")),
+    )
+    # Overwrite clears output records and can renumber meshes. Bind source masks by name.
+    DNAExporter._capture_mesh_metadata(exporter, surface, 7, "head_lod0_mesh", 8, faces)
+    assert exporter._mesh_metadata_records[7]["preservations"] == {"PRESERVE_MouthPocket": expected}
+    group = surface.vertex_groups.new(name="PRESERVE_MouthPocket")
+    group.add([1], 0.5, "REPLACE")
+    DNAExporter._capture_mesh_metadata(exporter, surface, 7, "head_lod0_mesh", 8, faces)
+    assert exporter._mesh_metadata_records[7]["preservations"][group.name] == {"vertices": [2], "weights": [0.5]}
+    group.remove([1])
+    DNAExporter._capture_mesh_metadata(exporter, surface, 7, "head_lod0_mesh", 8, faces)
+    assert exporter._mesh_metadata_records[7]["preservations"][group.name] == {"vertices": [], "weights": []}
+    surface.vertex_groups.remove(group)
+    exporter._mesh_metadata_records = {}
+    DNAExporter._capture_mesh_metadata(exporter, surface, 7, "head_lod0_mesh", 9, faces)
+    assert "preservations" not in exporter._mesh_metadata_records[7]
+    DNAExporter._capture_mesh_metadata(exporter, surface, 0, "another_mesh", 8, faces)
+    assert "preservations" not in exporter._mesh_metadata_records[0]
+
+
+@pytest.mark.parametrize(
+    "mask",
+    [
+        {"vertices": [0, 0], "weights": [0.25, 0.75]},
+        {"vertices": [4], "weights": [1]},
+        {"vertices": [True], "weights": [1]},
+        {"vertices": [0], "weights": []},
+        {"vertices": [0], "weights": [-0.1]},
+        {"vertices": [0], "weights": [1.1]},
+        {"vertices": [0], "weights": [float("nan")]},
+        {"vertices": [0], "weights": [float("inf")]},
+        {"vertices": [0], "weights": [True]},
+    ],
+)
+def test_preservation_metadata_rejects_invalid_weights_and_indices(surface, mask):
+    record = mesh_data.capture(surface, 0, "head_lod0_mesh", 4, [[0, 1, 2], [0, 2, 3]], [0])
+    record["preservations"] = {"PRESERVE_MouthPocket": mask}
+    with pytest.raises(ValueError, match="preservation group"):
+        mesh_data.validate_record(record, record["topology"])
+
+
+def test_preservation_weights_native_export_import_and_reexport(tmp_path, surface):
+    group = surface.vertex_groups.new(name="preserve_MouthPocket")
+    for vertex, weight in enumerate([0.015362793579697609, 0.05, 0.713427, 1]):
+        group.add([vertex], weight, "REPLACE")
+    expected = {group.name: {"vertices": [0, 1, 2, 3], "weights": [group.weight(i) for i in range(4)]}}
+    source = write_surface(tmp_path / "preserve-source.dna")
+    target = tmp_path / "preserve-export.dna"
+    export_surface(surface, source, target)
+    options = SimpleNamespace(
+        import_vertex_colors=False,
+        import_vertex_groups=False,
+        import_normals=False,
+        **{f"import_lod{i}": True for i in range(8)},
+    )
+    instance = SimpleNamespace(name="Reimported", head_dna_file_path=str(target), output=SimpleNamespace())
+    importer = DNAImporter(instance, options, 0.01)
+    imported = None
+    try:
+        reader = importer._dna_reader
+        assert mesh_data.record_for(reader, "head", 0)["preservations"] == expected
+        assert all(not mesh_data.is_preservation_group(reader.getJointName(i)) for i in range(reader.getJointCount()))
+        importer.initialize_dna_data()
+        imported = importer.create_mesh_object(0, "head_lod0_mesh")
+        assert not any(mesh_data.is_preservation_group(g.name) for g in imported.vertex_groups)
+        reexport = tmp_path / "preserve-reexport.dna"
+        surface.name = "Original_head_lod0_mesh"
+        export_surface(imported, target, reexport)
+        reimport = get_dna_reader(reexport)
+        try:
+            assert mesh_data.record_for(reimport, "head", 0)["preservations"] == expected
+        finally:
+            release_dna_handle(reimport)
+    finally:
+        if imported is not None:
+            mesh = imported.data
+            bpy.data.objects.remove(imported, do_unlink=True)
+            bpy.data.meshes.remove(mesh)
+        release_dna_handle(importer._dna_reader)
+
+
+@pytest.mark.parametrize("kind", ["head", "body"])
+@pytest.mark.parametrize("export_type", [DNAExporter, DNACalibrator])
+def test_full_export_retains_preservation_without_skin_weight_export(
+    tmp_path, rig_factory, compact_dna, kind, export_type
+):
+    with rig_factory.lease(RigProfile(asset=str(compact_dna)), tmp_path) as instance:
+        instance.output.run_validations = False
+        setattr(instance.output, f"{kind}_topology_type", "Custom")
+        obj = getattr(instance, f"{kind}_mesh")
+        group = obj.vertex_groups.new(name="PRESERVE_MouthPocket")
+        group.add([0], 0.05, "REPLACE")
+        group.add([2], 0.9, "REPLACE")
+        expected = {group.name: {"vertices": [0, 2], "weights": [group.weight(0), group.weight(2)]}}
+        instance.output.folder_path = str(tmp_path)
+        previous = None
+        for iteration in range(2):
+            exporter = export_type(
+                instance,
+                100,
+                component_type=kind,
+                file_name=f"preserve-{iteration}.dna",
+                reader=previous,
+                textures=False,
+                vertex_groups=False,
+                vertex_colors=False,
+                shape_keys=False,
+                seam_follower=None,
+            )
+            try:
+                assert exporter.run()[0]
+            finally:
+                release_dna_handle(exporter._dna_writer)
+                release_dna_handle(exporter._dna_reader)
+            previous = get_dna_reader(tmp_path / f"preserve-{iteration}.dna")
+            try:
+                assert mesh_data.record_for(previous, kind, 0)["preservations"] == expected
+            except Exception:
+                release_dna_handle(previous)
+                raise
+            if iteration == 0:
+                obj.vertex_groups.remove(group)
+        release_dna_handle(previous)
 
 
 def test_json_dna_preserves_structured_metadata(tmp_path):
@@ -199,6 +383,8 @@ def test_native_merge_split_metadata_and_sparse_lods(tmp_path, surface, compact_
                 "topology": mesh_data.topology(3, [[0, 1, 2]]),
                 "neckline": [0, 1, 2],
                 "colors": [],
+                "exclusions": {"EXCLUDE_Test": [0, 2]},
+                "preservations": {"PRESERVE_Test": {"vertices": [0, 2], "weights": [0.125, 0.875]}},
             }
             mesh["positions"] = {"xs": [0, 2, 0], "ys": [150, 150, 151], "zs": [0, 0, 0]}
             color = scene_colors.snapshot(surface.data)[0]
@@ -227,11 +413,14 @@ def test_native_merge_split_metadata_and_sparse_lods(tmp_path, surface, compact_
     values = mesh_data.unpack(color["values"]).copy()
     values[0] = [12, 34, 56, 78]
     color["values"] = mesh_data.pack(values, "|u1")
+    payload["meshes"][0]["preservations"]["PRESERVE_Test"]["weights"][0] = 0.25
     mesh_data.set_graph_payload(native, "head", payload, "Changed Head Type")
     projected = partitions.project(native, indices, ownership)
     record = mesh_data.read(mesh_data.graph_reader(projected["head"]), "head")["meshes"][0]
     np.testing.assert_array_equal(mesh_data.unpack(record["colors"][0]["values"])[0], [12, 34, 56, 78])
     assert mesh_data.type_name(mesh_data.graph_reader(projected["head"]), "head") == "Changed Head Type"
+    assert record["exclusions"] == {"EXCLUDE_Test": [0, 2]}
+    assert record["preservations"] == {"PRESERVE_Test": {"vertices": [0, 2], "weights": [0.25, 0.875]}}
     assert mesh_data.read(mesh_data.graph_reader(projected["body"]), "body") == mesh_data.read(
         mesh_data.graph_reader(graphs["body"]), "body"
     )
@@ -269,7 +458,7 @@ def test_seam_validation_and_topology_fingerprint(surface):
         mesh_data.validate_record(record, mesh_data.topology(4, [[0, 2, 1], [0, 2, 3]]))
 
 
-def test_scene_topology_allows_only_unused_trailing_positions(surface):
+def test_scene_topology_allows_sparse_positions_but_rejects_changed_connectivity(surface):
     reader = SimpleNamespace(
         getVertexPositionCount=lambda _: 6,
         getFaceCount=lambda _: 2,
@@ -279,10 +468,10 @@ def test_scene_topology_allows_only_unused_trailing_positions(surface):
     target = SimpleNamespace(dna_reader=reader)
     scene_merge._validate_topology(target, surface, 0)
     reader.getVertexLayoutPositionIndices = lambda _: [0, 1, 2, 5]
-    with pytest.raises(ValueError, match="canonical DNA"):
-        scene_merge._validate_topology(target, surface, 0)
+    # Compact imports can omit unused DNA positions anywhere in the array.
+    scene_merge._validate_topology(target, surface, 0)
     reader.getVertexLayoutPositionIndices = lambda _: [0, 2, 1, 3]
-    with pytest.raises(ValueError, match="reordered DNA"):
+    with pytest.raises(ValueError, match="changed DNA face topology"):
         scene_merge._validate_topology(target, surface, 0)
 
 

@@ -122,6 +122,7 @@ class DNAExporter:
         self._bone_index_lookup = {}
         existing = mesh_data.read(self._dna_reader, self._component_type)
         self._mesh_metadata_records = {r["mesh_index"]: r for r in existing["meshes"]} if existing else {}
+        self._source_mesh_metadata = {r["name"]: r for r in self._mesh_metadata_records.values()}
         # (export_mesh_index, blend_shape_channel_index) pairs collected during shape
         # key export so the mesh -> blend-shape channel mapping can be rebuilt.
         self._mesh_blend_shape_channel_pairs: list[tuple[int, int]] = []
@@ -693,9 +694,17 @@ class DNAExporter:
 
     def _capture_mesh_metadata(self, obj: bpy.types.Object, index: int, name: str, count: int, faces: list) -> None:
         lods = [lod for lod, objects in self._export_lods.items() if any(mesh == obj for mesh, _ in objects)]
-        self._mesh_metadata_records[index] = mesh_data.capture(
-            obj, index, name, count, faces, lods, colors=self._include_vertex_colors
-        )
+        previous = self._mesh_metadata_records.get(index, {})
+        if previous.get("name") != name:
+            previous = self._source_mesh_metadata.get(name, {})
+        record = mesh_data.capture(obj, index, name, count, faces, lods, colors=self._include_vertex_colors)
+        # Imports deliberately omit these authoring groups. Preserve their DNA
+        # masks unless topology changed; an authored (even empty) group overrides.
+        if previous.get("topology") == record["topology"]:
+            for field in ("exclusions", "preservations"):
+                if previous.get(field):
+                    record[field] = {**previous[field], **record.get(field, {})}
+        self._mesh_metadata_records[index] = record
         declared_type = getattr(self._instance.output, f"{self._component_type}_topology_type", "").strip()
         declared_type = declared_type or mesh_data.type_name(self._dna_reader, self._component_type)
         if (

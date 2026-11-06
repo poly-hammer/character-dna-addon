@@ -851,6 +851,12 @@ class ImportCharacterDna(bpy.types.Operator, importer.ImportAsset, CharacterImpo
     bl_label = "Import DNA"
     filename_ext = ".dna"
 
+    import_template_data: bpy.props.BoolProperty(
+        default=False,
+        options={"HIDDEN", "SKIP_SAVE"},
+        description="Restore internal converter masks as editable vertex groups",
+    )  # pyright: ignore[reportInvalidTypeForm]
+
     filter_glob: bpy.props.StringProperty(
         default="*.dna",
         options={"HIDDEN"},

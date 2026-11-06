@@ -49,6 +49,7 @@ class DNAImporter:
 
         self._instance = instance
         self._import_properties = import_properties
+        self._import_template_data = getattr(import_properties, "import_template_data", False)
         self._linear_modifier = linear_modifier
 
         if component_type == "head":
@@ -78,7 +79,11 @@ class DNAImporter:
         self._vertex_color_data = None
         self._component_type = component_type
         self._custom_topology = mesh_data.has_custom_topology(self._dna_reader, component_type)
-        self._mesh_metadata = mesh_data.read(self._dna_reader, component_type) if self._custom_topology else None
+        self._mesh_metadata = (
+            mesh_data.read(self._dna_reader, component_type)
+            if self._custom_topology or self._import_template_data
+            else None
+        )
         if self._mesh_metadata is not None and self._mesh_metadata.get("space", "component") != "component":
             raise ValueError("Project merged DNA before importing component mesh metadata.")
 
@@ -179,10 +184,14 @@ class DNAImporter:
 
     def get_dna_vertex_groups(self, mesh_index: int) -> dict[str, list[tuple[int, float]]]:
         vertex_groups = {}
+        template_data = getattr(self, "_import_template_data", False)
         for layout_index, vertex_index in enumerate(self._dna_reader.getVertexLayoutPositionIndices(mesh_index)):
             vertex_bone_indices = self._dna_reader.getSkinWeightsJointIndices(mesh_index, vertex_index)
             vertex_weights = self._dna_reader.getSkinWeightsValues(mesh_index, vertex_index)
             for bone_index, weight in zip(vertex_bone_indices, vertex_weights, strict=False):
+                name = self._dna_reader.getJointName(bone_index)
+                if not template_data and (mesh_data.is_exclusion_group(name) or mesh_data.is_preservation_group(name)):
+                    continue
                 if bone_index in vertex_groups:
                     vertex_group_indices, vertex_group_weights = vertex_groups[bone_index]
                 else:
@@ -251,6 +260,7 @@ class DNAImporter:
         # Group membership is stable while this synchronous import runs. Avoid
         # Blender's linear name lookup for every influence on every vertex.
         joint_names = {}
+        template_data = getattr(self, "_import_template_data", False)
         vertex_groups = {group.name: group for group in mesh_object.vertex_groups}
         position_ids = sorted(set(self._dna_reader.getVertexLayoutPositionIndices(mesh_index)))
         for vertex in mesh_object.data.vertices:
@@ -261,11 +271,49 @@ class DNAImporter:
                 if bone_index not in joint_names:
                     joint_names[bone_index] = self._dna_reader.getJointName(bone_index)
                 vertex_group_name = joint_names[bone_index]
+                if not template_data and (
+                    mesh_data.is_exclusion_group(vertex_group_name)
+                    or mesh_data.is_preservation_group(vertex_group_name)
+                ):
+                    continue
                 vertex_group = vertex_groups.get(vertex_group_name)
                 if not vertex_group:
                     vertex_group = mesh_object.vertex_groups.new(name=vertex_group_name)
                     vertex_groups[vertex_group_name] = vertex_group
                 vertex_group.add(index=[vertex.index], weight=weight, type="REPLACE")
+
+    def _set_template_vertex_groups(self, mesh_index: int, mesh_object: bpy.types.Object) -> None:
+        """Restore authoring masks using DNA position IDs rather than UV layout IDs."""
+        if self._mesh_metadata is None:
+            return
+        record = next((r for r in self._mesh_metadata["meshes"] if r["mesh_index"] == mesh_index), None)
+        if record is None:
+            return
+        mesh_data.validate_record(
+            record,
+            mesh_data.topology(
+                self._dna_reader.getVertexPositionCount(mesh_index),
+                mesh_data.reader_faces(self._dna_reader, mesh_index),
+            ),
+        )
+        position_ids = sorted(set(self._dna_reader.getVertexLayoutPositionIndices(mesh_index)))
+        inverse = {dna: local for local, dna in enumerate(position_ids)}
+        groups = {name: dict.fromkeys(vertices, 1.0) for name, vertices in record.get("exclusions", {}).items()}
+        groups.update(
+            {
+                name: dict(zip(mask["vertices"], mask["weights"], strict=True))
+                for name, mask in record.get("preservations", {}).items()
+            }
+        )
+        for name, weights in groups.items():
+            group = mesh_object.vertex_groups.get(name)
+            if group is not None:
+                group.remove(list(range(len(mesh_object.data.vertices))))
+            else:
+                group = mesh_object.vertex_groups.new(name=name)
+            for position, weight in weights.items():
+                if position in inverse:
+                    group.add([inverse[position]], weight, "REPLACE")
 
     def set_mesh_normals(self, mesh_index: int, mesh: bpy.types.Mesh):
         """Import the DNA's own normals as custom split normals.
@@ -522,6 +570,9 @@ class DNAImporter:
             self.set_vertex_groups(mesh_index, mesh_object=mesh_object)
             # Attach the mesh to the armature
             self.set_armature_modifier(mesh_object)
+
+        if self._import_template_data:
+            self._set_template_vertex_groups(mesh_index, mesh_object)
 
         # The DNA reader already transformed the geometry into Blender space.
         # Persist the DNA identity independently of editable object/collection names.

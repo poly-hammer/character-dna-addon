@@ -1,4 +1,4 @@
-"""Versioned component-owned colors and neck boundaries in DNA metadata.
+"""Versioned component-owned colors, boundaries, and converter masks in DNA metadata.
 
 Colors address DNA positions or face corners, never UV layout IDs. A merged
 document carries explicit bindings back to each component's original topology.
@@ -21,8 +21,20 @@ SCHEMA = 1
 PREFIX = "character_dna.mesh_data"
 TYPE_PREFIX = "character_dna.topology"
 SEAM_GROUP = "SEAM_neckline"
+EXCLUSION_PREFIX = "EXCLUDE_"
+PRESERVATION_PREFIX = "PRESERVE_"
 KINDS = ("head", "body")
 logger = logging.getLogger(__name__)
+
+
+def is_exclusion_group(name: str) -> bool:
+    """Identify converter-only masks, never armature deformation groups."""
+    return name.upper().startswith(EXCLUSION_PREFIX)
+
+
+def is_preservation_group(name: str) -> bool:
+    """Identify weighted converter shape-preservation masks."""
+    return name.upper().startswith(PRESERVATION_PREFIX)
 
 
 def type_key(kind: str) -> str:
@@ -160,6 +172,34 @@ def validate_record(record: dict, fingerprint: dict) -> None:
         len(seam) < 3 or len(set(seam)) != len(seam) or any(not 0 <= v < fingerprint["vertices"] for v in seam)
     ):
         raise ValueError("Invalid neckline vertex indices.")
+    exclusions = record.get("exclusions", {})
+    if not isinstance(exclusions, dict):
+        raise ValueError("Invalid converter exclusion groups.")
+    for name, vertices in exclusions.items():
+        if (
+            not isinstance(name, str)
+            or not is_exclusion_group(name)
+            or not isinstance(vertices, list)
+            or any(type(v) is not int or not 0 <= v < fingerprint["vertices"] for v in vertices)
+            or len(set(vertices)) != len(vertices)
+        ):
+            raise ValueError(f"Invalid converter exclusion group: {name}")
+    preservations = record.get("preservations", {})
+    if not isinstance(preservations, dict):
+        raise ValueError("Invalid converter preservation groups.")
+    for name, mask in preservations.items():
+        if not isinstance(name, str) or not is_preservation_group(name) or not isinstance(mask, dict):
+            raise ValueError(f"Invalid converter preservation group: {name}")
+        vertices, weights = mask.get("vertices"), mask.get("weights")
+        if (
+            not isinstance(vertices, list)
+            or not isinstance(weights, list)
+            or len(vertices) != len(weights)
+            or any(type(v) is not int or not 0 <= v < fingerprint["vertices"] for v in vertices)
+            or len(set(vertices)) != len(vertices)
+            or any(type(w) not in (int, float) or not 0 <= w <= 1 for w in weights)
+        ):
+            raise ValueError(f"Invalid converter preservation group: {name}")
 
 
 def ordered_boundary(faces: list, vertices: set[int]) -> list[int]:
@@ -211,6 +251,22 @@ def capture(
     }
     if len(faces) != len(mesh.polygons):
         raise ValueError("Mesh metadata requires the exported face correspondence.")
+    groups = {group.index: group.name for group in obj.vertex_groups if is_exclusion_group(group.name)}
+    if groups:
+        record["exclusions"] = {name: [] for name in groups.values()}
+        for vertex in mesh.vertices:
+            for assignment in vertex.groups:
+                if assignment.group in groups and assignment.weight > 0:
+                    record["exclusions"][groups[assignment.group]].append(position_ids[vertex.index])
+    preserve_groups = {group.index: group.name for group in obj.vertex_groups if is_preservation_group(group.name)}
+    if preserve_groups:
+        record["preservations"] = {name: {"vertices": [], "weights": []} for name in preserve_groups.values()}
+        for vertex in mesh.vertices:
+            for assignment in vertex.groups:
+                if assignment.group in preserve_groups and assignment.weight > 0:
+                    mask = record["preservations"][preserve_groups[assignment.group]]
+                    mask["vertices"].append(position_ids[vertex.index])
+                    mask["weights"].append(float(assignment.weight))
     if colors:
         corners = []
         for poly, face in zip(mesh.polygons, faces, strict=True):
@@ -403,6 +459,12 @@ def compose(originals: dict, merged: dict, indices: dict) -> None:
                     )
                 if record["neckline"] is not None:
                     record["neckline"] = [vertices[v] for v in record["neckline"]]
+                if "exclusions" in record:
+                    record["exclusions"] = {
+                        name: [vertices[v] for v in mask] for name, mask in record["exclusions"].items()
+                    }
+                for mask in record.get("preservations", {}).values():
+                    mask["vertices"] = [vertices[v] for v in mask["vertices"]]
                 records.append(record)
         set_graph_payload(
             merged,
@@ -434,6 +496,10 @@ def project(native: dict, parts: dict, indices: dict) -> None:
                 )
             if record["neckline"] is not None:
                 record["neckline"] = [inverse[v] for v in record["neckline"]]
+            if "exclusions" in record:
+                record["exclusions"] = {name: [inverse[v] for v in mask] for name, mask in record["exclusions"].items()}
+            for mask in record.get("preservations", {}).values():
+                mask["vertices"] = [inverse[v] for v in mask["vertices"]]
             record.update({key: binding[key] for key in ("mesh_index", "name", "lods", "topology")})
             validate_record(record, record["topology"])
             index = record["mesh_index"]
