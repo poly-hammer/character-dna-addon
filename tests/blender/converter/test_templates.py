@@ -33,14 +33,14 @@ def setup_scene():
         bpy.data.meshes.remove(data)
 
 
-@pytest.mark.parametrize("preset,count", [("basic", 2), ("advanced", 5), ("exact", 10)])
+@pytest.mark.parametrize("preset,count", [("basic", 2), ("advanced", 5)])
 def test_presets_share_dna_and_keep_all_relationships(setup_scene, preset, count):
     props, obj = setup_scene
     next(item for item in props.extra_meshes if item.role == "head").scene_object = obj
     path = templates.TEMPLATE_FOLDER / f"metahuman_{preset}.json"
     props.template = str(path)
     assert props.template_file == str(path)
-    assert props.template_name == f"MetaHuman ({preset.title()})"
+    assert props.template_name == f"MetaHuman (Full Body {preset.title()})"
     assert len(props.extra_meshes) == 10
     assert sum(item.fit_method == "COPY" for item in props.extra_meshes) == count
     assert next(item for item in props.extra_meshes if item.role == "head").scene_object == obj
@@ -75,6 +75,45 @@ def test_scan_store_requires_six_accessory_copy_inputs(setup_scene):
     ui.CHARACTER_DNA_PT_converter.draw(SimpleNamespace(layout=layout), bpy.context)
     fields = [args[1] for name, args, _ in layout.calls if name == "prop"]
     assert fields.count("scene_object") == 6 and fields.count("joined_mesh") == 1
+
+
+def test_bundled_enum_ids_survive_retiring_exact(setup_scene):
+    from character_dna.editors.converter.callbacks import get_templates
+
+    props, obj = setup_scene
+    entries = get_templates(props, bpy.context)
+    assert [entry[4] for entry in entries] == [0, 1, 4]
+    assert [entry[1] for entry in entries] == [
+        "MetaHuman (Full Body Basic)",
+        "MetaHuman (Full Body Advanced)",
+        "3D Scan Store (Full Body)",
+    ]
+    assert not (templates.TEMPLATE_FOLDER / "metahuman_exact.json").exists()
+    with pytest.raises(ValueError, match="Unknown bundled template"):
+        templates.default_template("exact")
+    for item in props.extra_meshes:
+        item.fit_method = "COPY"
+        item.scene_object = obj
+    props.template_file = str(templates.TEMPLATE_FOLDER / "metahuman_exact.json")
+    props["template"] = 2
+    files = templates.current_dna_files(props)
+    templates.migrate(props)
+    assert props.template == "__scene__" and props.template_file == ""
+    assert all(item.fit_method == "COPY" and item.scene_object == obj for item in props.extra_meshes)
+    assert templates.current_dna_files(props) == files
+
+
+@pytest.mark.parametrize("path", templates.BUNDLED_TEMPLATES)
+def test_uv_default_and_custom_override_round_trip(setup_scene, tmp_path, path):
+    props, _ = setup_scene
+    props.validate_uvs = False
+    templates.load_template(props, path)
+    assert props.validate_uvs
+    props.validate_uvs = False
+    saved = tmp_path / "uv-override.json"
+    templates.save_template(props, saved)
+    assert not json.loads(saved.read_text())["validate_uvs"]
+    assert not props.validate_uvs
 
 
 def test_legacy_json_method_loads_and_saves_as_copy(setup_scene, tmp_path):
@@ -310,7 +349,10 @@ def test_custom_template_selection_survives_blend_storage(setup_scene, tmp_path)
 @pytest.mark.parametrize("missing", [row["id"] for row in templates.default_template()["meshes"]])
 def test_every_copy_target_is_required_before_import(setup_scene, tmp_path, monkeypatch, missing):
     props, obj = setup_scene
-    props.template = str(templates.BUNDLED_TEMPLATES[2])
+    recipe = templates.default_template()
+    for row in recipe["meshes"]:
+        row["method"] = "COPY"
+    templates.apply_template(props, recipe)
     for item in props.extra_meshes:
         item.scene_object = obj if item.role != missing else None
     props.new_name, props.new_folder = "RequiredTargets", str(tmp_path)
@@ -536,7 +578,7 @@ def test_merged_surface_obeys_component_visibility(setup_scene, hidden, render_d
             bpy.data.objects.remove(obj, do_unlink=True)
 
 
-@pytest.mark.parametrize("preset,count", [(0, 2), (1, 5), (2, 10)])
+@pytest.mark.parametrize("preset,count", [(0, 2), (1, 5)])
 def test_panel_exposes_copy_targets_and_only_custom_save(setup_scene, tmp_path, preset, count):
     props, _ = setup_scene
     props.template = str(templates.BUNDLED_TEMPLATES[preset])

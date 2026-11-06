@@ -351,6 +351,12 @@ class CharacterAddonProperties:
 
 
 class CharacterImportProperties(get_dna_import_property_group_base_class()):
+    preserve_viewport_shading: bpy.props.BoolProperty(
+        default=False,
+        options={"HIDDEN", "SKIP_SAVE"},
+        description="Keep the current viewport shading when importing materials",
+    )  # pyright: ignore[reportInvalidTypeForm]
+
     import_mesh: bpy.props.BoolProperty(default=True, name="Mesh", description="Whether to import the head meshes")  # pyright: ignore[reportInvalidTypeForm]
     import_normals: bpy.props.BoolProperty(
         default=False,

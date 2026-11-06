@@ -1,5 +1,7 @@
 """Pose normalization contracts, anatomical profiles and worker isolation."""
 
+import json
+
 from types import SimpleNamespace
 
 import bpy
@@ -198,7 +200,7 @@ def test_canonical_projection_proves_repeat_noop_without_receipt():
     np.testing.assert_array_equal(result["positions"], candidate)
 
 
-def test_pose_option_defaults_off_and_roundtrips():
+def test_pose_option_defaults_on_and_roundtrips():
     from character_dna.editors.converter import templates
     from character_dna.editors.converter.properties import get_converter_properties
 
@@ -207,19 +209,80 @@ def test_pose_option_defaults_off_and_roundtrips():
     bpy.context.window.scene = scene
     try:
         properties = get_converter_properties()
+        assert properties.normalize_to_a_pose
+        assert properties.bl_rna.properties["normalize_to_a_pose"].name == "Normalize to A-Pose"
+        assert "fit_to_a_pose" not in properties.bl_rna.properties
         templates.apply_template(properties, templates.default_template())
-        assert not properties.fit_to_a_pose
-        properties.fit_to_a_pose = True
+        assert properties.normalize_to_a_pose
+        properties.normalize_to_a_pose = False
         recipe = templates.from_properties(properties)
+        assert "fit_to_a_pose" not in recipe
         templates.apply_template(properties, recipe)
-        assert properties.fit_to_a_pose
+        assert not properties.normalize_to_a_pose
         assert pose_profiles.available(properties)
-        recipe["fit_to_a_pose"] = "yes"
+        recipe["normalize_to_a_pose"] = "yes"
         with pytest.raises(ValueError, match="boolean"):
             templates.validate_template(recipe)
     finally:
         bpy.context.window.scene = previous
         bpy.data.scenes.remove(scene)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("storage", ["scene", "recipe"])
+def test_pose_option_migrates_saved_choices(enabled, storage):
+    from character_dna.editors.converter import templates
+    from character_dna.editors.converter.properties import get_converter_properties
+
+    previous = bpy.context.window.scene
+    scene = bpy.data.scenes.new("Legacy pose option test")
+    bpy.context.window.scene = scene
+    try:
+        properties = get_converter_properties()
+        templates.apply_template(properties, templates.default_template())
+        properties.property_unset("normalize_to_a_pose")
+        if storage == "scene":
+            properties["fit_to_a_pose"] = enabled
+        else:
+            recipe = json.loads(properties.template_data)
+            recipe.pop("normalize_to_a_pose")
+            recipe["fit_to_a_pose"] = enabled
+            properties.template_data = json.dumps(recipe)
+        templates.migrate(properties)
+        assert properties.normalize_to_a_pose == enabled
+        assert "fit_to_a_pose" not in properties
+        recipe = templates.from_properties(properties)
+        assert recipe["normalize_to_a_pose"] == enabled and "fit_to_a_pose" not in recipe
+        # Repeated migration cannot override a later user choice.
+        properties.normalize_to_a_pose = not enabled
+        templates.migrate(properties)
+        assert properties.normalize_to_a_pose != enabled
+    finally:
+        bpy.context.window.scene = previous
+        bpy.data.scenes.remove(scene)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_legacy_pose_template_key_is_upgraded(enabled):
+    from character_dna.editors.converter import templates
+
+    recipe = templates.default_template()
+    recipe.pop("normalize_to_a_pose")
+    recipe["fit_to_a_pose"] = enabled
+    templates.validate_template(recipe)
+    assert recipe["normalize_to_a_pose"] == enabled and "fit_to_a_pose" not in recipe
+    recipe["fit_to_a_pose"] = not enabled
+    templates.validate_template(recipe)
+    assert recipe["normalize_to_a_pose"] == enabled
+
+
+def test_all_bundled_pose_defaults_are_enabled():
+    from character_dna.editors.converter import templates
+
+    for path in templates.BUNDLED_TEMPLATES:
+        recipe = json.loads(path.read_text())
+        assert recipe["normalize_to_a_pose"] is True
+        assert "fit_to_a_pose" not in recipe
 
 
 def test_pose_landmark_generation_uses_target_position_domain(tmp_path):

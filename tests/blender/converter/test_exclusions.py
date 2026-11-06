@@ -84,6 +84,48 @@ def test_complete_input_takes_precedence_over_exclusion_masks(pair):
     assert "excluded_groups" not in details
 
 
+def test_complete_input_retries_uvs_without_excluded_corners(pair, meshes):
+    _, target, _ = pair
+    source = meshes("Complete teeth", positions(target), [list(p.vertices) for p in target.data.polygons])
+    uv = np.array([loop.uv[:] for loop in target.data.uv_layers.active.data], dtype=np.float32)
+    uv[-3:] += [0.25, -0.4]
+    source.data.uv_layers.new().data.foreach_set("uv", uv.ravel())
+    with pytest.raises(ValueError, match="UVs differ"):
+        correspondence.match(source.data, target.data, require_uvs=True)
+    before = set(bpy.data.meshes)
+    mapping, details = correspondence.match_with_exclusions(
+        source.data, target.data, {"EXCLUDE_Tongue": [1, 3, 5]}, require_uvs=True
+    )
+    np.testing.assert_array_equal(mapping, np.arange(7))
+    assert details["uv_excluded_groups"] == ["EXCLUDE_Tongue"]
+    assert details["uv_ignored_corners"] == 3 and details["uv_max_error"] == 0
+    assert "relative_vertices" not in details  # Present, mapped anatomy stays copied.
+    assert set(bpy.data.meshes) == before
+    np.testing.assert_array_equal(np.array([loop.uv[:] for loop in source.data.uv_layers.active.data]), uv)
+
+
+def test_exclusion_retry_still_rejects_unmasked_uv_errors(pair, meshes):
+    _, target, _ = pair
+    source = meshes("Complete teeth", positions(target), [list(p.vertices) for p in target.data.polygons])
+    uv = np.array([loop.uv[:] for loop in target.data.uv_layers.active.data], dtype=np.float32)
+    uv[-3:] += 0.5
+    uv[0] += 0.1
+    source.data.uv_layers.new().data.foreach_set("uv", uv.ravel())
+    with pytest.raises(ValueError, match=r"exclusion fallback failed: UVs differ.*1 of 6 face corners"):
+        correspondence.match_with_exclusions(source.data, target.data, {"EXCLUDE_Tongue": [1, 3, 5]}, require_uvs=True)
+
+
+def test_exclusion_retry_cannot_mask_entire_uv_layout(pair, meshes):
+    _, target, _ = pair
+    source = meshes("All excluded", positions(target), [list(p.vertices) for p in target.data.polygons])
+    uv = np.array([loop.uv[:] for loop in target.data.uv_layers.active.data], dtype=np.float32) + 0.5
+    source.data.uv_layers.new().data.foreach_set("uv", uv.ravel())
+    with pytest.raises(ValueError, match="cannot remove the entire UV layout"):
+        correspondence.match_with_exclusions(
+            source.data, target.data, {"EXCLUDE_All": list(range(7))}, require_uvs=True
+        )
+
+
 @pytest.mark.parametrize("material_input", ["none", "same", "independent_full"])
 @pytest.mark.parametrize("complete", [False, True])
 def test_excluded_region_materials_are_blank_only_when_fallback_is_used(pair, meshes, material_input, complete):

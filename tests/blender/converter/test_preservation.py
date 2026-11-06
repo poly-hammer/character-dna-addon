@@ -164,7 +164,7 @@ def test_clearance_dependencies_reject_cycles_and_relative_references():
     recipe["meshes"][0]["preserve_clearance_references"] = ["teeth"]
     with pytest.raises(ValueError, match="Copy to Target"):
         templates.validate_template(recipe)
-    recipe = templates.default_template("exact")
+    recipe = templates.default_template("advanced")
     recipe["meshes"][0]["preserve_clearance_references"] = ["body"]
     recipe["meshes"][1]["preserve_clearance_references"] = ["head"]
     with pytest.raises(ValueError, match="Cyclic"):

@@ -565,8 +565,8 @@ class CharacterComponentBase(metaclass=ABCMeta):
             if material:
                 materials.append(material)
 
-        # switch to material view
-        utilities.set_viewport_shading("MATERIAL")
+        if not getattr(self.dna_import_properties, "preserve_viewport_shading", False):
+            utilities.set_viewport_shading("MATERIAL")
 
         # set the image textures to match
         if self._load_texture_maps:
