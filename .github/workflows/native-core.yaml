@@ -1,0 +1,159 @@
+name: Pinned Native Core
+# Public callers cannot resolve a private reusable workflow. Check out the
+# immutable private source here and run the same native checks and artifact build.
+on:
+  workflow_call:
+    inputs:
+      core-sha:
+        description: 'Exact core revision when invoked from a consumer repository'
+        required: true
+        type: string
+    secrets:
+      GH_PAT:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CHARACTER_DNA_RELEASE_BUILD: '1'
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: poly-hammer/character-dna-core
+          ref: ${{ inputs.core-sha }}
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: poly-hammer/OpenRigLogic
+          ref: f453ea17701d25d55072451f1f775f347c5af636
+          path: build/openriglogic/source
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked --no-install-project --python 3.11
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --check .
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny --locked check
+      - run: cargo fetch --locked
+      - run: uv run --no-sync python scripts/generate_notices.py --check
+
+  test:
+    name: Rust tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: poly-hammer/character-dna-core
+          ref: ${{ inputs.core-sha }}
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: poly-hammer/OpenRigLogic
+          ref: f453ea17701d25d55072451f1f775f347c5af636
+          path: build/openriglogic/source
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+
+  wheels:
+    name: Candidate wheel (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - platform: linux-x64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: '2_28'
+          - platform: macos-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: poly-hammer/character-dna-core
+          ref: ${{ inputs.core-sha }}
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: poly-hammer/OpenRigLogic
+          ref: f453ea17701d25d55072451f1f775f347c5af636
+          path: build/openriglogic/source
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: |
+            3.13
+            3.11
+      - uses: Swatinem/rust-cache@v2
+      - uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: '1.15.0'
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          args: --release --locked --out dist
+      - run: python scripts/build_wheels.py --check dist
+      - uses: astral-sh/setup-uv@v7
+      - name: Test the built wheel on both supported interpreters
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheels=(dist/character_dna_core-*.whl)
+          test "${#wheels[@]}" -eq 1
+          python scripts/test_wheel.py --wheel "${wheels[0]}"
+      - name: Record artifact hashes and provenance
+        run: python scripts/write_artifact_manifest.py --directory dist --platform ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: character-dna-core-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  required:
+    name: Native core checks
+    if: always()
+    needs: [quality, test, wheels]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every check and platform build
+        env:
+          QUALITY: ${{ needs.quality.result }}
+          TESTS: ${{ needs.test.result }}
+          WHEELS: ${{ needs.wheels.result }}
+        run: test "$QUALITY" = success && test "$TESTS" = success && test "$WHEELS" = success

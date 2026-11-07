@@ -40,7 +40,7 @@ jobs:
 
   native:
     if: github.event.pull_request.head.repo.full_name == github.repository
-    uses: poly-hammer/character-dna-core/.github/workflows/native.yaml@59c8d5f5cc998fa8548ff5483c60617f2e2f2902
+    uses: ./.github/workflows/native-core.yaml
     secrets: inherit
     with:
       core-sha: 59c8d5f5cc998fa8548ff5483c60617f2e2f2902
