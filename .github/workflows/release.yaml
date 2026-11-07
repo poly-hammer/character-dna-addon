@@ -26,6 +26,8 @@ on:
           - staging
           - production
 
+# Keep per-test JSONL diagnostics and job deadlines. The periodic faulthandler
+# watchdog can segfault while code objects change (python/cpython#158200).
 jobs:
   lint:
     name: Lint & Static Analysis
@@ -55,7 +57,7 @@ jobs:
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-4-5-windows-latest:
     needs: [lint, native]
@@ -72,7 +74,7 @@ jobs:
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-4-5-macos-latest:
     needs: [lint, native]
@@ -89,7 +91,7 @@ jobs:
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   # Test with Blender 5.2
   test-blender-5-2-ubuntu-latest:
@@ -107,7 +109,7 @@ jobs:
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-5-2-windows-latest:
     needs: [lint, native]
@@ -124,7 +126,7 @@ jobs:
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-5-2-macos-latest:
     needs: [lint, native]
@@ -141,7 +143,7 @@ jobs:
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   release:
     needs:
