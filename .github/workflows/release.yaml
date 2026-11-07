@@ -151,7 +151,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: poly-hammer/poly-hammer-utils
-          ref: 573697281624307763c324166b68a3ce002f3573
+          ref: 60b6a63236581832e10330b2c0cefcc017e40528
           path: poly-hammer-utils
           token: ${{ secrets.GH_PAT }}
           persist-credentials: false
