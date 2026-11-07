@@ -1,5 +1,8 @@
 ## Major Changes
 
+* Rebuilt converter processing in Rust, including pose recovery, anatomy fitting, joints and LOD calibration. DNA reads and writes use OpenRigLogic directly.
+* Viewport conversion playback now runs independently of native computation, retaining completed-stage previews and the exact final result.
+* Restart Blender after installing this update so it loads the new native bindings.
 * Added initial implementation of the Swing and Twist Editor. Now the Swing and twist values in DNA can be customized.
 * Convertor now supports merging and splitting DNA components at the Blender scene level, as well as, the DNA file level.
 
