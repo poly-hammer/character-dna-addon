@@ -478,7 +478,7 @@ def transform_plan(plans: list, component: str) -> array:
     )
 
 
-def make_record(carrier: Any, instance: Any = None) -> dict[str, Any]:
+def make_record(carrier: Any, instance: Any = None, *, prepared_model: tuple | None = None) -> dict[str, Any]:
     """Build a native frame plan from persisted bindings or an authoring descriptor."""
     instance = instance if instance is not None else _resolve_instance(carrier)
     component = carrier["component"]
@@ -498,8 +498,16 @@ def make_record(carrier: Any, instance: Any = None) -> dict[str, Any]:
     from ..dna_io.coordinates import validate_rig_basis
 
     validate_rig_basis(carrier["rig"])
-    model = _model(getattr(instance, f"{component}_dna_file_path"), component == "body")
-    info = _module.describe(_module.create_session(model))
+    if prepared_model is None:
+        model = _model(getattr(instance, f"{component}_dna_file_path"), component == "body")
+        info = _module.describe(_module.create_session(model))
+    else:
+        # Installation already hashed and loaded this exact immutable model.
+        # Reuse it for the frame plan, but abort if the file changed while the
+        # Blender drivers were being created. Rebuilds still perform full hashes.
+        model, info, path, signature = prepared_model
+        if _file_signature(path) != signature:
+            raise RuntimeError(f"DNA changed while installing: {path}. Retry loading the rig.")
     record = {
         "identity": instance_id(instance),
         "instance": instance,
@@ -606,6 +614,8 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
             raise ValueError(f"Rig is not writable in object or pose mode: {rig.name}")
         model = _model(getattr(instance, f"{component}_dna_file_path"), component == "body")
         info = _module.describe(_module.create_session(model))
+        path = Path(bpy.path.abspath(getattr(instance, f"{component}_dna_file_path"))).resolve(strict=True)
+        prepared_model = (model, info, path, _model_files[str(path), component == "body"].signature)
         plans = getattr(instance, f"{component}_bone_transform_plan")
         if component == "head":
             manager = instance.head_manager
@@ -642,11 +652,11 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
                 targets.append(Target(socket.id_data, socket.path_from_id("default_value"), -1, maps_offset + channel))
                 initial[maps_offset + channel] = socket.default_value
         all_targets.extend(targets)
-        prepared.append((component, rig, info, plans, targets, initial))
+        prepared.append((component, rig, prepared_model, plans, targets, initial))
     validate_targets(all_targets)
     install_eye_convergence(instance.face_board)
     try:
-        for component, rig, _info, plans, targets, initial in prepared:
+        for component, rig, prepared_model, plans, targets, initial in prepared:
             carrier = bpy.data.objects.new(f"{instance.name}_{component}_native", None)
             carrier[CARRIER_MARKER] = 1
             carrier["token"] = uuid.uuid4().hex
@@ -723,7 +733,7 @@ def install(instance: Any) -> None:  # noqa: PLR0912, PLR0915
             for flag in SETTINGS:
                 add_variable(driver, flag, carrier, f'["settings"]["{flag}"]')
             driver.expression = SOLVE_EXPRESSION
-            _records[carrier.as_pointer()] = make_record(carrier, instance)
+            _records[carrier.as_pointer()] = make_record(carrier, instance, prepared_model=prepared_model)
             _warnings.pop(carrier.as_pointer(), None)
         if instance.head_rig and instance.face_board and instance.auto_evaluate_head:
             _install_switches(instance, identity)
