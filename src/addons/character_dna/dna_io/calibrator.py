@@ -37,9 +37,8 @@ class DNACalibrator(DNAExporter, DNAImporter):
         return bool(self._instance.output.auto_update_lods) and self._instance.is_pro
 
     def validate(self) -> tuple[bool, str, str, Callable | None]:
-        valid, title, message, fix = super().validate()
-        if not valid:
-            return (valid, title, message, fix)
+        if not self._rig_object or not self._include_meshes:
+            return super().validate()
 
         # A calibration writes back into the DNA's own vertex arrays by index, so a mesh that
         # gained vertices has nowhere to write them. Overwriting is unaffected, hence the override.
@@ -58,7 +57,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 try:
                     position_indices.for_mesh(self._dna_reader, mesh_index, mesh_object.data)
                 except ValueError as error:
-                    mismatched.append(str(error))
+                    mismatched.append(f"{mesh_object.name}: {error}")
 
         if mismatched:
             return (
@@ -69,7 +68,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 None,
             )
 
-        return (True, "Success", "All validations passed.", None)
+        return super().validate()
 
     def _get_body_mesh_lookup(
         self, lod_index: int, mesh_name: str, head_to_body_edge_loop_mapping: dict[str, dict[int, int]]
@@ -77,20 +76,20 @@ class DNACalibrator(DNAExporter, DNAImporter):
         # If this is the head, and the align head and body option is on, then we want to use the
         # exact same vertex positions for the body and head vertices where they overlap. This needs to
         # be precised to the exact floating point value.
-        if mesh_name != f"{self._instance.name}_head_lod{lod_index}_mesh":
+        if (
+            self._component_type != "head"
+            or self._seam_follower != "head"
+            or self._instance.output.method != "calibrate"
+            or not self._instance.output.align_head_and_body
+            or mesh_name != f"{self._instance.name}_head_lod{lod_index}_mesh"
+        ):
             return {}
 
         custom = mesh_data.has_custom_topology(self._dna_reader, "head")
         body_lod_index = lod_index if custom else HEAD_TO_BODY_LOD_MAPPING.get(lod_index)
         body_mesh_name = f"{self._instance.name}_body_lod{body_lod_index}_mesh"
         body_mesh_lod = bpy.data.objects.get(body_mesh_name)
-        if (
-            self._component_type == "head"
-            and self._seam_follower == "head"
-            and self._instance.output.method == "calibrate"
-            and self._instance.output.align_head_and_body
-            and body_mesh_lod
-        ):
+        if body_mesh_lod:
             bmesh_object = self.get_bmesh(body_mesh_lod)
             vertex_indices, vertex_positions = self.get_mesh_vertex_positions(bmesh_object)
             bmesh_object.free()

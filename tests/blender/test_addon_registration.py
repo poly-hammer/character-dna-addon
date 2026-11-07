@@ -167,8 +167,13 @@ def test_reload_addon_source_code_in_isolated_process():
         """
     )
     result = subprocess.run(  # noqa: S603
-        [sys.executable, "-"], input=script, text=True, capture_output=True, timeout=120, check=False
+        [sys.executable, str(Path(__file__).parents[1] / "utilities" / "process.py"), script],
+        text=True,
+        capture_output=True,
+        timeout=120,
+        check=False,
     )
     output = result.stdout + result.stderr
     assert "RELOAD_CHECK_PASSED" in result.stdout, output
     assert "Traceback" not in result.stderr, output
+    assert result.returncode == 0, output

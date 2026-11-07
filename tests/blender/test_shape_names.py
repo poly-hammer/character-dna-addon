@@ -286,6 +286,13 @@ def test_long_shape_written_with_full_channel_identity(mesh, method, kind):
         getBlendShapeTargetCount=lambda _mesh: 1,
         getBlendShapeChannelIndex=lambda *_args: 0,
         getBlendShapeChannelName=lambda _channel: channel_name,
+        getVertexPositionCount=lambda _mesh: len(mesh.data.vertices),
+        getVertexLayoutPositionIndices=lambda _mesh: [],
+        getFaceCount=lambda _mesh: 0,
+        getBlendShapeTargetVertexIndices=lambda *_args: [],
+        getBlendShapeTargetDeltaXs=lambda *_args: [],
+        getBlendShapeTargetDeltaYs=lambda *_args: [],
+        getBlendShapeTargetDeltaZs=lambda *_args: [],
     )
     stream = dna.MemoryStream()
     writer = dna.BinaryStreamWriter(stream)

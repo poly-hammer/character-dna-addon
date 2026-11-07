@@ -38,7 +38,7 @@ jobs:
     uses: ./.github/workflows/native-core.yaml
     secrets: inherit
     with:
-      core-sha: 59c8d5f5cc998fa8548ff5483c60617f2e2f2902
+      core-sha: 010de056df0563253f6e4ea6f3be3baecd36b198
 
   test-blender-4-5-ubuntu-latest:
     needs: [lint, native]
@@ -54,6 +54,8 @@ jobs:
       base: "character-dna"
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
+      test-env: |
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
 
   test-blender-4-5-windows-latest:
     needs: [lint, native]
@@ -69,6 +71,8 @@ jobs:
       base: "character-dna"
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
+      test-env: |
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
 
   test-blender-4-5-macos-latest:
     needs: [lint, native]
@@ -84,6 +88,8 @@ jobs:
       base: "character-dna"
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
+      test-env: |
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
 
   # Test with Blender 5.2
   test-blender-5-2-ubuntu-latest:
@@ -100,6 +106,8 @@ jobs:
       base: "character-dna"
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
+      test-env: |
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
 
   test-blender-5-2-windows-latest:
     needs: [lint, native]
@@ -115,6 +123,8 @@ jobs:
       base: "character-dna"
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
+      test-env: |
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
 
   test-blender-5-2-macos-latest:
     needs: [lint, native]
@@ -130,6 +140,8 @@ jobs:
       base: "character-dna"
       base-branch: ${{ github.ref }}
       wheel-artifacts: character-dna-core-*
+      test-env: |
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
 
   release:
     needs:

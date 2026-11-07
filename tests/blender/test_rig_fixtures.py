@@ -57,6 +57,9 @@ def test_bone_only_shape_queries_resolve_scene_once(empty_character_scene, query
         name="ShapeLookup",
         head_dna_reader=reader,
         head_rig=None,
+        head_mesh=None,
+        id_data=bpy.context.scene,
+        get=lambda _key: None,
         data={},
         cache_key=lambda kind, descriptor: (kind, descriptor),
     )
