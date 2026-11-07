@@ -35,10 +35,10 @@ jobs:
       python-version: "3.13"
 
   native:
-    uses: poly-hammer/character-dna-core/.github/workflows/native.yaml@f198cb6c5c08de4b254a6d7423f36223706af4d5
+    uses: poly-hammer/character-dna-core/.github/workflows/native.yaml@a71d2ce491a906ca5dcf45ad3f3028aac4827b2b
     secrets: inherit
     with:
-      core-sha: f198cb6c5c08de4b254a6d7423f36223706af4d5
+      core-sha: a71d2ce491a906ca5dcf45ad3f3028aac4827b2b
 
   test-blender-4-5-ubuntu-latest:
     needs: [lint, native]

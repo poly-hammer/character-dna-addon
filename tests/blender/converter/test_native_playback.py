@@ -104,6 +104,32 @@ def test_preview_pressure_retains_exact_final_geometry_for_every_mesh(preview_sc
     np.testing.assert_array_equal(positions(obj), exact)
 
 
+def test_early_worker_preview_cannot_commit_a_conversion_stage(preview_scene, monkeypatch):
+    obj, pipeline, playback = preview_scene
+    original = positions(obj)
+    phases = []
+    commit = Transition.commit
+
+    def observe(transition):
+        phases.append(transition.label)
+        commit(transition)
+
+    monkeypatch.setattr(Transition, "commit", observe)
+    playback.capture(pipeline)
+    job = SimpleNamespace(previews=[(1, "Template surface", original + 1, "body")])
+    playback.job(pipeline, job)
+    assert not playback.tick(0.0)
+    assert playback.tick(1.0)
+    assert phases == []
+    np.testing.assert_array_equal(positions(obj), original)
+    np.testing.assert_array_equal(positions(playback.objects[obj]), original + 1)
+    accepted = Transition("Fit supplied surfaces")
+    accepted.add_mesh(obj, original + 2)
+    accepted.commit()
+    assert phases == ["Fit supplied surfaces"]
+    np.testing.assert_array_equal(positions(obj), original + 2)
+
+
 def test_cancel_removes_preview_datablocks_and_restores_output_visibility(preview_scene):
     obj, pipeline, playback = preview_scene
     original = positions(obj)
