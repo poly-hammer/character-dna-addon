@@ -5,11 +5,9 @@ document carries explicit bindings back to each component's original topology.
 """
 
 import base64
-import hashlib
 import json
 import logging
 
-from collections import Counter
 from typing import Any
 
 import numpy as np
@@ -128,10 +126,9 @@ def unpack(record: dict) -> np.ndarray:
 
 
 def topology(vertex_count: int, faces: list) -> dict:
-    sizes = [len(face) for face in faces]
-    digest = hashlib.sha256(np.asarray([vertex_count, len(faces), *sizes], dtype="<u4").tobytes())
-    digest.update(np.asarray([v for face in faces for v in face], dtype="<u4").tobytes())
-    return {"vertices": vertex_count, "faces": len(faces), "corners": sum(sizes), "sha256": digest.hexdigest()}
+    from ..bindings import load_converter_core
+
+    return json.loads(load_converter_core().scene_topology_fingerprint(vertex_count, faces))
 
 
 def reader_faces(reader: Any, index: int) -> list[list[int]]:
@@ -300,26 +297,10 @@ def apply_uv_layers(mesh: Any, record: dict, corners: list[int]) -> None:
 
 
 def ordered_boundary(faces: list, vertices: set[int]) -> list[int]:
-    """Order exactly one closed boundary, rejecting branches and disconnected rings."""
-    edges = Counter(tuple(sorted((a, b))) for face in faces for a, b in zip(face, [*face[1:], face[0]], strict=True))
-    neighbors = {v: [] for v in vertices}
-    for (a, b), count in edges.items():
-        if count == 1 and a in vertices and b in vertices:
-            neighbors[a].append(b)
-            neighbors[b].append(a)
-    if len(vertices) < 3 or any(len(adjacent) != 2 for adjacent in neighbors.values()):
-        raise ValueError(f"{SEAM_GROUP} must select one complete closed mesh boundary.")
-    ordered = [min(vertices)]
-    previous, current = ordered[0], min(neighbors[ordered[0]])
-    while current != ordered[0]:
-        if current in ordered:
-            raise ValueError(f"{SEAM_GROUP} contains a disconnected boundary.")
-        ordered.append(current)
-        following = next(v for v in neighbors[current] if v != previous)
-        previous, current = current, following
-    if len(ordered) != len(vertices):
-        raise ValueError(f"{SEAM_GROUP} contains more than one boundary.")
-    return ordered
+    """Delegate captured data to the native converter adapter."""
+    from .native_mesh_data import ordered_boundary as native
+
+    return native(faces, vertices)
 
 
 def object_boundary(obj: Any) -> list[int] | None:
@@ -428,23 +409,10 @@ def apply_colors(mesh: Any, record: dict, position_ids: list[int] | None = None)
 def match_boundaries(
     head: list[int], body: list[int], head_points: Any, body_points: Any, *, tolerance: float
 ) -> dict[int, int]:
-    """Match ring rotation and direction, never a many-to-one nearest projection."""
-    if len(head) != len(body) or len(head) < 3:
-        raise ValueError("Head and body necklines must have the same vertex count to weld.")
-    hp, bp = np.asarray(head_points)[head], np.asarray(body_points)[body]
-    candidates = []
-    for reverse in (False, True):
-        ring = list(reversed(body)) if reverse else body
-        points = bp[::-1] if reverse else bp
-        for offset in range(len(body)):
-            distances = np.linalg.norm(hp - np.roll(points, -offset, axis=0), axis=1)
-            candidates.append((float(np.mean(distances**2)), float(np.max(distances)), ring[offset:] + ring[:offset]))
-    candidates.sort(key=lambda row: row[0])
-    if candidates[0][1] > tolerance:
-        raise ValueError("Head/body neckline separation exceeds the matching tolerance; align the rest meshes.")
-    if abs(candidates[1][0] - candidates[0][0]) < max(tolerance**2 * 1e-8, 1e-16):
-        raise ValueError("Ambiguous neckline correspondence; inspect the boundary vertices.")
-    return dict(zip(head, candidates[0][2], strict=True))
+    """Delegate captured data to the native converter adapter."""
+    from .native_mesh_data import match_boundaries as native
+
+    return native(head, body, head_points, body_points, tolerance=tolerance)
 
 
 def record_for(reader: Any, kind: str, mesh_index: int) -> dict | None:

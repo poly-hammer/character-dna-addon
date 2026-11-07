@@ -25,7 +25,7 @@ from ..constants import (
 from ..exceptions import InvalidComponentTypeError
 from ..typing import *  # noqa: F403  # noqa: F403
 from . import mesh_data
-from .coordinates import DNA_ROTATION_MODE
+from .coordinates import DNA_ROTATION_MODE, CanonicalDNAWriter
 from .misc import get_dna_reader, get_dna_writer
 
 
@@ -100,7 +100,7 @@ class DNAExporter:
         else:
             self._dna_reader = reader
 
-        self._dna_writer = get_dna_writer(file_path=self._target_dna_file, file_format=self._instance.output.format)
+        self._dna_writer = self._create_writer()
         # Populate the writer with the data from the reader
         self._dna_writer.setFrom(self._dna_reader, dna.DataLayer_All, dna.UnknownLayerPolicy_Preserve, None)
 
@@ -130,6 +130,10 @@ class DNAExporter:
         # pre-flight validation pass (``validate_scene``) and ``run`` without
         # doubling the collected mesh/image lists.
         self._scene_initialized = False
+
+    def _create_writer(self) -> CanonicalDNAWriter:
+        """Create the transport used by this exporter."""
+        return get_dna_writer(file_path=self._target_dna_file, file_format=self._instance.output.format)
 
     def _report(self, message: str, fraction: float | None = None) -> None:
         """Forward a status update to the optional progress callback.

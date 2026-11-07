@@ -211,6 +211,57 @@ def test_template_pose_normalization_roundtrip(
     assert not list(tmp_path.rglob("ConversionReport.json"))
 
 
+def test_joined_input_conversion_preserves_each_component_domain(
+    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, conversion_diagnostics
+):
+    import numpy as np
+
+    from character_dna.dna_io import get_dna_reader, release_dna_handle
+    from character_dna.editors.converter import assembly
+    from character_dna.editors.converter.pipeline import positions
+
+    props = get_converter_properties()
+    rows = configure_template(props, base_dna_folder)
+    sources = {kind: rows[kind].scene_object for kind in ("head", "body")}
+    original = {kind: positions(obj) for kind, obj in sources.items()}
+    readers = {kind: get_dna_reader(base_dna_folder / f"{kind}.dna") for kind in sources}
+    try:
+        domain = assembly.prepare(sources, readers, {kind: rows[kind].dna_mesh_name for kind in sources})
+    finally:
+        for reader in readers.values():
+            release_dna_handle(reader)
+    joined = bpy.data.objects.new("Joined supplied character", domain.mesh)
+    bpy.context.scene.collection.objects.link(joined)
+    before = positions(joined)
+    expected = {kind: before[ids].copy() for kind, ids in domain.component_to_assembly.items()}
+    try:
+        props.input_layout = "JOINED"
+        props.joined_mesh = joined
+        for kind in sources:
+            rows[kind].scene_object = None
+        props.normalize_to_a_pose = False
+        props.adjust_seam = False
+        props.validate_uvs = False
+        props.new_name = "JoinedInputRoundtrip"
+        props.new_folder = str(tmp_path)
+        assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
+        instance = bpy.context.scene.character_dna.rig_instance_list.get(props.new_name)
+        assert instance is not None
+        for kind, source in sources.items():
+            np.testing.assert_allclose(positions(getattr(instance, f"{kind}_mesh")), expected[kind], atol=2e-6, rtol=0)
+            np.testing.assert_array_equal(positions(source), original[kind])
+            assert conversion_diagnostics["meshes"][kind]["binding"] == "full_body"
+            assert conversion_diagnostics["meshes"][kind]["export_max_error_m"] < 2e-6
+            assert (tmp_path / f"{kind}.dna").is_file()
+        np.testing.assert_array_equal(positions(joined), before)
+        assert joined.hide_get() and joined.hide_render
+        assert conversion_diagnostics["assembly"]["seam_pairs"] == len(domain.seam)
+    finally:
+        props.joined_mesh = None
+        bpy.data.objects.remove(joined, do_unlink=True)
+        domain.close()
+
+
 def test_pose_quality_failure_rolls_back_conversion(load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path):
     import numpy as np
 

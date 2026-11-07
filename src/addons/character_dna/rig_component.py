@@ -171,6 +171,23 @@ class RigComponent:
             for obj in scene_objects
             if obj.type == "MESH" and obj.get("ca_dna_rig") == self.rig and obj.get("ca_dna_component") == self.kind
         }
+        # A DNA merge deliberately detaches its canonical views. Only the
+        # instance's live surface registry can grant those IDs binding ownership.
+        registry = self.instance.get("dna_merged_surfaces")
+        surfaces = list(registry.values()) if registry else [self.instance.get("dna_merge_proxy")]
+        working = {}
+        for surface in surfaces:
+            if surface is None or surface.name not in scene_objects:
+                continue
+            obj = surface.get(f"dna_merge_{self.kind}")
+            if (
+                obj is not None
+                and obj.type == "MESH"
+                and obj.get("dna_working_source")
+                and obj.get("ca_dna_rig") == self.rig
+                and obj.get("ca_dna_component") == self.kind
+            ):
+                working[obj.get("ca_dna_mesh_index")] = obj
         result = {}
         for index in range(reader.getMeshCount()):
             # The explicitly linked main mesh can replace the imported template.
@@ -178,7 +195,11 @@ class RigComponent:
             if index == 0 and self.mesh and self.mesh.name in scene_objects:
                 obj = self.mesh
             else:
-                obj = tagged.get(index) or scene_objects.get(f"{self.instance.name}_{reader.getMeshName(index)}")
+                obj = (
+                    tagged.get(index)
+                    or working.get(index)
+                    or scene_objects.get(f"{self.instance.name}_{reader.getMeshName(index)}")
+                )
             if obj is not None:
                 result[index] = obj
         return result

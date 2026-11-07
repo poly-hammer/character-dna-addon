@@ -405,6 +405,8 @@ def setup_scene(*_: Any) -> None:
 def teardown_scene(*_: Any) -> None:
     from ..runtime import controller, engine
 
+    if editors := get_editors():
+        editors.cancel_conversions()
     engine.invalidate()
     scene_properties = getattr(bpy.context.scene, ToolInfo.NAME, object)
 
@@ -417,6 +419,8 @@ def teardown_scene(*_: Any) -> None:
 def pre_undo(*_: Any) -> None:
     from ..runtime.controller import before_undo
 
+    if editors := get_editors():
+        editors.cancel_conversions()
     before_undo()
     context: "Context" = bpy.context  # type: ignore[attr-defined]  # noqa: UP037
     addon_window_manager_properties = get_addon_window_manager_properties(context)

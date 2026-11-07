@@ -43,3 +43,24 @@ def test_secondary_mesh_binding_ignores_unlinked_ids_and_keeps_renamed_tags(mini
     assert component.meshes_for_reader(reader) == {0: mesh, 1: secondary}
     bpy.context.scene.collection.objects.unlink(secondary)
     assert component.meshes_for_reader(reader) == {0: mesh}
+
+
+@pytest.mark.parametrize("kind", ["head", "body"])
+def test_registered_working_source_retains_binding_without_exposing_unrelated_ids(minimal_character, kind):
+    instance = minimal_character
+    mesh = getattr(instance, f"{kind}_mesh")
+    working = mesh.copy()
+    working["ca_dna_mesh_index"] = 1
+    working["ca_dna_component"] = kind
+    working["ca_dna_rig"] = getattr(instance, f"{kind}_rig")
+    working["dna_working_source"] = True
+    surface = bpy.data.objects.new("RegisteredSurface", None)
+    bpy.context.scene.collection.objects.link(surface)
+    surface[f"dna_merge_{kind}"] = working
+    reader = SimpleNamespace(getMeshCount=lambda: 2, getMeshName=lambda index: f"mesh_{index}")
+    component = instance.component(kind)
+    assert component.meshes_for_reader(reader) == {0: mesh}
+    instance["dna_merged_surfaces"] = {"0": surface}
+    assert component.meshes_for_reader(reader) == {0: mesh, 1: working}
+    bpy.context.scene.collection.objects.unlink(surface)
+    assert component.meshes_for_reader(reader) == {0: mesh}
