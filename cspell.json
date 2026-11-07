@@ -54,7 +54,19 @@
         "Raasch",
         "rbf",
         "character_dna",
-        "Steagall"
+        "Steagall",
+        "ARAP",
+        "ascontiguousarray",
+        "iinfo",
+        "lods",
+        "lstsq",
+        "MHB",
+        "nbytes",
+        "OMP",
+        "OPENBLAS",
+        "rcond",
+        "rint",
+        "upgrader"
     ],
     "dictionaries": [
         "python",
