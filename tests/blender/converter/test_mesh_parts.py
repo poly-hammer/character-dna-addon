@@ -6,7 +6,7 @@ import bpy
 import numpy as np
 import pytest
 
-from character_dna.editors.converter import mesh_parts
+from character_dna.editors.converter.mesh import parts as mesh_parts
 from character_dna.editors.converter.pipeline import ConversionPipeline, positions
 
 

@@ -43,7 +43,7 @@ jobs:
     uses: ./.github/workflows/native-core.yaml
     secrets: inherit
     with:
-      core-sha: 010de056df0563253f6e4ea6f3be3baecd36b198
+      core-sha: bcc6a2920e756a8581b9195eb4924495e8a91066
 
   test-blender-4-5-ubuntu-latest:
     needs: [lint, native]

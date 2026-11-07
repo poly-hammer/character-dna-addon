@@ -150,7 +150,8 @@ def test_invalid_uv_metadata_is_rejected(surface, damage):
 
 
 def test_fitting_and_mesh_subsets_use_native_uvs_with_extra_layer_selected(surface):
-    from character_dna.editors.converter import correspondence, mesh_parts
+    from character_dna.editors.converter import correspondence
+    from character_dna.editors.converter.mesh import parts as mesh_parts
     from character_dna.editors.shared.utilities import _extract_blender_uv_layout
 
     original = snapshot(surface.data)

@@ -13,7 +13,8 @@ from test_merge_split import coordinates
 
 from character_dna.dna_io import document
 from character_dna.editors.backup_manager import core as backups
-from character_dna.editors.converter import merge_split, scene_merge
+from character_dna.editors.converter.mesh import merge_split
+from character_dna.editors.converter.scene import merge as scene_merge
 from character_dna.runtime import controller, engine
 from character_dna.utilities import get_addon_preferences
 from fixtures.rigs import RigProfile

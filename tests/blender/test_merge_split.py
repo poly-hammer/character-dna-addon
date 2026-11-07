@@ -13,7 +13,7 @@ import pytest
 from character_dna import shape_names
 from character_dna.constants import HEAD_TO_BODY_EDGE_LOOP_FILE_PATH
 from character_dna.dna_io import document, get_dna_reader, get_dna_writer, release_dna_handle
-from character_dna.editors.converter import scene_merge
+from character_dna.editors.converter.scene import merge as scene_merge
 from character_dna.runtime import controller, engine
 from character_dna.utilities import get_active_rig_instance
 from constants import TEST_DNA_FOLDER
@@ -595,7 +595,7 @@ def test_shape_editor_uses_welded_surface_and_restores_canonical_order(character
 
 
 def test_document_merge_requires_shared_output_folder(minimal_character, tmp_path):
-    from character_dna.editors.converter.merge_split import _output_directory
+    from character_dna.editors.converter.mesh.merge_split import _output_directory
 
     instance = minimal_character
     instance["head_dna_file_path"] = str(tmp_path / "head.dna")
@@ -743,7 +743,7 @@ def test_failed_split_rebinding_keeps_merged_scene_and_file_ownership(character,
     from types import SimpleNamespace
 
     from character_dna.dna_io import shape_dependencies
-    from character_dna.editors.converter.merge_split import SplitComponents
+    from character_dna.editors.converter.mesh.merge_split import SplitComponents
 
     instance = character
     assert bpy.ops.character_dna.merge_components() == {"FINISHED"}

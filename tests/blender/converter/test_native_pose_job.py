@@ -5,8 +5,8 @@ import time
 import numpy as np
 import pytest
 
-from character_dna.editors.converter.native_pose_job import NativePoseJob
-from character_dna.editors.converter.pose_job import PoseJob
+from character_dna.editors.converter.native.pose.job import NativePoseJob
+from character_dna.editors.converter.pose.job import PoseJob
 
 from .test_a_pose import toy
 

@@ -118,7 +118,7 @@ def test_partition_cleanup_preserves_preexisting_working_directories(monkeypatch
 @pytest.mark.parametrize("head_targets", [(), (0,)])
 def test_merged_leases_own_document_and_partition_paths(rig_factory, tmp_path, mode, head_targets, compact_dna):
     from character_dna import shape_names
-    from character_dna.editors.converter import scene_merge
+    from character_dna.editors.converter.scene import merge as scene_merge
 
     profile = RigProfile(asset=str(compact_dna), pose_bones=STATE_BONES, document_mode=mode, head_targets=head_targets)
     partitions = []

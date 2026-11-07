@@ -8,7 +8,7 @@ import pytest
 
 from character_dna.bindings import load_converter_core
 from character_dna.dna_io import DNACalibrator, get_dna_reader, release_dna_handle
-from character_dna.editors.converter.native_calibration import NativeCalibrator
+from character_dna.editors.converter.native.calibration import NativeCalibrator
 from constants import BODY_DNA_FILE
 from fixtures.rigs import RigProfile
 

@@ -652,7 +652,7 @@ def set_active_lod(self: "CharacterViewOptionsProperties", value: int):
     ):
         set_hidden(body_lod_object, False)
     if instance.get("dna_merge_proxy"):
-        from ..editors.converter.scene_merge import sync_visibility
+        from ..editors.converter.scene.merge import sync_visibility
 
         sync_visibility(instance)
 

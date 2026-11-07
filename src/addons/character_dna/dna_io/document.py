@@ -383,7 +383,8 @@ def finish_import(instance: Any, path: Path | None, manifest: dict | None, *, im
             instance.converter_merge_mode = "DNA"
     if not editors_available():
         return
-    from ..editors.converter import scene_merge, source_views
+    from ..editors.converter.scene import merge as scene_merge
+    from ..editors.converter.source import views as source_views
     from ..runtime import controller
 
     with controller.authoring_operation(instance):
@@ -643,7 +644,7 @@ def restore_scene_documents() -> None:
 
                 try:
                     if editors_available():
-                        from ..editors.converter import source_views
+                        from ..editors.converter.source import views as source_views
 
                         source_views.refresh_transforms(instance)
                     bind_instance(instance, Path(bpy.path.abspath(path)))

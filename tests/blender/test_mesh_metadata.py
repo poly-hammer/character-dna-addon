@@ -23,7 +23,7 @@ from character_dna.dna_io import (
     partitions,
     release_dna_handle,
 )
-from character_dna.editors.converter import scene_colors, scene_merge
+from character_dna.editors.converter.scene import colors as scene_colors, merge as scene_merge
 from fixtures.rigs import RigProfile
 
 

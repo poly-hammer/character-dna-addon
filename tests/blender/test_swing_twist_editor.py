@@ -270,7 +270,7 @@ def test_external_edit_is_rejected(character):
 @pytest.mark.rig_profile(state_only=True)
 def test_combined_commit_preserves_head_and_surface(character, monkeypatch, fail_first):
     from character_dna.dna_io import document
-    from character_dna.editors.converter import scene_merge
+    from character_dna.editors.converter.scene import merge as scene_merge
 
     path = Path(character["combined_dna_path"])
     before = path.read_bytes()

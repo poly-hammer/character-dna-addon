@@ -103,7 +103,7 @@ def migrate_instance(instance: Any) -> None:
     from ..utilities import editors_available
 
     if editors_available():
-        from ..editors.converter.scene_merge import migrate_names
+        from ..editors.converter.scene.merge import migrate_names
 
         migrate_names(instance, renamed)
     if renamed:

@@ -6,9 +6,9 @@ import bpy
 import numpy as np
 import pytest
 
-from character_dna.editors.converter import viewport_playback
 from character_dna.editors.converter.lifecycle import ConversionLifecycle
 from character_dna.editors.converter.pipeline import Transition, positions, write_positions
+from character_dna.editors.converter.viewport import playback as viewport_playback
 
 
 @pytest.fixture

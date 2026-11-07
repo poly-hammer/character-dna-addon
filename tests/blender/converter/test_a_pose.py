@@ -9,11 +9,15 @@ import numpy as np
 import pytest
 
 from character_dna.dna_io import get_dna_reader, release_dna_handle
-from character_dna.editors.converter import pose_contacts, pose_profiles, pose_receipt
-from character_dna.editors.converter.pose_fit import canonical, geometry, quality, samples
-from character_dna.editors.converter.pose_fit.model import PoseModel
-from character_dna.editors.converter.pose_fit.solver import fit
-from character_dna.editors.converter.pose_job import PoseJob
+from character_dna.editors.converter.pose import (
+    contacts as pose_contacts,
+    profiles as pose_profiles,
+    receipt as pose_receipt,
+)
+from character_dna.editors.converter.pose.fit import canonical, geometry, quality, samples
+from character_dna.editors.converter.pose.fit.model import PoseModel
+from character_dna.editors.converter.pose.fit.solver import fit
+from character_dna.editors.converter.pose.job import PoseJob
 from character_dna.editors.shared import pose_transfer, topology_profiles
 from character_dna.editors.shared.utilities import build_world_rest_pose
 
@@ -173,7 +177,7 @@ def test_worker_roundtrip_cleanup_and_cancel():
 
 
 def test_worker_interpreter_preserves_active_environment(monkeypatch, tmp_path):
-    from character_dna.editors.converter import pose_job
+    from character_dna.editors.converter.pose import job as pose_job
 
     active = tmp_path / "python.exe"
     active.touch()
@@ -190,9 +194,9 @@ def test_worker_dependency_failure_is_reported(tmp_path):
 
     from pathlib import Path
 
-    from character_dna.editors.converter import pose_job
+    from character_dna.editors.converter.pose import job as pose_job, worker as pose_worker
 
-    worker = Path(pose_job.__file__).with_name("pose_worker.py")
+    worker = Path(pose_worker.__file__)
     # Disable site-packages to reproduce the original missing-NumPy startup.
     result = subprocess.run(  # noqa: S603 - fixed bundled worker in an isolated test folder
         [str(pose_job.worker_python()), "-S", str(worker), str(tmp_path)], check=False, timeout=30

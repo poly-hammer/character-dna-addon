@@ -8,7 +8,8 @@ from types import SimpleNamespace
 import bpy
 import pytest
 
-from character_dna.editors.converter import dna_components, templates, ui
+from character_dna.editors.converter import templates, ui
+from character_dna.editors.converter.dna import components as dna_components
 from character_dna.editors.converter.operators import CHARACTER_DNA_OT_convert_to_dna
 from character_dna.editors.converter.properties import ConverterExtraMeshItem, get_converter_properties
 
@@ -558,7 +559,7 @@ def test_output_visibility_survives_lod_switches(setup_scene, mesh, component, h
 
 @pytest.mark.parametrize("hidden,render_disabled", [(False, False), (True, False), (False, True), (True, True)])
 def test_merged_surface_obeys_component_visibility(setup_scene, hidden, render_disabled):
-    from character_dna.editors.converter.scene_merge import sync_visibility
+    from character_dna.editors.converter.scene.merge import sync_visibility
 
     _, head = setup_scene
     body, surface = head.copy(), head.copy()

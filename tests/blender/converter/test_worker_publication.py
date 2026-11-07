@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from character_dna.editors.converter import pose_worker
+from character_dna.editors.converter.pose import worker as pose_worker
 
 
 def test_worker_retries_atomic_publication_with_an_open_reader(tmp_path, monkeypatch):

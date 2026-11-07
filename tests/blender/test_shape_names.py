@@ -14,7 +14,7 @@ from test_merge_split import coordinates
 from character_dna import shape_names
 from character_dna.dna_io.misc import create_shape_key
 from character_dna.dna_io.shape_migration import recover_mesh
-from character_dna.editors.converter import scene_merge
+from character_dna.editors.converter.scene import merge as scene_merge
 from character_dna.runtime import controller, engine
 from fixtures.compact_dna import STATE_BONES
 from fixtures.rigs import RigProfile
@@ -401,7 +401,7 @@ def test_alias_registry_survives_blend_reload(tmp_path):
 
 @pytest.mark.rig_profile(compact=True, long_target=True)
 def test_long_surface_edits_use_logical_names_and_rollback(character):
-    from character_dna.editors.converter import surface_session
+    from character_dna.editors.converter.surface import session as surface_session
 
     instance = character
     obj = instance.head_mesh

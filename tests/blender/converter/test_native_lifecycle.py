@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import bpy
 
 from character_dna.editors.converter import lifecycle
-from character_dna.editors.converter.native_jobs import StageJob
+from character_dna.editors.converter.native.jobs import StageJob
 
 
 def test_cancelled_operator_rejects_late_timer_before_accessing_old_scene():

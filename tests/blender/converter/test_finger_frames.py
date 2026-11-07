@@ -6,7 +6,7 @@ import pytest
 
 from mathutils import Euler, Matrix, Vector
 
-from character_dna.editors.converter.finger_frames import (
+from character_dna.editors.converter.joints.fingers import (
     fit_finger_orientations,
     hand_bind_transforms,
     skin_hand_positions,

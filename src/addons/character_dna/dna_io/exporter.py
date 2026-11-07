@@ -277,7 +277,7 @@ class DNAExporter:
         file is written), so a validation failure and its fix dialog surface before
         the exporter has already exported another component."""
         if self._instance.get("dna_merge_proxy"):
-            from ..editors.converter.scene_merge import prepare_export
+            from ..editors.converter.scene.merge import prepare_export
 
             prepare_export(self._instance, apply=False)
         self.initialize_scene_data()
@@ -963,7 +963,7 @@ class DNAExporter:
 
         migrate_instance(self._instance)
         if self._instance.get("dna_merge_proxy"):
-            from ..editors.converter.scene_merge import prepare_export
+            from ..editors.converter.scene.merge import prepare_export
 
             prepare_export(self._instance, apply=True)
 

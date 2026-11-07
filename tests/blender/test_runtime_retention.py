@@ -7,7 +7,7 @@ import pytest
 
 from character_dna import shape_names
 from character_dna.dna_io import release_dna_handle
-from character_dna.editors.converter import scene_merge
+from character_dna.editors.converter.scene import merge as scene_merge
 from character_dna.editors.shape_key_editor.editor import ShapeKeyEditor
 from character_dna.runtime import controller, engine, retention
 from fixtures.compact_dna import STATE_BONES

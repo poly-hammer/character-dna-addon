@@ -8,7 +8,7 @@ from mathutils import Euler
 
 from character_dna.bindings import load_converter_core
 from character_dna.dna_io.exporter import DNAExporter
-from character_dna.editors.converter.native_joints import _matrices
+from character_dna.editors.converter.native.joints.frames import _matrices
 from fixtures.rigs import RigProfile
 
 

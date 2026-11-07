@@ -3,7 +3,8 @@
 import numpy as np
 import pytest
 
-from character_dna.editors.converter import preservation, preserve_clearance, templates
+from character_dna.editors.converter import templates
+from character_dna.editors.converter.preservation import clearance as preserve_clearance, core as preservation
 from character_dna.editors.converter.properties import get_converter_properties
 
 

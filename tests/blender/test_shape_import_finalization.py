@@ -11,7 +11,7 @@ from test_merge_split import import_shape_keys
 from test_runtime_retention import identities
 
 from character_dna import shape_names
-from character_dna.editors.converter import scene_merge
+from character_dna.editors.converter.scene import merge as scene_merge
 from character_dna.editors.shape_key_editor import utilities
 from character_dna.editors.shape_key_editor.operators import ImportShapeKeys
 from character_dna.runtime import controller, engine, retention
