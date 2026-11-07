@@ -1,11 +1,37 @@
 """Direct SDK calibration must preserve the established saved DNA contract."""
 
+import json
+import shutil
+
 import numpy as np
 import pytest
 
+from character_dna.bindings import load_converter_core
 from character_dna.dna_io import DNACalibrator, get_dna_reader, release_dna_handle
 from character_dna.editors.converter.native_calibration import NativeCalibrator
+from constants import BODY_DNA_FILE
 from fixtures.rigs import RigProfile
+
+
+def test_native_calibration_reads_and_writes_unicode_paths(tmp_path):
+    native = load_converter_core()
+    source = tmp_path / "角色 source.dna"
+    output = tmp_path / "résultat 角色.dna"
+    reference = tmp_path / "reference.dna"
+    reopened = tmp_path / "reopened.dna"
+    reference_reopened = tmp_path / "reference_reopened.dna"
+    shutil.copyfile(BODY_DNA_FILE, source)
+    options = json.dumps({"families": {}, "seam_reference": None, "seams": [], "metadata": None, "zero_shapes": False})
+    empty = np.empty((0, 3), dtype=np.float32)
+    for input_path, output_path in (
+        (BODY_DNA_FILE, reference),
+        (source, output),
+        (output, reopened),
+        (reference, reference_reopened),
+    ):
+        native.calibrate_dna(str(input_path), str(output_path), [], [], empty, empty, options)
+    assert output.read_bytes() == reference.read_bytes()
+    assert reopened.read_bytes() == reference_reopened.read_bytes()
 
 
 @pytest.mark.parametrize("component,zero_shapes", [("head", False), ("head", True), ("body", False)])

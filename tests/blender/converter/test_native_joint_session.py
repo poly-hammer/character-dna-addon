@@ -70,3 +70,29 @@ def test_native_channel_euler_orders_and_gimbal_limits():
     expected = [frame.to_3x3() for frame in frames.values()]
     actual = [Euler(np.radians(row), "XZY").to_matrix() for row in rotations]
     np.testing.assert_allclose(actual, expected, atol=2e-5, rtol=0)
+
+
+@pytest.mark.parametrize(
+    "points,faces",
+    [
+        ([(0, 0, 0), (1, 0, 0), (2, 0, 0)], [(0, 1, 2)]),
+        ([(1, 0, 0), (0, 1, 0), (0, 0, 1)], [(0, 1, 2), (2, 1, 0)]),
+        ([(0, 0, 0)] * 3, [(0, 1, 2)]),
+    ],
+)
+def test_native_degenerate_normals_match_blender(points, faces):
+    mesh = bpy.data.meshes.new("degenerate-normal-contract")
+    try:
+        mesh.from_pydata(points, [], faces)
+        mesh.polygons.foreach_set("use_smooth", np.ones(len(faces), dtype=bool))
+        mesh.update()
+        expected = np.empty((len(mesh.loops), 3), dtype=np.float32)
+        mesh.corner_normals.foreach_get("vector", expected.ravel())
+        actual = load_converter_core().mesh_smooth_normals(
+            np.array(points, np.float32),
+            np.array(faces, np.int32).ravel(),
+            np.array([len(face) for face in faces], np.int32),
+        )
+        np.testing.assert_array_equal(np.frombuffer(actual, np.float32).reshape(-1, 3), expected)
+    finally:
+        bpy.data.meshes.remove(mesh)

@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: poly-hammer/character-dna-core
-          ref: b318b7636d96a09551c36c0f36949c623dcf91d8
+          ref: f198cb6c5c08de4b254a6d7423f36223706af4d5
           path: core
           token: ${{ secrets.GH_PAT }}
           persist-credentials: false
