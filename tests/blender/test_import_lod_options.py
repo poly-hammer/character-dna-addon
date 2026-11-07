@@ -1,5 +1,7 @@
 """File-browser options follow real DNA mesh LOD mappings, not template slots."""
 
+import os
+
 from types import SimpleNamespace
 
 import bpy
@@ -50,9 +52,12 @@ def test_panels_share_definition_reader_and_refresh_changed_file(tmp_path, monke
     assert get_mesh_lods(first) == [0]
     assert ui.get_import_dna_reader(bpy.context, str(path)) is first
     assert opened == ["Definition"]
+    previous_stamp = path.stat()
     # Release the Windows read handle before replacing this asset in place.
     release_dna_handle(first)
     write_surface(path, lods=(0, 3))
+    # Equal-size writes can share a filesystem tick; explicitly version this fixture.
+    os.utime(path, ns=(previous_stamp.st_atime_ns, previous_stamp.st_mtime_ns + 1_000_000_000))
     second = ui.get_import_dna_reader(bpy.context, str(path))
     assert get_mesh_lods(second) == [0, 3]
     assert opened == ["Definition", "Definition"]
