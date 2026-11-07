@@ -70,3 +70,30 @@ def test_preparing_a_lower_lod_preserves_the_lod0_domain():
     assert reader.getMeshIndicesForLOD(0) == lod0
     assert reader.getMeshName(mesh.index) == mesh.name
     assert reader.prepare_mesh(mesh.name) is mesh
+
+
+def test_template_fingerprint_respects_metadata_without_a_primary_uv(monkeypatch):
+    from types import SimpleNamespace
+
+    from character_dna.editors.converter.native import direct
+    from character_dna.editors.converter.native.template import TemplateReader
+
+    reader = TemplateReader(str(TEST_DNA_FOLDER / "ada" / "body.dna"), "body")
+    mesh = reader.meshes["body_lod0_mesh"]
+    digest = load_converter_core().topology_digest(mesh.corners, mesh.sizes, len(mesh.positions), None)
+    pipeline = object.__new__(direct.DirectPipeline)
+    pipeline.operator = SimpleNamespace(
+        _component_types=["body"],
+        _properties=SimpleNamespace(dna_files={"body": "retained"}),
+        _components={},
+        _dna_mesh_names={},
+    )
+    pipeline.rows = {"body": {"component": "body", "mesh": mesh.name, "topology_sha256": digest}}
+    pipeline.mesh_metadata = {"body": {mesh.index: {"uv_layers": []}}}
+    pipeline.objects, pipeline.base, pipeline.position_ids = {}, {}, {}
+    monkeypatch.setattr(direct, "TemplateReader", lambda *_args: reader)
+    for method in ("_resolve_profiles", "_prepare_assembly", "_load_masks", "_record"):
+        monkeypatch.setattr(pipeline, method, lambda *_args: None)
+    pipeline._import()
+    assert pipeline.prepared["body"].uv is None
+    assert pipeline.prepared["body"].primary_uv is not None
