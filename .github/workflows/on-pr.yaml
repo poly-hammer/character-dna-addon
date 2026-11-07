@@ -38,24 +38,30 @@ jobs:
     with:
       python-version: "3.13"
 
-  # Test with Blender 4.5
-  # Todo: Figure out why only these stall on CI
-  # test-blender-4-5-ubuntu-latest:
-  #   needs: [lint]
-  #   name: Blender 4.5 Tests
-  #   uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
-  #   secrets: inherit
-  #   with:
-  #     timeout-minutes: 90
-  #     python-version: "3.11"
-  #     blender-version: "4.5"
-  #     runner-os: "ubuntu-latest"
-  #     addon-id: "character_dna"
-  #     base: "character-dna"
-  #     base-branch: ${{ github.head_ref }}
+  native:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    uses: poly-hammer/character-dna-core/.github/workflows/native.yaml@b318b7636d96a09551c36c0f36949c623dcf91d8
+    secrets: inherit
+    with:
+      core-sha: b318b7636d96a09551c36c0f36949c623dcf91d8
+
+  test-blender-4-5-ubuntu-latest:
+    needs: [lint, native]
+    name: Blender 4.5 Tests
+    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
+    secrets: inherit
+    with:
+      timeout-minutes: 90
+      python-version: "3.11"
+      blender-version: "4.5"
+      runner-os: "ubuntu-latest"
+      addon-id: "character_dna"
+      base: "character-dna"
+      base-branch: ${{ github.head_ref }}
+      wheel-artifacts: character-dna-core-*
 
   test-blender-4-5-windows-latest:
-    needs: [lint]
+    needs: [lint, native]
     name: Blender 4.5 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -67,11 +73,12 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}
+      wheel-artifacts: character-dna-core-*
       test-env: |
         PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-4-5-macos-latest:
-    needs: [lint]
+    needs: [lint, native]
     name: Blender 4.5 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -83,12 +90,13 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}
+      wheel-artifacts: character-dna-core-*
       test-env: |
         PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   # Test with Blender 5.1
   test-blender-5-2-ubuntu-latest:
-    needs: [lint]
+    needs: [lint, native]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -100,11 +108,12 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}
+      wheel-artifacts: character-dna-core-*
       test-env: |
         PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-5-2-windows-latest:
-    needs: [lint]
+    needs: [lint, native]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -116,11 +125,12 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}
+      wheel-artifacts: character-dna-core-*
       test-env: |
         PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-5-2-macos-latest:
-    needs: [lint]
+    needs: [lint, native]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -132,6 +142,7 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}
+      wheel-artifacts: character-dna-core-*
       test-env: |
         PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 

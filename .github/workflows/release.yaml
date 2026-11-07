@@ -9,6 +9,10 @@ on:
       - ".github/workflows/**"
   workflow_dispatch:
     inputs:
+      release-set-run:
+        description: "Successful complete Character DNA Core candidate run ID"
+        required: false
+        type: string
       environment:
         description: "Target environment"
         required: true
@@ -26,23 +30,29 @@ jobs:
     with:
       python-version: "3.13"
 
-  # Test with Blender 4.5
-  # Todo: Figure out why only these stall on CI
-  # test-blender-4-5-ubuntu-latest:
-  #   needs: [lint]
-  #   name: Blender 4.5 Tests
-  #   uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
-  #   secrets: inherit
-  #   with:
-  #     timeout-minutes: 90
-  #     python-version: "3.11"
-  #     blender-version: "4.5"
-  #     runner-os: "ubuntu-latest"
-  #     addon-id: "character_dna"
-  #     base: "character-dna"
+  native:
+    uses: poly-hammer/character-dna-core/.github/workflows/native.yaml@b318b7636d96a09551c36c0f36949c623dcf91d8
+    secrets: inherit
+    with:
+      core-sha: b318b7636d96a09551c36c0f36949c623dcf91d8
+
+  test-blender-4-5-ubuntu-latest:
+    needs: [lint, native]
+    name: Blender 4.5 Tests
+    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
+    secrets: inherit
+    with:
+      timeout-minutes: 90
+      python-version: "3.11"
+      blender-version: "4.5"
+      runner-os: "ubuntu-latest"
+      addon-id: "character_dna"
+      base: "character-dna"
+      base-branch: ${{ github.ref }}
+      wheel-artifacts: character-dna-core-*
 
   test-blender-4-5-windows-latest:
-    needs: [lint]
+    needs: [lint, native]
     name: Blender 4.5 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
@@ -53,9 +63,11 @@ jobs:
       runner-os: "windows-latest"
       addon-id: "character_dna"
       base: "character-dna"
+      base-branch: ${{ github.ref }}
+      wheel-artifacts: character-dna-core-*
 
   test-blender-4-5-macos-latest:
-    needs: [lint]
+    needs: [lint, native]
     name: Blender 4.5 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
@@ -66,10 +78,12 @@ jobs:
       runner-os: "macos-latest"
       addon-id: "character_dna"
       base: "character-dna"
+      base-branch: ${{ github.ref }}
+      wheel-artifacts: character-dna-core-*
 
   # Test with Blender 5.2
   test-blender-5-2-ubuntu-latest:
-    needs: [lint]
+    needs: [lint, native]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
@@ -80,9 +94,11 @@ jobs:
       runner-os: "ubuntu-latest"
       addon-id: "character_dna"
       base: "character-dna"
+      base-branch: ${{ github.ref }}
+      wheel-artifacts: character-dna-core-*
 
   test-blender-5-2-windows-latest:
-    needs: [lint]
+    needs: [lint, native]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
@@ -93,9 +109,11 @@ jobs:
       runner-os: "windows-latest"
       addon-id: "character_dna"
       base: "character-dna"
+      base-branch: ${{ github.ref }}
+      wheel-artifacts: character-dna-core-*
 
   test-blender-5-2-macos-latest:
-    needs: [lint]
+    needs: [lint, native]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
@@ -106,6 +124,8 @@ jobs:
       runner-os: "macos-latest"
       addon-id: "character_dna"
       base: "character-dna"
+      base-branch: ${{ github.ref }}
+      wheel-artifacts: character-dna-core-*
 
   release:
     needs:
@@ -113,15 +133,14 @@ jobs:
         test-blender-5-2-ubuntu-latest,
         test-blender-5-2-windows-latest,
         test-blender-5-2-macos-latest,
-        # test-blender-4-5-ubuntu-latest,
+        test-blender-4-5-ubuntu-latest,
         test-blender-4-5-windows-latest,
         test-blender-4-5-macos-latest,
       ]
-    name: Release
-    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-release.yaml@main
+    if: github.event_name == 'workflow_dispatch' && inputs.release-set-run != ''
+    name: Promote exact tested release set
+    uses: ./.github/workflows/native-publish.yaml
     secrets: inherit
     with:
-      timeout-minutes: 90
-      python-version: "3.13"
-      environment: ${{ github.event.inputs.environment || 'staging' }}
-      addon-id: "character_dna"
+      release-set-run: ${{ inputs.release-set-run }}
+      environment: ${{ inputs.environment || 'staging' }}

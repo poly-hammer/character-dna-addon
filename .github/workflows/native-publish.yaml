@@ -1,0 +1,93 @@
+name: Promote Tested Converter Release
+on:
+  workflow_dispatch:
+    inputs:
+      release-set-run:
+        description: 'Successful complete Character DNA Core candidate run ID'
+        required: true
+        type: string
+      environment:
+        description: 'Promote exact staging bytes to production only after staging validation'
+        required: true
+        type: choice
+        options: [staging, production]
+      rollback:
+        description: 'Restore the channel indices saved before this exact release set'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      release-set-run:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      rollback:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: character-dna-publication-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: poly-hammer/character-dna-core
+          ref: b318b7636d96a09551c36c0f36949c623dcf91d8
+          path: core
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Verify all installed gates and fetch the exact release set
+        id: candidate
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          CANDIDATE_RUN: ${{ inputs.release-set-run }}
+        run: python core/scripts/fetch_release_set.py --run "$CANDIDATE_RUN" --output packages
+      - uses: actions/checkout@v7
+        with:
+          repository: poly-hammer/character-dna-addon
+          ref: ${{ steps.candidate.outputs.addon_commit }}
+          path: addon
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+      - name: Install the tested distribution tooling
+        working-directory: addon
+        run: uv sync --locked --python 3.13
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Publish or restore exact immutable package bytes
+        working-directory: addon
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          PORTAL_API_KEY: ${{ inputs.environment == 'production' && secrets.POLY_HAMMER_PORTAL_API_KEY_PRODUCTION || secrets.POLY_HAMMER_PORTAL_API_KEY_STAGING }}
+          ROLLBACK: ${{ inputs.rollback }}
+        run: |
+          args=()
+          if [ "$ROLLBACK" = true ]; then args+=(--rollback); fi
+          uv run --no-sync python ../core/scripts/publish_release_set.py \
+            --packages ../packages --environment "$ENVIRONMENT" "${args[@]}"
+      - name: Record the promoted combination
+        env:
+          RELEASE_SET: ${{ steps.candidate.outputs.release_set }}
+          CORE: ${{ steps.candidate.outputs.core_commit }}
+          ADDON: ${{ steps.candidate.outputs.addon_commit }}
+        run: |
+          printf 'Release set: `%s`\n\nCore: `%s`\n\nAdd-on: `%s`\n\nRestart Blender after updating or rolling back native bindings.\n' \
+            "$RELEASE_SET" "$CORE" "$ADDON" >> "$GITHUB_STEP_SUMMARY"
