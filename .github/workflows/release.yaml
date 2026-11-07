@@ -9,14 +9,6 @@ on:
       - ".github/workflows/**"
   workflow_dispatch:
     inputs:
-      release-set-run:
-        description: "Successful complete Character DNA Core candidate run ID"
-        required: false
-        type: string
-      rollback:
-        description: "Restore the previous channel indices for this exact release set"
-        type: boolean
-        default: false
       environment:
         description: "Target environment"
         required: true
@@ -36,14 +28,8 @@ jobs:
     with:
       python-version: "3.13"
 
-  native:
-    uses: ./.github/workflows/native-core.yaml
-    secrets: inherit
-    with:
-      core-sha: bcc6a2920e756a8581b9195eb4924495e8a91066
-
   test-blender-4-5-ubuntu-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 4.5 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -55,12 +41,11 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
         PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-4-5-windows-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 4.5 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -72,12 +57,11 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
         PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-4-5-macos-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 4.5 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -89,13 +73,12 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
         PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   # Test with Blender 5.2
   test-blender-5-2-ubuntu-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -107,12 +90,11 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
         PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-5-2-windows-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -124,12 +106,11 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
         PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-5-2-macos-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -141,7 +122,6 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
         PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
@@ -155,11 +135,46 @@ jobs:
         test-blender-4-5-windows-latest,
         test-blender-4-5-macos-latest,
       ]
-    if: github.event_name == 'workflow_dispatch' && inputs.release-set-run != ''
-    name: Promote exact tested release set
-    uses: ./.github/workflows/native-publish.yaml
-    secrets: inherit
-    with:
-      release-set-run: ${{ inputs.release-set-run }}
-      environment: ${{ inputs.environment || 'staging' }}
-      rollback: ${{ inputs.rollback || false }}
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: ${{ inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: addon
+          lfs: true
+          submodules: true
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+      # Pin the helper until its reviewed 0.4.4 update is published to PyPI.
+      - uses: actions/checkout@v7
+        with:
+          repository: poly-hammer/poly-hammer-utils
+          ref: 573697281624307763c324166b68a3ce002f3573
+          path: poly-hammer-utils
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@v7
+      - name: Install the locked packaging environment and tested release helper
+        working-directory: addon
+        run: |
+          uv sync --locked --python 3.13
+          uv pip install --no-deps --reinstall ../poly-hammer-utils
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Create the standard add-on release with matching Core assets
+        working-directory: addon
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          ADDONS_FOLDER: ${{ github.workspace }}/addon/src/addons
+          GITHUB_REPO: ${{ github.repository }}
+          ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          PORTAL_API_KEY: ${{ inputs.environment == 'production' && secrets.POLY_HAMMER_PORTAL_API_KEY_PRODUCTION || secrets.POLY_HAMMER_PORTAL_API_KEY_STAGING }}
+        run: uv run --no-sync python -m poly_hammer_utils.extension.character_dna

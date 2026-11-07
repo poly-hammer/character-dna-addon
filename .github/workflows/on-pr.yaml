@@ -38,15 +38,8 @@ jobs:
     with:
       python-version: "3.13"
 
-  native:
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    uses: ./.github/workflows/native-core.yaml
-    secrets: inherit
-    with:
-      core-sha: bcc6a2920e756a8581b9195eb4924495e8a91066
-
   test-blender-4-5-ubuntu-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 4.5 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -58,12 +51,11 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-4-5-windows-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 4.5 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -75,12 +67,11 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-4-5-macos-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 4.5 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -92,13 +83,12 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   # Test with Blender 5.1
   test-blender-5-2-ubuntu-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -110,12 +100,11 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-5-2-windows-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -127,12 +116,11 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   test-blender-5-2-macos-latest:
-    needs: [lint, native]
+    needs: [lint]
     name: Blender 5.2 Tests
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
     secrets: inherit
@@ -144,9 +132,8 @@ jobs:
       addon-id: "character_dna"
       base: "character-dna"
       base-branch: ${{ github.head_ref }}
-      wheel-artifacts: character-dna-core-*
       test-env: |
-        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json -o faulthandler_timeout=120
+        PYTEST_ADDOPTS=--test-run-report=reports/test-run.json
 
   benchmark-blender-4-5:
     needs: [test-blender-4-5-windows-latest, test-blender-4-5-macos-latest]
