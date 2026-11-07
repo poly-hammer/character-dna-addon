@@ -44,6 +44,15 @@ from ..utilities import preserve_context
 logger = logging.getLogger(__name__)
 
 
+def _load_materials(names: set[str]) -> dict[str, bpy.types.Material]:
+    missing = [name for name in names if bpy.data.materials.get(name) is None]
+    if not missing:
+        return {}
+    with bpy.data.libraries.load(str(MATERIALS_FILE_PATH), link=False) as (source, target):
+        target.materials = [name for name in missing if name in source.materials]
+    return {material.name: material for material in target.materials if material is not None}
+
+
 class CharacterComponentBase(metaclass=ABCMeta):
     def __init__(
         self,
@@ -55,6 +64,8 @@ class CharacterComponentBase(metaclass=ABCMeta):
         focus_on_import: bool = True,
         material_import_exclusions: set[str] | None = None,
         load_texture_maps: bool = True,
+        importer_factory: Any = DNAImporter,
+        bulk_scene: bool = False,
     ):
         # make sure dna file path is a Path object
         dna_file_path = Path(bpy.path.abspath(str(dna_file_path))) if dna_file_path else None
@@ -69,6 +80,7 @@ class CharacterComponentBase(metaclass=ABCMeta):
         self._focus_on_import = focus_on_import
         self._material_import_exclusions = set(material_import_exclusions or ())
         self._load_texture_maps = load_texture_maps
+        self._bulk_scene = bulk_scene
 
         # determine the asset root folder based on the dna file path
         self.asset_root_folder = None
@@ -127,7 +139,7 @@ class CharacterComponentBase(metaclass=ABCMeta):
         self.dna_importer = None
         if file_path.is_file() and file_path.exists():
             self.dna_reader = get_dna_reader(file_path=dna_file_path or self.dna_file_path, file_format="binary")
-            self.dna_importer = DNAImporter(
+            self.dna_importer = importer_factory(
                 instance=self.rig_instance,
                 import_properties=self.dna_import_properties,
                 linear_modifier=self.linear_modifier,
@@ -321,6 +333,10 @@ class CharacterComponentBase(metaclass=ABCMeta):
         considered; this is how the surface-skinning joints are isolated from the
         joints that skin the other meshes (such as the teeth or eyes).
         """
+        if self.dna_importer and hasattr(self.dna_importer, "skin_joint_names"):
+            names = self.dna_importer.skin_joint_names(lod, mesh_names)
+            if names is not None:
+                return names
         reader = self.dna_reader
         joint_name_cache: dict[int, str] = {}
         skinned_joint_names: set[str] = set()
@@ -510,15 +526,17 @@ class CharacterComponentBase(metaclass=ABCMeta):
         }
         # Transferred meshes never receive an imported placeholder or maps-folder textures.
         self._purge_existing_materials(set(shader_mapping.values()))
+        imported = _load_materials(set(shader_mapping.values())) if getattr(self, "_bulk_scene", False) else {}
         for key, material_name in shader_mapping.items():
             material = bpy.data.materials.get(material_name)
             if not material:
                 # import the materials
                 file_path = f"{MATERIALS_FILE_PATH}{sep}Material{sep}{material_name}"
-                bpy.ops.wm.append(filepath=file_path, filename=material_name, directory=directory_path)
+                if not getattr(self, "_bulk_scene", False):
+                    bpy.ops.wm.append(filepath=file_path, filename=material_name, directory=directory_path)
 
                 # get the imported material
-                material = bpy.data.materials.get(material_name)
+                material = imported.get(material_name) or bpy.data.materials.get(material_name)
                 if not material:
                     material = bpy.data.materials.get(f"{self.name}_{material_name}")
                     # create the transparent materials if they don't exist

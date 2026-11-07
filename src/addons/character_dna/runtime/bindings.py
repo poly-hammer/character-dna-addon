@@ -98,6 +98,43 @@ def _set_targets(carrier: Any, targets: list) -> None:
     carrier.property_overridable_library_set('["targets"]', True)
 
 
+class _DriverValidation:
+    """Reuse RNA array validation without skipping per-target ownership checks."""
+
+    def __init__(self):
+        self.arrays = {}
+        self.bone_properties = set()
+
+    @staticmethod
+    def _bone_schema(target: Target) -> tuple | None:
+        parent, separator, property_name = target.path.rpartition(".")
+        if (
+            separator
+            and property_name in {"location", "rotation_euler", "scale"}
+            and parent.startswith("pose.bones[")
+            and isinstance(target.owner.path_resolve(parent), bpy.types.PoseBone)
+        ):
+            return target.owner.as_pointer(), property_name
+        return None
+
+    def validated(self, target: Target) -> bool:
+        if target.index < 0:
+            return False
+        key = target.owner.as_pointer(), target.path
+        if key not in self.arrays and self._bone_schema(target) in self.bone_properties:
+            self.arrays[key] = 3
+        return 0 <= target.index < self.arrays.get(key, 0)
+
+    def remember(self, target: Target) -> None:
+        if target.index >= 0:
+            value = target.owner.path_resolve(target.path)
+            if hasattr(value, "__len__"):
+                self.arrays[target.owner.as_pointer(), target.path] = len(value)
+                schema = self._bone_schema(target)
+                if schema is not None:
+                    self.bone_properties.add(schema)
+
+
 def install_targets_iter(carrier: Any, targets: list[Target], *, append: bool = False) -> Iterator:
     """Install targets in resumable steps, retaining existing drivers when appending."""
     validate_targets(targets)
@@ -115,14 +152,18 @@ def install_targets_iter(carrier: Any, targets: list[Target], *, append: bool = 
     ]
     _set_targets(carrier, records)
     template_owner = template = None
+    validation = _DriverValidation()
     try:
         for target in targets:
-            curve = (
-                target.owner.driver_add(target.path)
-                if target.index < 0
-                else target.owner.driver_add(target.path, target.index)
-            )
-            installed.append((target, curve))
+            curve = None
+            if template is None or not validation.validated(target):
+                curve = (
+                    target.owner.driver_add(target.path)
+                    if target.index < 0
+                    else target.owner.driver_add(target.path, target.index)
+                )
+                installed.append((target, curve))
+                validation.remember(target)
             if template is None:
                 curve.keyframe_points.clear()
                 for modifier in tuple(curve.modifiers):
@@ -145,8 +186,9 @@ def install_targets_iter(carrier: Any, targets: list[Target], *, append: bool = 
                 copied.data_path = target.path
                 copied.array_index = max(0, target.index)
                 copied.driver.variables["output"].targets[0].data_path = f'["outputs"][{target.channel}]'
-                drivers.remove(curve)
-                installed[-2:] = [(target, copied)]
+                if curve is not None:
+                    drivers.remove(curve)
+                    installed[-2:] = [(target, copied)]
                 curve = copied
             yield target.owner, curve
     except BaseException:

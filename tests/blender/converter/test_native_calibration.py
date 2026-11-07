@@ -98,6 +98,9 @@ def test_native_calibration_matches_python_saved_dna(rig_factory, tmp_path, comp
                     )
                 assert actual.getBlendShapeTargetCount(mesh_id) == expected.getBlendShapeTargetCount(mesh_id)
                 for target in range(expected.getBlendShapeTargetCount(mesh_id)):
+                    assert actual.getBlendShapeChannelIndex(mesh_id, target) == expected.getBlendShapeChannelIndex(
+                        mesh_id, target
+                    )
                     for field in (
                         "BlendShapeTargetVertexIndices",
                         "BlendShapeTargetDeltaXs",

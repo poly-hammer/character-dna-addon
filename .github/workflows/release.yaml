@@ -31,7 +31,7 @@ jobs:
   test-blender-4-5-ubuntu-latest:
     needs: [lint]
     name: Blender 4.5 Tests
-    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
+    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
     with:
       timeout-minutes: 90
@@ -47,7 +47,7 @@ jobs:
   test-blender-4-5-windows-latest:
     needs: [lint]
     name: Blender 4.5 Tests
-    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
+    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
     with:
       timeout-minutes: 90
@@ -63,7 +63,7 @@ jobs:
   test-blender-4-5-macos-latest:
     needs: [lint]
     name: Blender 4.5 Tests
-    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
+    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
     with:
       timeout-minutes: 90
@@ -80,7 +80,7 @@ jobs:
   test-blender-5-2-ubuntu-latest:
     needs: [lint]
     name: Blender 5.2 Tests
-    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
+    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
     with:
       timeout-minutes: 90
@@ -96,7 +96,7 @@ jobs:
   test-blender-5-2-windows-latest:
     needs: [lint]
     name: Blender 5.2 Tests
-    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
+    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
     with:
       timeout-minutes: 90
@@ -112,7 +112,7 @@ jobs:
   test-blender-5-2-macos-latest:
     needs: [lint]
     name: Blender 5.2 Tests
-    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@5145eff254d87a53c9158e41edc25a18ea5c746c
+    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-tests.yaml@main
     secrets: inherit
     with:
       timeout-minutes: 90

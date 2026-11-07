@@ -1064,7 +1064,23 @@ def purge_face_board_components():
                     bpy.data.objects.remove(scene_object, do_unlink=True)
 
 
-def import_face_board(name: str) -> bpy.types.Object | None:
+def import_face_board(name: str, *, bulk: bool = False) -> bpy.types.Object | None:
+    if bulk:
+        # Load the board and its widget dependencies together without an append
+        # operator, selection changes, or intermediate dependency-graph updates.
+        with bpy.data.libraries.load(str(FACE_BOARD_FILE_PATH), link=False) as (source, target):
+            names = list(source.objects)
+            board_index = names.index(FACE_BOARD_NAME)
+            target.objects = names
+        board = target.objects[board_index]
+        for obj in target.objects:
+            if obj is not None and obj != board:
+                obj.use_fake_user = True
+        bpy.context.scene.collection.objects.link(board)
+        board.name = f"{name}_{FACE_BOARD_NAME}"
+        if isinstance(board.data, bpy.types.Armature):
+            board.data.relation_line_position = "HEAD"
+        return board
     sep = "\\"
     if sys.platform != "win32":
         sep = "/"

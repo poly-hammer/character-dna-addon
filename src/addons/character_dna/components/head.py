@@ -78,7 +78,7 @@ class CharacterComponentHead(CharacterComponentBase):
         # import the face board if one does not already exist in the scene
         if not any(i.face_board for i in self.scene_properties.rig_instance_list):
             if self.dna_import_properties.import_face_board:
-                face_board_object = utilities.import_face_board(name=self.name)
+                face_board_object = utilities.import_face_board(name=self.name, bulk=self._bulk_scene)
 
         elif not self.rig_instance.face_board and not self.dna_import_properties.reuse_face_board:
             if self.dna_import_properties.import_face_board:

@@ -16,14 +16,13 @@ def test_cancelled_operator_rejects_late_timer_before_accessing_old_scene():
     assert not calls
 
 
-def test_shutdown_joins_worker_before_deleting_preview_and_is_idempotent():
+def test_shutdown_joins_worker_before_removing_timer_and_is_idempotent():
     order = []
     job = StageJob(SimpleNamespace(close=lambda: order.append("join")), "waiting")
     operator = SimpleNamespace(
         _session_active=True,
         _pipeline=SimpleNamespace(pose_jobs=[job]),
         _remove_timer=lambda _context: order.append("timer"),
-        _playback=SimpleNamespace(close=lambda: order.append("preview")),
         _snapshot=None,
         _reporter=None,
     )
@@ -32,7 +31,7 @@ def test_shutdown_joins_worker_before_deleting_preview_and_is_idempotent():
     lifecycle._active_conversions[id(operator)] = operator
     lifecycle.cancel_active_conversions(bpy.context)
     lifecycle.cancel_active_conversions(bpy.context)
-    assert order == ["join", "timer", "preview"]
+    assert order == ["join", "timer"]
     assert job.task is None
     assert not operator._session_active
     assert not lifecycle._active_conversions

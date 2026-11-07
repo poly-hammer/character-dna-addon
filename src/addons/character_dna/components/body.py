@@ -70,17 +70,9 @@ class CharacterComponentBody(CharacterComponentBase):
         self.rig_instance.body_mesh = self.body_mesh_object
         self.rig_instance.body_rig = self.body_rig_object
         self.rig_instance.body_dna_file_path = str(self.dna_importer.source_dna_file)
-        self.rig_instance.body_initialize()
-
-        # create and assign the body bone collections from the bone names read from the DNA
-        if self.body_rig_object:
-            utilities.assign_body_bone_collections(
-                rig_object=self.body_rig_object,
-                swing_bone_names=tuple(self.rig_instance.body_swing_bone_names),
-                twist_bone_names=tuple(self.rig_instance.body_twist_bone_names),
-                driver_bone_names=tuple(self.rig_instance.body_driver_bone_names),
-                driven_bone_names=tuple(self.rig_instance.body_driven_bone_names),
-            )
+        if not self._bulk_scene:
+            self.rig_instance.body_initialize()
+            self.assign_bone_collections()
 
         if self.body_rig_object and self.body_mesh_object and len(self.scene_properties.rig_instance_list) > 1:
             # if this isn't the first rig, move it to the right of the last body mesh
@@ -99,6 +91,17 @@ class CharacterComponentBody(CharacterComponentBase):
         utilities.toggle_expand_in_outliner()
 
         return valid, message
+
+    def assign_bone_collections(self):
+        """Assign collections after the final DNA reader has been initialized."""
+        if self.body_rig_object:
+            utilities.assign_body_bone_collections(
+                rig_object=self.body_rig_object,
+                swing_bone_names=tuple(self.rig_instance.body_swing_bone_names),
+                twist_bone_names=tuple(self.rig_instance.body_twist_bone_names),
+                driver_bone_names=tuple(self.rig_instance.body_driver_bone_names),
+                driven_bone_names=tuple(self.rig_instance.body_driven_bone_names),
+            )
 
     def frame_rig_to_target(self, mesh_object: bpy.types.Object) -> float:
         """Uniformly scale the body rig so its height matches ``mesh_object``

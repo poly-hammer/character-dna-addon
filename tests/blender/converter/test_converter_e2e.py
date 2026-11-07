@@ -85,9 +85,9 @@ def test_convert_meshes_to_dna(  # noqa: PLR0915 - complete conversion contract
     properties.normalize_to_a_pose = False
     properties.constrain_head_to_body = True
 
-    # Interactive conversion yields to timers before finalization; background
-    # conversion does not. Reproduce the deferred native binding at that boundary.
+    # Template data must stay native until the final scene is created.
     from character_dna.components.base import CharacterComponentBase
+    from character_dna.editors.converter.native.direct import DirectPipeline
     from character_dna.editors.converter.pipeline import Transition, positions
     from character_dna.runtime import controller, engine
 
@@ -110,6 +110,18 @@ def test_convert_meshes_to_dna(  # noqa: PLR0915 - complete conversion contract
         commit_transition(transition)
 
     monkeypatch.setattr(Transition, "commit", commit_with_native_bindings)
+    create_scene = DirectPipeline._create_scene
+    scene_commits = []
+
+    def create_final_scene(pipeline):
+        assert pipeline.geometry_complete
+        assert all((pipeline.operator._staging_folder / f"{kind}.dna").is_file() for kind in ("head", "body"))
+        assert not any(obj.name.startswith(name + "_") for obj in bpy.data.objects)
+        assert pipeline.native_joint_results["reconciled_joints"]
+        create_scene(pipeline)
+        scene_commits.append(True)
+
+    monkeypatch.setattr(DirectPipeline, "_create_scene", create_final_scene)
     result = bpy.ops.character_dna.convert_to_dna()  # type: ignore[attr-defined]
     assert result == {"FINISHED"}, "Conversion operator should finish successfully"
     import numpy as np
@@ -117,8 +129,8 @@ def test_convert_meshes_to_dna(  # noqa: PLR0915 - complete conversion contract
     for obj, before in input_positions.items():
         np.testing.assert_array_equal(positions(obj), before)
         assert obj.hide_get() and obj.hide_render
-    assert phases[0] == "Fit supplied surfaces"
-    assert "Fit head joints" in phases
+    assert phases == []
+    assert scene_commits == [True]
     assert not list(temp_folder.rglob("ConversionReport.json"))
     report = conversion_diagnostics
     assert report["models"] == []
@@ -211,6 +223,55 @@ def test_template_pose_normalization_roundtrip(
     assert not list(tmp_path.rglob("ConversionReport.json"))
 
 
+def test_known_limb_pose_full_operator(
+    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, conversion_diagnostics
+):
+    """Include the established nontrivial pose workload in click-to-ready timing."""
+    import numpy as np
+
+    from character_dna.bindings import load_converter_core
+    from character_dna.editors.converter.pipeline import positions, write_positions
+    from character_dna.editors.converter.pose import profiles
+    from character_dna.editors.converter.pose.fit import geometry
+
+    props = get_converter_properties()
+    rows = configure_template(props, base_dna_folder, components=("body",))
+    native = load_converter_core()
+    template = native.DnaTemplate(str(base_dna_folder / "body.dna"))
+    info = json.loads(template.info())
+    name = rows["body"].dna_mesh_name
+    names, parents = info["names"], info["parents"]
+    bind = np.asarray([info["states"][name]["matrix"] for name in names]).reshape(-1, 4, 4)
+    reference = np.frombuffer(template.mesh(name)["positions"], dtype=np.float32).reshape(-1, 3).astype(float)
+    weights = np.frombuffer(template.weights(name, names), dtype=np.float64).reshape(-1, len(names))
+    weights = geometry.normalized_weights(weights)
+    profile = profiles.load("metahuman")
+    posed = bind.copy()
+    for index, name in enumerate(names):
+        parent = parents[index]
+        if parent >= 0:
+            posed[index] = posed[parent] @ np.linalg.inv(bind[parent]) @ bind[index]
+        if name.startswith(("upperarm_", "thigh_")) and name in profile["joints"]:
+            posed[index, :3, :3] = geometry.rotation(np.array([0.05, 0.12, -0.08])) @ posed[index, :3, :3]
+        if name in {"index_01_l", "thumb_01_r", "foot_l", "hand_r"}:
+            posed[index, :3, :3] = geometry.rotation(np.array([0.15, -0.05, 0.1])) @ posed[index, :3, :3]
+    body = rows["body"].scene_object
+    write_positions(body, geometry.apply(geometry.blend(weights, posed, bind), reference))
+    original = positions(body)
+    props.new_name, props.new_folder = "KnownLimbPose", str(tmp_path)
+    props.validate_uvs = False
+    assert props.normalize_to_a_pose
+    assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
+    instance = bpy.context.scene.character_dna.rig_instance_list[props.new_name]
+    error = np.linalg.norm(positions(instance.body_mesh) - reference, axis=1)
+    assert conversion_diagnostics["a_pose"]["status"] == "rigid_control"
+    assert np.sqrt(np.mean(error**2)) < 1e-4
+    assert error.max() < 5e-4
+    assert conversion_diagnostics["meshes"]["body"]["export_max_error_m"] < 2e-6
+    np.testing.assert_array_equal(positions(body), original)
+    assert (tmp_path / "body.dna").is_file()
+
+
 def test_joined_input_conversion_preserves_each_component_domain(
     load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, conversion_diagnostics
 ):
@@ -286,10 +347,39 @@ def test_pose_quality_failure_rolls_back_conversion(load_mhc_conformed_topology_
     assert not bpy.context.scene.character_dna.rig_instance_list.get("RejectedPose")
 
 
+def test_runtime_initialization_failure_restores_scene_and_published_files(
+    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, monkeypatch
+):
+    from character_dna.rig_instance import RigInstance
+
+    props = get_converter_properties()
+    configure_template(props, base_dna_folder, components=("head",))
+    props.new_name = "RejectedRuntime"
+    props.new_folder = str(tmp_path)
+    output = tmp_path / "head.dna"
+    output.write_bytes(b"previous accepted output")
+    evaluate = RigInstance.evaluate
+
+    def reject(instance, *args, **kwargs):
+        if instance.name == props.new_name:
+            assert output.read_bytes() != b"previous accepted output"
+            raise ValueError("injected runtime initialization failure")
+        return evaluate(instance, *args, **kwargs)
+
+    monkeypatch.setattr(RigInstance, "evaluate", reject)
+    with pytest.raises(RuntimeError, match="injected runtime initialization failure"):
+        bpy.ops.character_dna.convert_to_dna()
+    assert output.read_bytes() == b"previous accepted output"
+    assert not (tmp_path / "ExportManifest.json").exists()
+    assert not bpy.context.scene.character_dna.rig_instance_list.get(props.new_name)
+    assert not any(obj.name.startswith(props.new_name + "_") for obj in bpy.data.objects)
+
+
 def test_failure_restores_owned_data_without_removing_unrelated_objects(
     load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, monkeypatch
 ):
-    from character_dna.editors.converter.pipeline import Transition, positions
+    from character_dna.editors.converter.native.direct import DirectPipeline
+    from character_dna.editors.converter.pipeline import positions
     from character_dna.utilities import get_addon_window_manager_properties
 
     props = get_converter_properties()
@@ -311,7 +401,10 @@ def test_failure_restores_owned_data_without_removing_unrelated_objects(
     (tmp_path / "head.dna").write_bytes(b"original output")
     unrelated = []
 
-    def interrupted(_transition):
+    create_scene = DirectPipeline._create_scene
+
+    def interrupted(pipeline):
+        create_scene(pipeline)
         copied = bpy.data.materials.get("CancelledConversion_head_shader")
         assert copied is not None and copied != material
         obj = bpy.data.objects.new("UnrelatedDuringConversion", None)
@@ -319,7 +412,7 @@ def test_failure_restores_owned_data_without_removing_unrelated_objects(
         unrelated.append(obj)
         raise ValueError("injected conversion failure")
 
-    monkeypatch.setattr(Transition, "commit", interrupted)
+    monkeypatch.setattr(DirectPipeline, "_create_scene", interrupted)
     try:
         with pytest.raises(RuntimeError, match="injected conversion failure"):
             bpy.ops.character_dna.convert_to_dna()

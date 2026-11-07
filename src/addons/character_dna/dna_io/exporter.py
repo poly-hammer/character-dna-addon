@@ -567,9 +567,13 @@ class DNAExporter:
     def save_images(self):
         if not self._include_textures:
             return
+        self.save_images_to_folder(self._images, self._target_dna_file.parent)
 
-        for image, file_name in self._images:
-            new_image_path = self._target_dna_file.parent / "Maps" / file_name
+    @staticmethod
+    def save_images_to_folder(images: list[tuple[bpy.types.Image, str]], folder: Path):
+        """Export captured image references without reopening or capturing DNA."""
+        for image, file_name in images:
+            new_image_path = folder / "Maps" / file_name
             new_image_path.parent.mkdir(parents=True, exist_ok=True)
             if not image.packed_file and not image.filepath:
                 logger.warning(f"Image {image.name} is not packed or saved. Skipping export.")
