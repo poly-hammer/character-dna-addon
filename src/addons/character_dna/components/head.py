@@ -67,7 +67,7 @@ class CharacterComponentHead(CharacterComponentBase):
                 clip=clip,
             )
 
-    def ingest(self, align: bool = True, constrain: bool = True) -> tuple[bool, str]:
+    def ingest(self, align: bool = True, constrain: bool = True) -> tuple[bool, str]:  # noqa: PLR0912
         valid, message = self.dna_importer.run()
         self.rig_instance.head_rig = self.dna_importer.rig_object
 
@@ -135,8 +135,8 @@ class CharacterComponentHead(CharacterComponentBase):
             utilities.select_only(self.rig_instance.head_mesh)
             utilities.focus_on_selected()
 
-        # collapse the outliner
-        utilities.toggle_expand_in_outliner()
+        if not self._bulk_scene:
+            utilities.toggle_expand_in_outliner()
 
         # switch to pose mode on the face gui object
         if face_board_object and utilities.set_active(face_board_object):

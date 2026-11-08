@@ -87,8 +87,8 @@ class CharacterComponentBody(CharacterComponentBase):
             utilities.select_only(self.rig_instance.body_mesh)
             utilities.focus_on_selected()
 
-        # collapse the outliner
-        utilities.toggle_expand_in_outliner()
+        if not self._bulk_scene:
+            utilities.toggle_expand_in_outliner()
 
         return valid, message
 
