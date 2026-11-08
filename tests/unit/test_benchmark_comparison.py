@@ -8,7 +8,7 @@ import venv
 import pytest
 
 from coverage import CoverageData
-from scripts.test_suite_refactor.compare_runs import (
+from benchmarks.compare_runs import (
     SOURCE,
     canonical_node,
     compare_cases,
@@ -16,7 +16,7 @@ from scripts.test_suite_refactor.compare_runs import (
     covered_path,
     source_mapping,
 )
-from scripts.test_suite_refactor.run_benchmarks import cleanup_temporary, python_executable
+from benchmarks.run_benchmarks import cleanup_temporary, python_executable
 
 
 def report(nodes):

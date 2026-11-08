@@ -17,7 +17,6 @@
       "checks": [
         "test_rig_leases_restore_pristine_state_and_own_paths",
         "test_failed_edit_does_not_leave_suspended_runtime_or_editor_cache",
-        "Opt-in lifetime_plugin repeats both lease canaries with private paths, stable Blender ID/handler counts and resident-memory samples",
         "test_partition_cleanup_preserves_preexisting_working_directories",
         "test_narrow_profile_constructs_final_bindings_once"
       ]
@@ -386,6 +385,7 @@
     }
   ],
   "fault_checks": {
+    "status": "Historical refactor qualification. The ad hoc mutation runner has been retired; the integration contracts below remain in the ordinary suite.",
     "target": "Shared editor recovery, component routing, swing/twist evaluation, collection restoration and native document publication",
     "mutations": [
       "omit resume",

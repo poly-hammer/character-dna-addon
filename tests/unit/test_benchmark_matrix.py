@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from scripts.test_suite_refactor.combine_benchmarks import LANES, combine
+from benchmarks.combine_benchmarks import LANES, combine
 
 
 @pytest.fixture
