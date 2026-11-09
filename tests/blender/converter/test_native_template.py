@@ -72,6 +72,35 @@ def test_preparing_a_lower_lod_preserves_the_lod0_domain():
     assert reader.prepare_mesh(mesh.name) is mesh
 
 
+def test_scan_store_head_identity_pose_preserves_vertices_with_raw_dna_weights():
+    """The male01 template's non-unit weights must not scale the face."""
+    from character_dna.editors.shared import topology_profiles
+
+    native = load_converter_core()
+    template = native.DnaTemplate(str(topology_profiles.ROOT.parent / "dna/3d_scan_store/full_body/head.dna"))
+    info = json.loads(template.info())
+    mesh = template.mesh("head_lod0_mesh")
+    names = info["names"]
+    points = np.frombuffer(mesh["positions"], np.float32).reshape(-1, 3).astype(float)
+    weights = np.frombuffer(template.weights("head_lod0_mesh", names), np.float64).reshape(-1, len(names))
+    # Keep this fixture meaningful: it contains the raw sums that exposed the bug.
+    assert np.count_nonzero(np.abs(weights.sum(axis=1) - 1.0) > 1e-5) > 0
+    parents = [names[i] if i >= 0 else None for i in info["parents"]]
+    edges = np.frombuffer(mesh["edges"], np.int32).reshape(-1, 2)
+    triangles = np.frombuffer(mesh["triangles"], np.int32).reshape(-1, 3)
+    identity = np.eye(4).reshape(1, 16)
+    values, report = native.pose_accept(
+        [names[0]],
+        identity,
+        identity,
+        points,
+        [("head", points, weights, names, parents, edges, triangles, True)],
+        [],
+    )
+    np.testing.assert_array_equal(np.frombuffer(values["head"], np.float64).reshape(-1, 3), points)
+    assert json.loads(report)["head"]["new_contact_pairs"] == 0
+
+
 def test_template_fingerprint_respects_metadata_without_a_primary_uv(monkeypatch):
     from types import SimpleNamespace
 

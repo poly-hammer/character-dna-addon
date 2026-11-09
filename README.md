@@ -69,6 +69,11 @@ This add-on bundles and redistributes the following third-party components.
 * **Sentry SDK for Python** — © Functional Software, Inc. dba Sentry, licensed under the MIT License.
 * **ufbx for Python** — MIT License.
 
+Each platform build ships these native bindings under `bindings/<os>/<arch>/<python>/`, with their
+licenses in that folder's `license/` directory: `OPEN_RIGLOGIC.md` for OpenRigLogic, and `CHARACTER_DNA.md`
+for the Character DNA Core native module (proprietary, © Poly Hammer LLC, all rights reserved, including the
+licenses of its own third-party dependencies).
+
 Epic Games, Unreal Engine, Fab, MetaHuman, RigLogic, and OpenRigLogic, and their associated design logos,
 are trademarks or registered trademarks of Epic Games, Inc. All other trademarks are the property of
 their respective owners. This add-on is not affiliated with, endorsed by, or sponsored by Epic Games,

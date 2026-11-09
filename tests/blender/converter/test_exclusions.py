@@ -82,9 +82,11 @@ def test_complete_input_takes_precedence_over_exclusion_masks(pair):
     result, details = correspondence.match_with_exclusions(target.data, target.data, {"EXCLUDE_Tongue": [1, 3, 5]})
     np.testing.assert_array_equal(result, np.arange(7))
     assert "excluded_groups" not in details
+    assert details["uv_excluded_groups"] == ["EXCLUDE_Tongue"]
+    assert details["uv_ignored_corners"] == 3
 
 
-def test_complete_input_retries_uvs_without_excluded_corners(pair, meshes):
+def test_complete_input_validates_uvs_without_excluded_corners(pair, meshes):
     _, target, _ = pair
     source = meshes("Complete teeth", positions(target), [list(p.vertices) for p in target.data.polygons])
     uv = np.array([loop.uv[:] for loop in target.data.uv_layers.active.data], dtype=np.float32)
@@ -104,14 +106,16 @@ def test_complete_input_retries_uvs_without_excluded_corners(pair, meshes):
     np.testing.assert_array_equal(np.array([loop.uv[:] for loop in source.data.uv_layers.active.data]), uv)
 
 
-def test_exclusion_retry_still_rejects_unmasked_uv_errors(pair, meshes):
+def test_exclusion_validation_still_rejects_unmasked_uv_errors(pair, meshes):
     _, target, _ = pair
     source = meshes("Complete teeth", positions(target), [list(p.vertices) for p in target.data.polygons])
     uv = np.array([loop.uv[:] for loop in target.data.uv_layers.active.data], dtype=np.float32)
     uv[-3:] += 0.5
     uv[0] += 0.1
     source.data.uv_layers.new().data.foreach_set("uv", uv.ravel())
-    with pytest.raises(ValueError, match=r"exclusion fallback failed: UVs differ.*1 of 6 face corners"):
+    with pytest.raises(
+        ValueError, match=r"Excluded 3 UV corners using EXCLUDE_Tongue.*UVs differ.*1 of 6 face corners"
+    ):
         correspondence.match_with_exclusions(source.data, target.data, {"EXCLUDE_Tongue": [1, 3, 5]}, require_uvs=True)
 
 
