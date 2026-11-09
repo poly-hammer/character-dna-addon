@@ -107,14 +107,18 @@ def test_bundled_enum_ids_survive_retiring_exact(setup_scene):
 @pytest.mark.parametrize("path", templates.BUNDLED_TEMPLATES)
 def test_uv_default_and_custom_override_round_trip(setup_scene, tmp_path, path):
     props, _ = setup_scene
-    props.validate_uvs = False
     templates.load_template(props, path)
-    assert props.validate_uvs
-    props.validate_uvs = False
+    assert all(item.validate_uvs for item in props.extra_meshes)
+    props.extra_meshes[0].validate_uvs = False
+    props.extra_meshes[0].uv_tolerance = 0.004
     saved = tmp_path / "uv-override.json"
     templates.save_template(props, saved)
-    assert not json.loads(saved.read_text())["validate_uvs"]
-    assert not props.validate_uvs
+    recipe = json.loads(saved.read_text())
+    assert "validate_uvs" not in recipe and "uv_tolerance" not in recipe
+    assert not recipe["meshes"][0]["validate_uvs"]
+    assert recipe["meshes"][0]["uv_tolerance"] == pytest.approx(0.004)
+    assert not props.extra_meshes[0].validate_uvs
+    assert props.extra_meshes[1].validate_uvs
 
 
 def test_legacy_json_method_loads_and_saves_as_copy(setup_scene, tmp_path):

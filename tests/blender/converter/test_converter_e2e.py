@@ -79,7 +79,8 @@ def test_convert_meshes_to_dna(  # noqa: PLR0915 - complete conversion contract
         component.filepath = "{CHARACTER_DNA_TEST_BASE}/" + component.component + ".dna"
     properties.new_name = name
     properties.new_folder = str(output_folder)
-    properties.validate_uvs = False
+    for item in properties.extra_meshes:
+        item.validate_uvs = False
     # This contract copies the already-conformed observations without changing
     # their pose. Pose normalization has its own end-to-end contracts below.
     properties.normalize_to_a_pose = False
@@ -213,7 +214,8 @@ def test_template_pose_normalization_roundtrip(
     original = positions(body)
     props.new_name = "PoseNormalizationRoundtrip"
     props.new_folder = str(tmp_path)
-    props.validate_uvs = False
+    for item in props.extra_meshes:
+        item.validate_uvs = False
     assert props.normalize_to_a_pose
     assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
     assert conversion_diagnostics["a_pose"]["status"] == "already_template"
@@ -259,7 +261,8 @@ def test_known_limb_pose_full_operator(
     write_positions(body, geometry.apply(geometry.blend(weights, posed, bind), reference))
     original = positions(body)
     props.new_name, props.new_folder = "KnownLimbPose", str(tmp_path)
-    props.validate_uvs = False
+    for item in props.extra_meshes:
+        item.validate_uvs = False
     assert props.normalize_to_a_pose
     assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
     instance = bpy.context.scene.character_dna.rig_instance_list[props.new_name]
@@ -302,7 +305,8 @@ def test_joined_input_conversion_preserves_each_component_domain(
             rows[kind].scene_object = None
         props.normalize_to_a_pose = False
         props.adjust_seam = False
-        props.validate_uvs = False
+        for item in props.extra_meshes:
+            item.validate_uvs = False
         props.new_name = "JoinedInputRoundtrip"
         props.new_folder = str(tmp_path)
         assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
@@ -332,7 +336,8 @@ def test_pose_quality_failure_rolls_back_conversion(load_mhc_conformed_topology_
     rows = configure_template(props, base_dna_folder)
     props.new_name = "RejectedPose"
     props.new_folder = str(tmp_path)
-    props.validate_uvs = False
+    for item in props.extra_meshes:
+        item.validate_uvs = False
     assert props.normalize_to_a_pose
     before = {row.scene_object: positions(row.scene_object) for role, row in rows.items() if role in {"head", "body"}}
     (tmp_path / "head.dna").write_bytes(b"previous output")

@@ -48,15 +48,19 @@ def test_copy_preserves_observations_and_fits_only_excluded_vertices(pair, reord
         source.data.uv_layers.new().data.foreach_set("uv", uv)
     props = SimpleNamespace(
         extra_meshes=[SimpleNamespace(role="teeth", fit_method="COPY", scene_object=source, material_source=None)],
-        validate_uvs=True,
-        uv_tolerance=1e-5,
     )
     pipeline = ConversionPipeline(
         SimpleNamespace(_properties=props, _owned={"materials": set()}),
         bpy.context,
         {
             "meshes": [
-                {"id": "teeth", "method": "COPY", "mesh": "teeth_lod0_mesh"},
+                {
+                    "id": "teeth",
+                    "method": "COPY",
+                    "mesh": "teeth_lod0_mesh",
+                    "validate_uvs": True,
+                    "uv_tolerance": 1e-5,
+                },
             ]
         },
     )
@@ -157,12 +161,21 @@ def test_excluded_region_materials_are_blank_only_when_fallback_is_used(pair, me
             SimpleNamespace(role="teeth", fit_method="COPY", scene_object=source, material_source=material_source)
         ],
         new_name="BlankRegion",
-        validate_uvs=False,
     )
     pipeline = ConversionPipeline(
         SimpleNamespace(_properties=props, _owned={"materials": set()}),
         bpy.context,
-        {"meshes": [{"id": "teeth", "method": "COPY", "mesh": "teeth_lod0_mesh"}]},
+        {
+            "meshes": [
+                {
+                    "id": "teeth",
+                    "method": "COPY",
+                    "mesh": "teeth_lod0_mesh",
+                    "validate_uvs": False,
+                    "uv_tolerance": 1e-5,
+                }
+            ]
+        },
     )
     pipeline.objects = {"teeth": target}
     pipeline.exclusions = {"teeth": {"EXCLUDE_Tongue": [1, 3, 5]}}

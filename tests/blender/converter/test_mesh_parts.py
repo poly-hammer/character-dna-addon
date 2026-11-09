@@ -48,13 +48,22 @@ def test_shared_sides_copy_positions_and_material_regions_from_original_vertex_i
         originals.append(material)
     rows, inputs, outputs = [], [], {}
     for role, part, dna_name in (("left", "LEFT", "eyeLeft_lod0_mesh"), ("right", "RIGHT", "eyeRight_lod0_mesh")):
-        rows.append({"id": role, "method": "COPY", "mesh_part": part, "mesh": dna_name})
+        rows.append(
+            {
+                "id": role,
+                "method": "COPY",
+                "mesh_part": part,
+                "mesh": dna_name,
+                "validate_uvs": True,
+                "uv_tolerance": 1e-5,
+            }
+        )
         inputs.append(SimpleNamespace(role=role, fit_method="COPY", scene_object=source, material_source=source))
         output = meshes(role, left * 0.1, [[0, 1, 2], [0, 2, 3]])
         output.data.uv_layers.new().data.foreach_set("uv", vertex_uvs[[0, 1, 2, 0, 2, 3]].ravel())
         outputs[role] = output
     operator = SimpleNamespace(
-        _properties=SimpleNamespace(extra_meshes=inputs, new_name="Parts", validate_uvs=True, uv_tolerance=1e-5),
+        _properties=SimpleNamespace(extra_meshes=inputs, new_name="Parts"),
         _owned={"materials": set()},
     )
     pipeline = ConversionPipeline(operator, bpy.context, {"meshes": rows})
@@ -96,14 +105,19 @@ def test_full_passes_through_and_failed_match_cleans_temporary_mesh(meshes):
         assert mesh == source.data and ids.tolist() == list(range(6))
     props = SimpleNamespace(
         extra_meshes=[SimpleNamespace(role="eye", fit_method="COPY", scene_object=source, material_source=None)],
-        validate_uvs=False,
     )
     pipeline = ConversionPipeline(
         SimpleNamespace(_properties=props),
         bpy.context,
         {
             "meshes": [
-                {"id": "eye", "method": "COPY", "mesh": "eyeLeft_lod0_mesh", "mesh_part": "LEFT"},
+                {
+                    "id": "eye",
+                    "method": "COPY",
+                    "mesh": "eyeLeft_lod0_mesh",
+                    "mesh_part": "LEFT",
+                    "validate_uvs": False,
+                },
             ]
         },
     )

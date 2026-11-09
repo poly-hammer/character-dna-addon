@@ -5,12 +5,16 @@ which component a runtime binding evaluates.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import bpy
 import numpy as np
 
 from . import shape_names
+
+
+if TYPE_CHECKING:
+    from .mesh_sampling import MeshSample
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,21 @@ class RigComponent:
     @property
     def mesh(self) -> bpy.types.Object | None:
         return getattr(self.instance, f"{self.kind}_mesh")
+
+    def sample_mesh(self, mesh_index: int) -> "MeshSample":
+        """Read evaluated canonical positions, including uncommitted merged edits."""
+        from .mesh_sampling import sample_mesh
+
+        return sample_mesh(self, mesh_index)
+
+    def topology_fingerprint(self, mesh_index: int) -> dict:
+        """Identify the indexed topology of this component's canonical DNA mesh."""
+        from .dna_io import mesh_data
+
+        reader = self.dna_reader
+        if hasattr(reader, "getTopologyFingerprint"):
+            return reader.getTopologyFingerprint(mesh_index)
+        return mesh_data.topology(reader.getVertexPositionCount(mesh_index), mesh_data.reader_faces(reader, mesh_index))
 
     @property
     def dna_file_path(self) -> str:

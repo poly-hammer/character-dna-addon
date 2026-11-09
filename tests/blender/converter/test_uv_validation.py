@@ -153,4 +153,4 @@ def test_converter_always_requests_preserved_shading():
 def test_all_bundled_templates_enable_uv_validation(path):
     import json
 
-    assert json.loads(path.read_text())["validate_uvs"] is True
+    assert all(row["validate_uvs"] for row in json.loads(path.read_text())["meshes"])
