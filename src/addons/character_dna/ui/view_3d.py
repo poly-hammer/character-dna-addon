@@ -215,15 +215,16 @@ class CHARACTER_DNA_PT_face_board(RigInstanceDependentPanel):
         if not error:
             scene_properties = getattr(context.scene, ToolInfo.NAME)
             face_board = scene_properties.face_board
+            pose_browser = getattr(context.window_manager, ToolInfo.NAME)
 
             row = self.layout.row(align=True)
             row.prop(face_board, "category", text="")
             row.popover(panel="CHARACTER_DNA_PT_face_pose_tags", text="", icon="FILTER")
 
             self.layout.label(text="Poses:")
-            self.layout.template_icon_view(face_board, "face_pose_previews", show_labels=True, scale_popup=5.0)
+            self.layout.template_icon_view(pose_browser, "face_pose_previews", show_labels=True, scale_popup=5.0)
             row = self.layout.row(align=True)
-            row.prop(face_board, "face_pose_previews", text="")
+            row.prop(pose_browser, "face_pose_previews", text="")
             row.operator(f"{ToolInfo.NAME}.face_board_search_pose", text="", icon="VIEWZOOM")
 
             column = self.layout.column(align=True)

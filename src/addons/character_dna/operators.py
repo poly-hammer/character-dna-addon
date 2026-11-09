@@ -1989,9 +1989,15 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
     bl_label = "Remove Selected Entry"
 
     delete_associated_data: bpy.props.BoolProperty(
-        name="Delete associated data",
+        name="Delete All Associated Data",
         description="Delete all associated objects and collections linked to this rig instance",
         default=True,
+    )  # pyright: ignore[reportInvalidTypeForm]
+
+    apply_mesh_shape: bpy.props.BoolProperty(
+        name="Apply Mesh Shape and Delete Other Data",
+        description="Bake the current LOD mesh shapes, remove rig data, and move the meshes to the scene collection",
+        default=False,
     )  # pyright: ignore[reportInvalidTypeForm]
 
     @staticmethod
@@ -2011,9 +2017,11 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
                         objects.add(item.scene_object)
                     if item.image_object:
                         images.add(item.image_object)
-                for collection_name in [instance.name] + [
-                    f"{instance.name}_{component_type}_lod{index}" for index in range(NUMBER_OF_HEAD_LODS)
-                ]:
+                for collection_name in (
+                    [instance.name]
+                    + [f"{instance.name}_lod{index}" for index in range(NUMBER_OF_HEAD_LODS)]
+                    + [f"{instance.name}_{component_type}_lod{index}" for index in range(NUMBER_OF_HEAD_LODS)]
+                ):
                     collection = bpy.data.collections.get((collection_name, None))
                     if collection and collection not in collections:
                         collections.append(collection)
@@ -2034,11 +2042,21 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
             return {"CANCELLED"}
 
         instance = my_list[active_index]
-        engine.release_records(instance)
         objects = set()
         images = set()
-        if self.delete_associated_data:
+        candidates = set()
+        strip_rig = not self.delete_associated_data and self.apply_mesh_shape
+        if self.delete_associated_data or strip_rig:
             collections, objects, images = self._associated_data(instance)
+            if strip_rig:
+                from .utilities.rig_removal import bake_lod_meshes
+
+                try:
+                    _, candidates = bake_lod_meshes(context, instance, collections, objects)
+                except (ValueError, RuntimeError) as error:
+                    self.report({"ERROR"}, str(error))
+                    return {"CANCELLED"}
+            engine.release_records(instance)
             for collection in reversed(collections):
                 if collection.library or collection.override_library:
                     continue
@@ -2046,8 +2064,15 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
                     objects.add(owner)
                     collection.objects.unlink(owner)
                 bpy.data.collections.remove(collection, do_unlink=True)
+        else:
+            engine.release_records(instance)
 
         my_list.remove(active_index)
+        if strip_rig:
+            from .utilities.rig_removal import remove_orphans
+
+            remove_orphans(objects, candidates)
+            objects.clear()
         unused = {owner for owner in objects if owner.library is None and owner.users == 0}
         while unused:
             objects.difference_update(unused)
@@ -2083,6 +2108,8 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
         row.label(text=f"Are you sure you want to remove the '{self.instance_name}' rig instance?", icon="ERROR")
         row = self.layout.row()
         row.prop(self, "delete_associated_data")
+        if not self.delete_associated_data:
+            self.layout.prop(self, "apply_mesh_shape")
 
 
 class UILIST_RIG_INSTANCE_OT_entry_add(GenericUIListOperator, bpy.types.Operator):

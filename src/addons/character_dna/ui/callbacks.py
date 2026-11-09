@@ -205,8 +205,38 @@ def get_face_pose_previews_items(
     # Cache the enum item values and the key for later retrieval. We must keep a
     # reference to the returned tuples alive to avoid a Blender enum GC crash.
     preview_collection.face_pose_previews = enum_items
+    preview_collection.face_pose_preview_values = {item[4] for item in enum_items}
     preview_collection.face_pose_previews_cache_key = cache_key
     return preview_collection.face_pose_previews
+
+
+def get_face_pose_ui_items(
+    self: "CharacterWindowManagerProperties",  # noqa: ARG001
+    context: "Context",
+) -> Iterable[tuple[str, str, str, int, int]]:
+    if context is None or context.scene is None:
+        return ()
+    return get_face_pose_previews_items(getattr(context.scene, ToolInfo.NAME).face_board, context)
+
+
+def get_face_pose_ui_value(self: "CharacterWindowManagerProperties") -> int:  # noqa: ARG001
+    from ..properties import face_pose_preview_collections
+
+    face_board = getattr(bpy.context.scene, ToolInfo.NAME).face_board
+    value = face_board.get("face_pose_previews", 0)
+    items = get_face_pose_previews_items(face_board, bpy.context)
+    return value if value in face_pose_preview_collections["face_poses"].face_pose_preview_values else items[0][4]
+
+
+def set_face_pose_ui_value(self: "CharacterWindowManagerProperties", value: int) -> None:  # noqa: ARG001
+    face_board = getattr(bpy.context.scene, ToolInfo.NAME).face_board
+    if is_readonly_id(face_board.id_data) or is_face_board_readonly(get_active_rig_instance()):
+        return
+    for identifier, _name, _description, _icon, number in get_face_pose_previews_items(face_board, bpy.context):
+        if number == value and identifier != NO_FACE_POSE:
+            # Keep scene persistence, API access, and the normal pose update callback.
+            face_board.face_pose_previews = identifier
+            return
 
 
 def ensure_face_pose_metadata(force: bool = False) -> list[dict]:

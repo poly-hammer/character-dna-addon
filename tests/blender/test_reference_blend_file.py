@@ -413,7 +413,9 @@ def test_reference_readonly_panel_states(mode: str, monkeypatch: pytest.MonkeyPa
         is_pro=False,
     )
     properties = SimpleNamespace(rig_instance_list=[instance], rig_instance_list_active_index=0, face_board=object())
-    context = SimpleNamespace(scene=SimpleNamespace(character_dna=properties))
+    context = SimpleNamespace(
+        scene=SimpleNamespace(character_dna=properties), window_manager=SimpleNamespace(character_dna=object())
+    )
     monkeypatch.setattr(view_3d, "get_active_rig_instance", lambda: instance)
     monkeypatch.setattr(view_3d, "valid_rig_instance_exists", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(engine, "carriers", lambda _instance: [])

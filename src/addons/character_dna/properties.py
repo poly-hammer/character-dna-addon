@@ -444,6 +444,17 @@ class CharacterWindowManagerProperties(bpy.types.PropertyGroup, CharacterImportP
     # Global, per-session cache shared across the whole addon.
     data = {}
 
+    # Scene-owned enum buttons make Blender resolve their RNA path for every
+    # popup entry, walking all rig-instance data each time. This UI-only proxy
+    # avoids that traversal; the selected pose still lives in the scene.
+    face_pose_previews: bpy.props.EnumProperty(
+        name="Face Poses",
+        items=callbacks.get_face_pose_ui_items,
+        get=callbacks.get_face_pose_ui_value,
+        set=callbacks.set_face_pose_ui_value,
+        options={"SKIP_SAVE"},
+    )  # pyright: ignore[reportInvalidTypeForm]
+
     error_message: bpy.props.StringProperty(default="")  # pyright: ignore[reportInvalidTypeForm]
     progress: bpy.props.FloatProperty(default=1.0)  # pyright: ignore[reportInvalidTypeForm]
     progress_description: bpy.props.StringProperty(default="")  # pyright: ignore[reportInvalidTypeForm]
