@@ -357,9 +357,10 @@ class CHARACTER_DNA_PT_view_options(RigInstanceDependentPanel):
             control_rig = instance.control_rig
             grid = self.layout.grid_flow(row_major=True, columns=2, even_columns=True, even_rows=True, align=True)
             col = grid.column()
-            col.enabled = bool(instance.head_material)
-            col.label(text="Head Material Color:")
-            row = col.row()
+            material_col = col.column()
+            material_col.enabled = bool(instance.head_material)
+            material_col.label(text="Head Material Color:")
+            row = material_col.row()
             row.enabled = not readonly and not is_readonly_id(instance.head_material)
             row.prop(view_options, "active_material_preview", text="")
             row = col.row()

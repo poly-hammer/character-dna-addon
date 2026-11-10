@@ -11,6 +11,36 @@ from character_dna.editors.converter import correspondence, materials
 from character_dna.editors.converter.pipeline import ConversionPipeline
 
 
+def test_surface_material_transfer_after_source_reload_preserves_missing_faces(scene_meshes):
+    import importlib
+
+    from character_dna.editors.converter.native import materials as native_materials
+
+    create, material = scene_meshes
+    points = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0)]
+    source = create("Surface source", points, [[0, 1, 2], [1, 3, 2]])
+    target = create("Surface target", points, [[1, 3, 2], [0, 1, 2], [0, 3, 2]])
+    first, second, previous = [material(name) for name in ("First", "Second", "Missing region")]
+    source.data.materials.append(first)
+    source.data.materials.append(second)
+    source.data.polygons[1].material_index = 1
+    target.data.materials.append(previous)
+    old_binding_type = materials.SurfaceBinding
+    importlib.reload(materials)
+    binding = materials.binding_from_result(
+        np.full(4, -1, dtype=np.int32), np.ones(4, dtype=bool), {"surface_faces": [1, 0, -1]}
+    )
+    assert type(binding) is not old_binding_type
+    np.testing.assert_array_equal(native_materials._material_indices(source, target, binding), [1, 0, -1])
+    materials.transfer(source, target, binding)
+    assert [target.material_slots[face.material_index].material for face in target.data.polygons] == [
+        second,
+        first,
+        previous,
+    ]
+    assert list(source.data.materials) == [first, second]
+
+
 @pytest.mark.parametrize("observed", [False, True])
 def test_named_exclusion_uses_assigned_source_material_for_supplied_or_missing_region(scene_meshes, observed):
     from character_dna.editors.converter.native.materials import region_material_indices

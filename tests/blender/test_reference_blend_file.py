@@ -384,7 +384,8 @@ class _ReadonlyUILayout:
 
 
 @pytest.mark.parametrize("mode", ["APPEND", "LINK", "EDITABLE_LINK"])
-def test_reference_readonly_panel_states(mode: str, monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize("has_head_material", [True, False])
+def test_reference_readonly_panel_states(mode: str, has_head_material: bool, monkeypatch: pytest.MonkeyPatch):
     from types import SimpleNamespace
 
     from character_dna.ui import view_3d
@@ -398,7 +399,7 @@ def test_reference_readonly_panel_states(mode: str, monkeypatch: pytest.MonkeyPa
         body_rig=owner,
         face_board=owner,
         control_rig=owner,
-        head_material=owner,
+        head_material=owner if has_head_material else None,
         head_mesh=owner,
         view_options=view_options,
         auto_evaluate=True,
@@ -467,7 +468,8 @@ def test_reference_readonly_panel_states(mode: str, monkeypatch: pytest.MonkeyPa
             panel.draw_header(panel_self, cast("Any", context))
         panel.draw(panel_self, cast("Any", context))
         for name in names:
-            assert layout.writable(name) == (mode == "APPEND"), (panel.__name__, name, mode)
+            expected = mode == "APPEND" and (name != "active_material_preview" or has_head_material)
+            assert layout.writable(name) == expected, (panel.__name__, name, mode, has_head_material)
     assert layout.writable("character_dna.force_evaluate")
     layout = _ReadonlyUILayout()
     view_3d.CHARACTER_DNA_PT_face_board.draw(cast("Any", SimpleNamespace(layout=layout)), cast("Any", context))
