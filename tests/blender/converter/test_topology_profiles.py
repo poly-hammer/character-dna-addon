@@ -102,7 +102,8 @@ def test_native_weld_keeps_skin_weights_in_the_position_domain():
 @pytest.fixture
 def scan_readers():
     files = templates.resolve_dna_files(
-        json.loads(templates.BUNDLED_TEMPLATES[-1].read_text()), str(templates.BUNDLED_TEMPLATES[-1])
+        json.loads((templates.TEMPLATE_FOLDER / "3d_scan_store_full_body.json").read_text()),
+        str(templates.TEMPLATE_FOLDER / "3d_scan_store_full_body.json"),
     )
     readers = {kind: get_dna_reader(path) for kind, path in files.items()}
     yield readers

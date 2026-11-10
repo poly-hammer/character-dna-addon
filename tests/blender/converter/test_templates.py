@@ -52,7 +52,7 @@ def test_presets_share_dna_and_keep_all_relationships(setup_scene, preset, count
 
 def test_scan_store_requires_six_accessory_copy_inputs(setup_scene):
     props, _ = setup_scene
-    props.template = str(templates.BUNDLED_TEMPLATES[-1])
+    props.template = str(templates.TEMPLATE_FOLDER / "3d_scan_store_full_body.json")
     assert props.input_layout == "JOINED"
     assert {item.dna_mesh_name for item in templates.input_rows(props)} == {
         "teeth_lod0_mesh",
@@ -83,11 +83,15 @@ def test_bundled_enum_ids_survive_retiring_exact(setup_scene):
 
     props, obj = setup_scene
     entries = get_templates(props, bpy.context)
-    assert [entry[4] for entry in entries] == [0, 1, 4]
+    assert [entry[4] for entry in entries] == [0, 1, 4, 5, 6, 7, 8]
     assert [entry[1] for entry in entries] == [
         "MetaHuman (Full Body Basic)",
         "MetaHuman (Full Body Advanced)",
-        "3D Scan Store (Full Body)",
+        "3D Scan Store (Full Body Advanced)",
+        "MetaHuman (Head Basic)",
+        "MetaHuman (Head Advanced)",
+        "3D Scan Store (Head Basic)",
+        "3D Scan Store (Head Advanced)",
     ]
     assert not (templates.TEMPLATE_FOLDER / "metahuman_exact.json").exists()
     with pytest.raises(ValueError, match="Unknown bundled template"):
@@ -198,7 +202,7 @@ def test_merged_source_is_exclusive_and_inactive_rows_do_not_reserve_inputs(setu
     from character_dna.editors.converter.properties import ConverterProperties
 
     props, obj = setup_scene
-    props.template = str(templates.BUNDLED_TEMPLATES[-1])
+    props.template = str(templates.TEMPLATE_FOLDER / "3d_scan_store_full_body.json")
     rows = {item.role: item for item in props.extra_meshes}
     poll = ConverterExtraMeshItem.__annotations__["scene_object"].keywords["poll"]
     full_body_poll = ConverterProperties.__annotations__["joined_mesh"].keywords["poll"]
@@ -378,7 +382,7 @@ def test_every_copy_target_is_required_before_import(setup_scene, tmp_path, monk
 @pytest.mark.parametrize("missing", ["teeth", "eye_left", "eye_right", "lens_left", "lens_right", "eye_edge"])
 def test_scan_store_accessory_targets_are_required_before_import(setup_scene, tmp_path, monkeypatch, missing):
     props, obj = setup_scene
-    props.template = str(templates.BUNDLED_TEMPLATES[-1])
+    props.template = str(templates.TEMPLATE_FOLDER / "3d_scan_store_full_body.json")
     props.joined_mesh = obj
     for item in templates.input_rows(props):
         item.scene_object = None if item.role == missing else obj
@@ -422,7 +426,7 @@ def test_missing_template_selection_retains_unsaved_setup(setup_scene, tmp_path)
     templates.apply_template(props, templates.default_template())
     before = props.template_data
     missing = tmp_path / "missing.json"
-    templates.remember_template(props, missing, "Missing template")
+    templates.remember_template(props, missing, "Missing template", [])
     props.template = str(missing)
     assert props.template == "__scene__"
     assert props.template_data == before

@@ -144,7 +144,7 @@ def test_old_scan_store_scene_gets_clearance_defaults_without_losing_bindings():
     import json
 
     props = get_converter_properties()
-    path = templates.BUNDLED_TEMPLATES[-1]
+    path = templates.TEMPLATE_FOLDER / "3d_scan_store_full_body.json"
     recipe = json.loads(path.read_text())
     recipe["meshes"][0].pop("preserve_clearance_references")
     try:

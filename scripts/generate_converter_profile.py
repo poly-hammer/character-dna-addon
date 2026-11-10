@@ -9,7 +9,7 @@ from pathlib import Path
 def main() -> None:
     parser = argparse.ArgumentParser(description="Transfer MetaHuman fitting landmarks to aligned template DNA")
     resources = Path(__file__).resolve().parents[1] / "src/addons/character_dna/editors/shared/resources"
-    parser.add_argument("--reference", type=Path, default=resources / "dna/default")
+    parser.add_argument("--reference", type=Path, default=resources / "dna/metahuman/full_body")
     parser.add_argument("--target", type=Path, default=resources / "dna/3d_scan_store/full_body")
     parser.add_argument("--profile", default="3d_scan_store/full_body")
     parser.add_argument("--output", type=Path)

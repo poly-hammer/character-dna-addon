@@ -327,29 +327,30 @@ def test_joined_input_conversion_preserves_each_component_domain(
         domain.close()
 
 
-def test_pose_quality_failure_rolls_back_conversion(load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path):
+def test_pose_quality_warning_allows_artist_review(
+    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, conversion_diagnostics
+):
     import numpy as np
 
     from character_dna.editors.converter.pipeline import positions
 
     props = get_converter_properties()
     rows = configure_template(props, base_dna_folder)
-    props.new_name = "RejectedPose"
+    props.new_name = "ReviewPose"
     props.new_folder = str(tmp_path)
     for item in props.extra_meshes:
         item.validate_uvs = False
     assert props.normalize_to_a_pose
     before = {row.scene_object: positions(row.scene_object) for role, row in rows.items() if role in {"head", "body"}}
     (tmp_path / "head.dna").write_bytes(b"previous output")
-    # These conformed observations cannot be normalized by the current solver
-    # without a local fold. Keep the guard, and prove it fails transactionally.
-    with pytest.raises(RuntimeError, match="inverted a local surface triangle"):
-        bpy.ops.character_dna.convert_to_dna()
+    # Pose quality is advisory so artists can inspect and correct the result.
+    assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
+    assert any("inverted a local surface triangle" in warning for warning in conversion_diagnostics["warnings"])
     for obj, original in before.items():
         np.testing.assert_array_equal(positions(obj), original)
-        assert not obj.hide_get()
-    assert (tmp_path / "head.dna").read_bytes() == b"previous output"
-    assert not bpy.context.scene.character_dna.rig_instance_list.get("RejectedPose")
+        assert obj.hide_get() and obj.hide_render
+    assert (tmp_path / "head.dna").stat().st_size > len(b"previous output")
+    assert bpy.context.scene.character_dna.rig_instance_list.get("ReviewPose")
 
 
 def test_runtime_initialization_failure_restores_scene_and_published_files(

@@ -82,7 +82,7 @@ def test_scan_store_mesh_defaults_and_explicit_settings():
     bpy.context.window.scene = scene
     try:
         props = get_converter_properties()
-        props.template = str(templates.BUNDLED_TEMPLATES[-1])
+        props.template = str(templates.TEMPLATE_FOLDER / "3d_scan_store_full_body.json")
         eye = next(item for item in props.extra_meshes if item.role == "eye_left")
         teeth = next(item for item in props.extra_meshes if item.role == "teeth")
         rows = {row["id"]: row for row in templates.from_properties(props)["meshes"]}

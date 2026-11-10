@@ -113,7 +113,7 @@ def test_sparse_barycentric_samples_validate_domain():
 
 
 @pytest.mark.parametrize(
-    "identifier,dna", [("metahuman", "default"), ("3d_scan_store/full_body", "3d_scan_store/full_body")]
+    "identifier,dna", [("metahuman", "metahuman/full_body"), ("3d_scan_store/full_body", "3d_scan_store/full_body")]
 )
 def test_bundled_profiles_match_dna_and_cover_every_joint(identifier, dna):
     profile = pose_profiles.load(identifier)
@@ -311,19 +311,22 @@ def test_legacy_pose_template_key_is_upgraded(enabled):
     assert recipe["normalize_to_a_pose"] == enabled
 
 
-def test_all_bundled_pose_defaults_are_enabled():
+def test_bundled_pose_default_requires_body_component():
     from character_dna.editors.converter import templates
 
     for path in templates.BUNDLED_TEMPLATES:
         recipe = json.loads(path.read_text())
-        assert recipe["normalize_to_a_pose"] is True
+        assert recipe["normalize_to_a_pose"] == ("body" in recipe["dna_files"])
         assert "fit_to_a_pose" not in recipe
 
 
 def test_pose_landmark_generation_uses_target_position_domain(tmp_path):
     resources = topology_profiles.ROOT.parent
     report = pose_transfer.generate(
-        resources / "dna/default/body.dna", resources / "dna/3d_scan_store/full_body/body.dna", tmp_path, "generated"
+        resources / "dna/metahuman/full_body/body.dna",
+        resources / "dna/3d_scan_store/full_body/body.dna",
+        tmp_path,
+        "generated",
     )
     assert report["samples"] > 0
     assert report["maximum_distance_m"] < 0.005
@@ -351,7 +354,7 @@ def test_shared_seam_correction_has_fixed_boundary_and_falloff():
 
 
 @pytest.mark.parametrize(
-    "identifier,dna", [("metahuman", "default"), ("3d_scan_store/full_body", "3d_scan_store/full_body")]
+    "identifier,dna", [("metahuman", "metahuman/full_body"), ("3d_scan_store/full_body", "3d_scan_store/full_body")]
 )
 def test_actual_template_known_pose_recovery(identifier, dna):
     from character_dna.dna_io import mesh_data
