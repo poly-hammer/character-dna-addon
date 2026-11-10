@@ -136,7 +136,7 @@ def test_exclusion_retry_cannot_mask_entire_uv_layout(pair, meshes):
 
 @pytest.mark.parametrize("material_input", ["none", "same", "independent_full"])
 @pytest.mark.parametrize("complete", [False, True])
-def test_excluded_region_materials_are_blank_only_when_fallback_is_used(pair, meshes, material_input, complete):
+def test_excluded_region_materials_prefer_named_source_then_blank_fallback(pair, meshes, material_input, complete):
     source, target, _ = pair
     if complete:
         source = meshes("Complete input", positions(target), [list(face.vertices) for face in target.data.polygons])
@@ -181,7 +181,7 @@ def test_excluded_region_materials_are_blank_only_when_fallback_is_used(pair, me
     pipeline.exclusions = {"teeth": {"EXCLUDE_Tongue": [1, 3, 5]}}
     pipeline._supplied()
     tongue = target.data.materials[target.data.polygons[2].material_index]
-    if complete:
+    if complete or material_source is not None:
         assert tongue == original or tongue.name.startswith("BlankRegion_teeth_shader")
         assert any(node.type == "TEX_IMAGE" for node in tongue.node_tree.nodes)
     else:
@@ -217,6 +217,7 @@ def test_exclusion_material_allocation_failure_still_tracks_new_datablocks(pair,
     )
     pipeline.objects = {"teeth": target}
     created = []
+    pipeline.exclusions = {"teeth": {"EXCLUDE_Tongue": [1, 3, 5]}}
 
     def fail(*_args):
         created.append(bpy.data.materials.new("Failed exclusion material"))
@@ -275,6 +276,7 @@ def test_partial_material_assignment_never_uses_missing_vertex_as_source_index(p
     if independent:
         pipeline = SimpleNamespace(
             material_sources={"teeth": material_source},
+            exclusions={"teeth": {"EXCLUDE_Tongue": [1, 3, 5]}},
             objects={"teeth": target},
             rows={"teeth": {"mesh": "teeth_lod0_mesh"}},
             operator=SimpleNamespace(_properties=SimpleNamespace(new_name="Exclude"), _owned={"materials": set()}),

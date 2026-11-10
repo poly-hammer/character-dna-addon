@@ -11,6 +11,44 @@ from character_dna.editors.converter import correspondence, materials
 from character_dna.editors.converter.pipeline import ConversionPipeline
 
 
+@pytest.mark.parametrize("observed", [False, True])
+def test_named_exclusion_uses_assigned_source_material_for_supplied_or_missing_region(scene_meshes, observed):
+    from character_dna.editors.converter.native.materials import region_material_indices
+
+    create, material = scene_meshes
+    points = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (0, 1, 1)]
+    target = create("Joined DNA teeth", points, [[0, 1, 2], [3, 4, 5]])
+    source = create("Teeth source", points, [[3, 4, 5], [0, 1, 2]])
+    teeth, tongue = material("DentalSource"), material("Tongue")
+    tongue.use_nodes = True
+    source.data.materials.append(teeth)
+    source.data.materials.append(tongue)
+    source.data.polygons[0].material_index = 1
+    mask = {f"EXCLUDE_{tongue.name}": [3, 4, 5]}
+    before = set(bpy.data.materials)
+    indices = region_material_indices(source, target, mask)
+    materials.transfer(
+        source, target, instance_name="Test", dna_mesh_name="teeth_lod0_mesh", exclusions=mask, face_indices=indices
+    )
+    materials.assign_exclusion_materials(target, mask, np.full(6, not observed), source)
+    assert target.data.materials[target.data.polygons[1].material_index] == tongue
+    primary = target.data.materials[target.data.polygons[0].material_index]
+    assert primary != teeth and primary.name.startswith("Test_teeth_shader")
+    assert set(bpy.data.materials) - before == {primary}
+    assert list(source.data.materials) == [teeth, tongue]
+
+
+def test_unmatched_exclusion_material_keeps_blank_fallback(scene_meshes):
+    create, material = scene_meshes
+    target = create("Excluded", [(0, 0, 0), (1, 0, 0), (0, 1, 0)], [[0, 1, 2]])
+    source = create("Source", [(0, 0, 0), (1, 0, 0), (0, 1, 0)], [[0, 1, 2]])
+    source.data.materials.append(material("Unrelated"))
+    materials.assign_exclusion_materials(target, {"EXCLUDE_Optional": [0, 1, 2]}, np.ones(3, dtype=bool), source)
+    result = target.data.materials[target.data.polygons[0].material_index]
+    assert result.name.startswith("Optional") and result.use_nodes
+    assert not any(node.type == "TEX_IMAGE" for node in result.node_tree.nodes)
+
+
 @pytest.fixture
 def scene_meshes():
     objects, meshes = [], []
@@ -113,6 +151,7 @@ def test_transfer_is_opt_in_for_each_relationship(scene_meshes, method, enabled)
         rows={"head": {"method": method, "mesh": "unknown"}},
         objects={"head": target},
         material_sources={"head": source} if enabled else {},
+        exclusions={},
         operator=SimpleNamespace(_properties=SimpleNamespace(new_name="Test"), _owned={"materials": set()}),
     )
     if method == "COPY":
@@ -197,6 +236,7 @@ def test_independent_material_source_needs_no_topology_match_for_uniform_materia
         rows={"head": {"method": "COPY", "mesh": "head_lod0_mesh", "component": "head"}},
         objects={"head": target},
         material_sources={"head": source},
+        exclusions={},
         operator=SimpleNamespace(_properties=SimpleNamespace(new_name="Test"), _rig_instance=instance, _owned=owned),
     )
     ConversionPipeline._transfer_materials(pipeline, "head", input_mesh, np.arange(3))
