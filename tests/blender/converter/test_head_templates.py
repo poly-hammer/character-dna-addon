@@ -33,6 +33,8 @@ HEAD_INPUTS = {
         "lens_right",
         "teeth",
         "eye_edge",
+        "brows",
+        "eyelashes",
     },
 }
 
@@ -188,7 +190,10 @@ def test_head_conversion_preserves_primary_uv_and_relative_anatomy(empty_charact
     for name, shape in source.meshes.items():
         result = output.meshes[name]
         np.testing.assert_array_equal(result.uv, shape.uv)
-        np.testing.assert_array_equal(result.position_ids, shape.position_ids)
+        replacement = next(item.fit_method == "REPLACE" for item in props.extra_meshes if item.dna_mesh_name == name)
+        np.testing.assert_array_equal(
+            result.position_ids, np.arange(len(shape.positions)) if replacement else shape.position_ids
+        )
         keep = np.ones(len(shape.positions), dtype=bool)
         if filename == "3d_scan_store_head_advanced.json" and name == "head_lod0_mesh":
             # Supplied teeth can expand the painted mouth pocket during clearance.

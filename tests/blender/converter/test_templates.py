@@ -50,7 +50,7 @@ def test_presets_share_dna_and_keep_all_relationships(setup_scene, preset, count
     assert all(path.is_file() for path in files.values())
 
 
-def test_scan_store_requires_six_accessory_copy_inputs(setup_scene):
+def test_scan_store_accessory_copy_and_replacement_inputs(setup_scene):
     props, _ = setup_scene
     props.template = str(templates.TEMPLATE_FOLDER / "3d_scan_store_full_body.json")
     assert props.input_layout == "JOINED"
@@ -61,9 +61,10 @@ def test_scan_store_requires_six_accessory_copy_inputs(setup_scene):
         "eyeLensLeft_lod0_mesh",
         "eyeLensRight_lod0_mesh",
         "eyeEdge_lod0_mesh",
+        "brows_lod0_mesh",
+        "eyelashes_lod0_mesh",
     }
-    assert {item.role for item in props.extra_meshes if item.fit_method == "RELATIVE"} == {"brows", "eyelashes"}
-    assert all(item.fit_method == "COPY" for item in templates.input_rows(props))
+    assert {item.role for item in props.extra_meshes if item.fit_method == "REPLACE"} == {"brows", "eyelashes"}
     assert {item.role: item.mesh_part for item in templates.input_rows(props)} == {
         "eye_left": "LEFT",
         "eye_right": "RIGHT",
@@ -71,11 +72,13 @@ def test_scan_store_requires_six_accessory_copy_inputs(setup_scene):
         "lens_right": "RIGHT",
         "teeth": "FULL",
         "eye_edge": "FULL",
+        "brows": "FULL",
+        "eyelashes": "FULL",
     }
     layout = Layout()
     ui.CHARACTER_DNA_PT_converter.draw(SimpleNamespace(layout=layout), bpy.context)
     fields = [args[1] for name, args, _ in layout.calls if name == "prop"]
-    assert fields.count("scene_object") == 6 and fields.count("joined_mesh") == 1
+    assert fields.count("scene_object") == 8 and fields.count("joined_mesh") == 1
 
 
 def test_bundled_enum_ids_survive_retiring_exact(setup_scene):
@@ -207,6 +210,7 @@ def test_merged_source_is_exclusive_and_inactive_rows_do_not_reserve_inputs(setu
     poll = ConverterExtraMeshItem.__annotations__["scene_object"].keywords["poll"]
     full_body_poll = ConverterProperties.__annotations__["joined_mesh"].keywords["poll"]
     rows["head"].scene_object = obj  # Stale split target, inactive in merged layout.
+    rows["brows"].fit_method = "RELATIVE"
     rows["brows"].scene_object = obj  # Relative fits have no target binding.
     assert poll(rows["eye_left"], obj) and full_body_poll(props, obj)
     rows["eye_left"].scene_object = obj
