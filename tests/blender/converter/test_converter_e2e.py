@@ -86,6 +86,11 @@ def test_convert_meshes_to_dna(  # noqa: PLR0915 - complete conversion contract
     properties.normalize_to_a_pose = False
     properties.constrain_head_to_body = True
 
+    from character_dna.editors.converter.templates import export_template
+
+    export_template(properties, temp_folder / "full-body-template.zip")
+    assert properties.template_id.startswith("custom:")
+
     # Template data must stay native until the final scene is created.
     from character_dna.components.base import CharacterComponentBase
     from character_dna.editors.converter.native.direct import DirectPipeline
@@ -247,7 +252,7 @@ def test_known_limb_pose_full_operator(
     reference = np.frombuffer(template.mesh(name)["positions"], dtype=np.float32).reshape(-1, 3).astype(float)
     weights = np.frombuffer(template.weights(name, names), dtype=np.float64).reshape(-1, len(names))
     weights = geometry.normalized_weights(weights)
-    profile = profiles.load("metahuman")
+    profile = profiles.load("metahuman/full_body")
     posed = bind.copy()
     for index, name in enumerate(names):
         parent = parents[index]

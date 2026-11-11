@@ -113,7 +113,8 @@ def test_sparse_barycentric_samples_validate_domain():
 
 
 @pytest.mark.parametrize(
-    "identifier,dna", [("metahuman", "metahuman/full_body"), ("3d_scan_store/full_body", "3d_scan_store/full_body")]
+    "identifier,dna",
+    [("metahuman/full_body", "metahuman/full_body"), ("3d_scan_store/full_body", "3d_scan_store/full_body")],
 )
 def test_bundled_profiles_match_dna_and_cover_every_joint(identifier, dna):
     profile = pose_profiles.load(identifier)
@@ -354,7 +355,8 @@ def test_shared_seam_correction_has_fixed_boundary_and_falloff():
 
 
 @pytest.mark.parametrize(
-    "identifier,dna", [("metahuman", "metahuman/full_body"), ("3d_scan_store/full_body", "3d_scan_store/full_body")]
+    "identifier,dna",
+    [("metahuman/full_body", "metahuman/full_body"), ("3d_scan_store/full_body", "3d_scan_store/full_body")],
 )
 def test_actual_template_known_pose_recovery(identifier, dna):
     from character_dna.dna_io import mesh_data

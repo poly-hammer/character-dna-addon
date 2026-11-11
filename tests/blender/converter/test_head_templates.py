@@ -15,7 +15,7 @@ from character_dna.editors.converter.native.template import TemplateReader
 from character_dna.editors.converter.properties import get_converter_properties
 
 from . import test_templates
-from .test_templates import Layout
+from .test_templates import Layout, read_package_recipe
 
 
 setup_scene = test_templates.setup_scene
@@ -55,9 +55,9 @@ def test_head_inputs_and_component_ui(setup_scene, filename, inputs):
     assert fields.count("scene_object") == len(inputs)
     assert not {"input_layout", "scene_layout", "dna_layout", "joined_mesh"} & set(fields)
     panel = SimpleNamespace(
-        layout=layout, _draw_active_extra_mesh=ui.CHARACTER_DNA_PT_converter_config._draw_active_extra_mesh
+        layout=layout, _draw_active_extra_mesh=ui.CHARACTER_DNA_PT_converter_config_meshes._draw_active_extra_mesh
     )
-    ui.CHARACTER_DNA_PT_converter_config.draw(panel, bpy.context)
+    ui.CHARACTER_DNA_PT_converter_config_footer.draw(panel, bpy.context)
     fields = [args[1] for name, args, _ in layout.calls if name == "prop"]
     assert not {"normalize_to_a_pose", "constrain_head_to_body", "adjust_seam"} & set(fields)
     recipe = templates.from_properties(props)
@@ -80,17 +80,29 @@ def test_filter_combination_does_not_change_selection_or_targets(setup_scene, mo
         "metahuman_head_advanced.json",
         "3d_scan_store_head_advanced.json",
     }
+    layout = Layout()
+    ui.CHARACTER_DNA_PT_converter.draw(SimpleNamespace(layout=layout), bpy.context)
+    assert any(
+        name == "label" and kwargs.get("text") == "4 filtered from view" and kwargs.get("icon") == "INFO"
+        for name, _, kwargs in layout.calls
+    )
     props.template_tag_match = "ANY"
     assert len(catalog.items(props, filtered=True)) == 6
     props.template_tag_match = "ALL"
     props.template_tag_filters["full body"].enabled = True
     assert catalog.items(props, filtered=True) == []
+    layout = Layout()
+    ui.CHARACTER_DNA_PT_converter.draw(SimpleNamespace(layout=layout), bpy.context)
+    assert any(name == "label" and kwargs.get("text") == "6 filtered from view" for name, _, kwargs in layout.calls)
     assert [row[0] for row in get_templates(props, bpy.context)] == [props.template_file]
     assert props.template == props.template_file
     assert (props.template_file, props.template_data) == before
     assert props.extra_meshes[0].scene_object == obj
     assert bpy.ops.character_dna.converter_template_tag(action="CLEAR") == {"FINISHED"}
     assert len(catalog.items(props, filtered=True)) == 7
+    layout = Layout()
+    ui.CHARACTER_DNA_PT_converter.draw(SimpleNamespace(layout=layout), bpy.context)
+    assert not any(kwargs.get("text", "").endswith(" filtered from view") for _, _, kwargs in layout.calls)
 
     def unexpected_read(*_args, **_kwargs):
         pytest.fail("Cached dropdown drawing must not read template files")
@@ -107,14 +119,16 @@ def test_tag_edit_save_load_and_filtered_enum(setup_scene, tmp_path):
     props.template_tags[-1].value = "  Studio Test  "
     assert props.template_tags[-1].value == "Studio Test"
     assert "studio test" in props.template_tag_filters
-    path = tmp_path / "custom.json"
-    templates.save_template(props, path)
-    assert "Studio Test" in json.loads(path.read_text())["tags"]
-    identifier = next(row[4] for row in catalog.items(props) if row[0] == str(path))
+    path = tmp_path / "custom.zip"
+    templates.export_template(props, path)
+    assert "Studio Test" in read_package_recipe(path)["tags"]
+    key = props.template_id
+    installed = Path(props.template_file)
+    identifier = next(row[4] for row in catalog.items(props) if row[0] == key)
     templates.load_template(props, templates.TEMPLATE_FOLDER / "metahuman_head_basic.json")
     props.template_tag_filters["studio test"].enabled = True
-    assert [row[0] for row in catalog.items(props, filtered=True)] == [str(path)]
-    props.template = str(path)
+    assert [row[0] for row in catalog.items(props, filtered=True)] == [key]
+    props.template = key
     assert props.extra_meshes[0].scene_object == obj
     assert props.template_tags[-1].value == "Studio Test"
     assert catalog.items(props, filtered=True)[0][4] == identifier
@@ -124,9 +138,9 @@ def test_tag_edit_save_load_and_filtered_enum(setup_scene, tmp_path):
     assert bpy.ops.character_dna.converter_template_tag(action="REMOVE") == {"FINISHED"}
     assert len(props.template_tags) == 3
     # Metadata changes made externally become visible only on explicit refresh.
-    saved = json.loads(path.read_text())
+    saved = json.loads(installed.read_text())
     saved["tags"] = ["External"]
-    path.write_text(json.dumps(saved))
+    installed.write_text(json.dumps(saved))
     templates.load_template(props, templates.TEMPLATE_FOLDER / "metahuman_head_basic.json")
     assert bpy.ops.character_dna.converter_template_tag(action="REFRESH") == {"FINISHED"}
     assert "external" in props.template_tag_filters
@@ -137,23 +151,26 @@ def test_tags_and_filter_state_survive_blend_reload(empty_character_scene, tmp_p
     templates.load_template(props, templates.TEMPLATE_FOLDER / "metahuman_head_advanced.json")
     bpy.ops.character_dna.converter_template_tag(action="ADD")
     props.template_tags[-1].value = "Studio"
-    template = tmp_path / "studio.json"
-    templates.save_template(props, template)
+    template = tmp_path / "studio.zip"
+    templates.export_template(props, template)
+    key, installed = props.template_id, props.template_file
     props.template_tag_filters["head"].enabled = True
     props.template_tag_filters["studio"].enabled = True
     bpy.ops.wm.save_as_mainfile(filepath=str(tmp_path / "tags.blend"))
     bpy.ops.wm.open_mainfile(filepath=str(tmp_path / "tags.blend"))
     props = get_converter_properties()
-    assert props.template_file == str(template)
+    assert props.template_file == installed
+    assert props.template_id == key
     assert props.template_tags[-1].value == "Studio"
     assert {item.name for item in props.template_tag_filters if item.enabled} == {"head", "studio"}
-    assert [row[0] for row in catalog.items(props, filtered=True)] == [str(template)]
+    assert [row[0] for row in catalog.items(props, filtered=True)] == [key]
 
 
 @pytest.mark.parametrize("filename", HEAD_INPUTS)
 def test_head_conversion_preserves_primary_uv_and_relative_anatomy(empty_character_scene, tmp_path, filename):
     props = get_converter_properties()
     templates.load_template(props, templates.TEMPLATE_FOLDER / filename)
+    templates.export_template(props, tmp_path / "head-template.zip")
     source = TemplateReader(str(templates.current_dna_files(props)["head"]), "head")
     offset = np.array([0.0, -0.002, 0.003])
     for item in templates.input_rows(props):
