@@ -271,6 +271,14 @@ def switch_to_bone_edit_mode(*armature_object: bpy.types.Object):
 
 
 def switch_to_pose_mode(*scene_object: bpy.types.Object):
+    if (
+        scene_object
+        and bpy.context.mode == "POSE"
+        and bpy.context.view_layer.objects.active == scene_object[-1]
+        and set(bpy.context.selected_objects) == set(scene_object)
+        and all(not obj.hide_viewport and not obj.hide_get() for obj in scene_object)
+    ):
+        return
     switch_to_object_mode()
     # A hidden object cannot be the active object for a mode switch, so the
     # mode_set poll would raise "Context missing active object". Unhide the
