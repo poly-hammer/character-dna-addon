@@ -431,10 +431,26 @@ def _copy_animation(owner: Any, mapping: dict) -> None:
             assignment.action_slot_handle = slot_handle
 
 
+def _make_direct_object_links(objects: Iterable[Any]) -> None:
+    indirect = [owner for owner in objects if owner.is_library_indirect]
+    if not indirect:
+        return
+    # Blender 5.3 leaves loaded objects indirect until they have a local user.
+    # A temporary collection promotes them to direct links, which override_create
+    # requires. Removing it preserves that status without instantiating the source.
+    staging = bpy.data.collections.new("Character DNA override staging")
+    try:
+        for owner in indirect:
+            staging.objects.link(owner)
+    finally:
+        bpy.data.collections.remove(staging)
+
+
 def _editable_objects(objects: dict[str, Any], descriptor: dict) -> dict[str, Any]:  # noqa: PLR0912
     for owner in objects.values():
         if owner.get(_MARKER) == 1 and not owner.is_property_overridable_library('["targets"]'):
             raise LegacyDataError(f"{owner.name}: saved native targets are not overridable. {MIGRATION_MESSAGE}")
+    _make_direct_object_links(objects.values())
     dependencies = _dependencies()
     reachable = set()
     pending = list(objects.values())

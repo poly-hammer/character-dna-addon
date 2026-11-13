@@ -74,10 +74,11 @@ class _Row:
         self.scene_object = scene_object
 
 
-class _FakeInstance:
+class _FakeInstance(dict):
     """Duck-typed ``RigInstance`` exposing only what the donor helpers read."""
 
     def __init__(self, head: list[Any], body: list[Any], head_mesh: Any = None) -> None:
+        super().__init__()
         self.output = SimpleNamespace(head_item_list=head, body_item_list=body)
         self.edit_target = SimpleNamespace(mesh=head_mesh)
 

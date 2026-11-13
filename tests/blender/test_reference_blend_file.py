@@ -594,6 +594,63 @@ def test_reference_rollback(tmp_path: Path, mode: str, monkeypatch: pytest.Monke
     assert notified == []
 
 
+def test_reference_editable_indirect_objects(tmp_path: Path):
+    """Objects without local users must be promoted before making protected overrides."""
+    from character_dna.utilities import reference
+
+    before = set(bpy.data.user_map())
+    try:
+        control = bpy.data.objects.new("Indirect_control", bpy.data.armatures.new("Indirect_controls"))
+        output = bpy.data.objects.new("Indirect_output", bpy.data.meshes.new("Indirect_geometry"))
+        output.data.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+        output.parent = control
+        output.modifiers.new("Binding", "ARMATURE").object = control
+        output.shape_key_add(name="Basis")
+        shape = output.shape_key_add(name="Expression")
+        curve = shape.driver_add("value")
+        variable = curve.driver.variables.new()
+        variable.type = "TRANSFORMS"
+        variable.targets[0].id = control
+        curve.driver.expression = variable.name
+        holder = bpy.data.objects.new("Indirect_holder", None)
+        holder["output"] = output
+        source = tmp_path / "indirect.blend"
+        bpy.data.libraries.write(str(source), {holder})
+        bpy.data.batch_remove(ids=set(bpy.data.user_map()) - before)
+
+        # Loading only the holder reproduces indirect object IDs even on Blender
+        # versions that mark explicitly requested objects as directly linked.
+        with bpy.data.libraries.load(str(source), link=True) as (_, data_to):
+            data_to.objects = ["Indirect_holder"]
+        source_output = data_to.objects[0]["output"]
+        source_control = source_output.parent
+        assert source_output.is_library_indirect
+        assert source_control.is_library_indirect
+        collections = set(bpy.data.collections)
+        loaded = reference._editable_objects(
+            {"control": source_control, "output": source_output},
+            {"pointers": {"face_board": "control"}},
+        )
+        control, output = loaded["control"], loaded["output"]
+        assert control.library is None and control.override_library is None
+        assert control.data.library is None
+        assert output.override_library.reference == source_output
+        assert output.override_library.is_system_override
+        assert output.data.override_library.reference == source_output.data
+        assert output.data.override_library.is_system_override
+        assert output.parent == control
+        assert output.modifiers[0].object == control
+        assert output.data.shape_keys.animation_data.drivers[0].driver.variables[0].targets[0].id == control
+        assert source_output.parent == source_control
+        assert source_output.modifiers[0].object == source_control
+        assert (
+            source_output.data.shape_keys.animation_data.drivers[0].driver.variables[0].targets[0].id == source_control
+        )
+        assert set(bpy.data.collections) == collections
+    finally:
+        bpy.data.batch_remove(ids=set(bpy.data.user_map()) - before)
+
+
 @pytest.mark.parametrize("mode", ["APPEND", "LINK", "EDITABLE_LINK"])
 def test_reference_object_transport(tmp_path: Path, mode: str):  # noqa: PLR0915
     import subprocess
