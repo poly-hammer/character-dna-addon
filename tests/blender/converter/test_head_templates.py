@@ -48,7 +48,7 @@ def test_head_inputs_and_component_ui(setup_scene, filename, inputs):
     assert set(templates.current_dna_files(props)) == {"head"}
     assert all(path.is_file() for path in templates.current_dna_files(props).values())
     assert props.scene_layout == props.input_layout == "SPLIT" and props.dna_layout == "SEPARATE"
-    assert not (props.normalize_to_a_pose or props.adjust_seam or props.constrain_head_to_body)
+    assert props.pose_normalization == "OFF" and not (props.adjust_seam or props.constrain_head_to_body)
     layout = Layout()
     ui.CHARACTER_DNA_PT_converter.draw(SimpleNamespace(layout=layout), bpy.context)
     fields = [args[1] for name, args, _ in layout.calls if name == "prop"]
@@ -59,7 +59,7 @@ def test_head_inputs_and_component_ui(setup_scene, filename, inputs):
     )
     ui.CHARACTER_DNA_PT_converter_config_footer.draw(panel, bpy.context)
     fields = [args[1] for name, args, _ in layout.calls if name == "prop"]
-    assert not {"normalize_to_a_pose", "constrain_head_to_body", "adjust_seam"} & set(fields)
+    assert not {"pose_normalization", "constrain_head_to_body", "adjust_seam"} & set(fields)
     recipe = templates.from_properties(props)
     templates.validate_template(recipe)
     if filename == "3d_scan_store_head_basic.json":

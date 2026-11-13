@@ -148,7 +148,7 @@ def test_full_body_advanced_replacements_follow_pose_normalization(empty_charact
             obj.data.uv_layers.new().data.foreach_set("uv", shape.uv.ravel())
         item.scene_object = obj
     props.new_name, props.new_folder = "BodyReplacement", str(tmp_path)
-    assert props.normalize_to_a_pose
+    assert props.pose_normalization == "LIMBS"
     assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
     assert (tmp_path / "head.dna").is_file() and (tmp_path / "body.dna").is_file()
     for name, expected in replacements.items():

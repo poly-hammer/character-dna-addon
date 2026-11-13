@@ -143,6 +143,7 @@ def test_profile_path_cannot_escape_resources():
 
 def test_receipt_requires_exact_geometry_reference_and_profile():
     arrays, profile = toy()
+    profile["components"] = [{"key": "body", "count": len(arrays["target"])}]
     names = arrays["names"].tolist()
     pipeline = SimpleNamespace(
         pose_joints=dict(zip(names, arrays["bind"], strict=True)),
@@ -158,6 +159,27 @@ def test_receipt_requires_exact_geometry_reference_and_profile():
     moved[0, 0] += 1e-5
     assert pose_receipt.read(source, moved, arrays["bind"], profile) is None
     assert pose_receipt.read(source, arrays["target"], arrays["bind"], {**profile, "id": "other"}) is None
+
+
+def test_axial_receipt_tracks_both_meshes_and_mode():
+    arrays, profile = toy()
+    head = arrays["target"][:3].copy()
+    profile.update(mode="SPINE", components=[{"key": "body", "count": 60}, {"key": "head", "count": 3}])
+    names = arrays["names"].tolist()
+    pipeline = SimpleNamespace(
+        pose_joints=dict(zip(names, arrays["bind"], strict=True)),
+        pose_names=names,
+        pose_reference={"body": {name: (arrays["bind"][i], 1) for i, name in enumerate(names)}},
+        targets={"body": arrays["target"], "head": head},
+        pose_profile=profile,
+    )
+    source = {}
+    pose_receipt.write(pipeline, [source])
+    combined = np.concatenate((arrays["target"], head))
+    assert pose_receipt.read(source, combined, arrays["bind"], profile) is not None
+    assert pose_receipt.read(source, combined, arrays["bind"], {**profile, "mode": "ALL"}) is None
+    combined[-1, 0] += 0.001
+    assert pose_receipt.read(source, combined, arrays["bind"], profile) is None
 
 
 def test_worker_roundtrip_cleanup_and_cancel():
@@ -236,7 +258,8 @@ def test_canonical_projection_proves_repeat_noop_without_receipt():
     np.testing.assert_array_equal(result["positions"], candidate)
 
 
-def test_pose_option_defaults_on_and_roundtrips():
+@pytest.mark.parametrize("mode", ["OFF", "LIMBS", "SPINE", "ALL"])
+def test_pose_option_defaults_to_limbs_and_roundtrips(mode):
     from character_dna.editors.converter import templates
     from character_dna.editors.converter.properties import get_converter_properties
 
@@ -245,71 +268,23 @@ def test_pose_option_defaults_on_and_roundtrips():
     bpy.context.window.scene = scene
     try:
         properties = get_converter_properties()
-        assert properties.normalize_to_a_pose
-        assert properties.bl_rna.properties["normalize_to_a_pose"].name == "Normalize to A-Pose"
+        assert properties.pose_normalization == "LIMBS"
+        assert properties.bl_rna.properties["pose_normalization"].name == "Normalize to A-Pose"
         assert "fit_to_a_pose" not in properties.bl_rna.properties
         templates.apply_template(properties, templates.default_template())
-        assert properties.normalize_to_a_pose
-        properties.normalize_to_a_pose = False
+        assert properties.pose_normalization == "LIMBS"
+        properties.pose_normalization = mode
         recipe = templates.from_properties(properties)
         assert "fit_to_a_pose" not in recipe
         templates.apply_template(properties, recipe)
-        assert not properties.normalize_to_a_pose
+        assert properties.pose_normalization == mode
         assert pose_profiles.available(properties)
-        recipe["normalize_to_a_pose"] = "yes"
-        with pytest.raises(ValueError, match="boolean"):
+        recipe["pose_normalization"] = "yes"
+        with pytest.raises(ValueError, match="OFF, LIMBS, SPINE or ALL"):
             templates.validate_template(recipe)
     finally:
         bpy.context.window.scene = previous
         bpy.data.scenes.remove(scene)
-
-
-@pytest.mark.parametrize("enabled", [False, True])
-@pytest.mark.parametrize("storage", ["scene", "recipe"])
-def test_pose_option_migrates_saved_choices(enabled, storage):
-    from character_dna.editors.converter import templates
-    from character_dna.editors.converter.properties import get_converter_properties
-
-    previous = bpy.context.window.scene
-    scene = bpy.data.scenes.new("Legacy pose option test")
-    bpy.context.window.scene = scene
-    try:
-        properties = get_converter_properties()
-        templates.apply_template(properties, templates.default_template())
-        properties.property_unset("normalize_to_a_pose")
-        if storage == "scene":
-            properties["fit_to_a_pose"] = enabled
-        else:
-            recipe = json.loads(properties.template_data)
-            recipe.pop("normalize_to_a_pose")
-            recipe["fit_to_a_pose"] = enabled
-            properties.template_data = json.dumps(recipe)
-        templates.migrate(properties)
-        assert properties.normalize_to_a_pose == enabled
-        assert "fit_to_a_pose" not in properties
-        recipe = templates.from_properties(properties)
-        assert recipe["normalize_to_a_pose"] == enabled and "fit_to_a_pose" not in recipe
-        # Repeated migration cannot override a later user choice.
-        properties.normalize_to_a_pose = not enabled
-        templates.migrate(properties)
-        assert properties.normalize_to_a_pose != enabled
-    finally:
-        bpy.context.window.scene = previous
-        bpy.data.scenes.remove(scene)
-
-
-@pytest.mark.parametrize("enabled", [False, True])
-def test_legacy_pose_template_key_is_upgraded(enabled):
-    from character_dna.editors.converter import templates
-
-    recipe = templates.default_template()
-    recipe.pop("normalize_to_a_pose")
-    recipe["fit_to_a_pose"] = enabled
-    templates.validate_template(recipe)
-    assert recipe["normalize_to_a_pose"] == enabled and "fit_to_a_pose" not in recipe
-    recipe["fit_to_a_pose"] = not enabled
-    templates.validate_template(recipe)
-    assert recipe["normalize_to_a_pose"] == enabled
 
 
 def test_bundled_pose_default_requires_body_component():
@@ -317,7 +292,7 @@ def test_bundled_pose_default_requires_body_component():
 
     for path in templates.BUNDLED_TEMPLATES:
         recipe = json.loads(path.read_text())
-        assert recipe["normalize_to_a_pose"] == ("body" in recipe["dna_files"])
+        assert recipe["pose_normalization"] == ("LIMBS" if "body" in recipe["dna_files"] else "OFF")
         assert "fit_to_a_pose" not in recipe
 
 
@@ -332,6 +307,33 @@ def test_pose_landmark_generation_uses_target_position_domain(tmp_path):
     assert report["samples"] > 0
     assert report["maximum_distance_m"] < 0.005
     assert (tmp_path / "pose.json").is_file()
+    generated = json.loads((tmp_path / "pose.json").read_text())
+    reader = get_dna_reader(resources / "dna/3d_scan_store/full_body/head.dna")
+    try:
+        from character_dna.dna_io import mesh_data
+
+        index = next(i for i in reader.getMeshIndicesForLOD(0) if reader.getMeshName(i) == "head_lod0_mesh")
+        assert generated["head_topology"] == topology_profiles.fingerprint(reader, index)
+        ids = np.array(sorted({v for face in mesh_data.reader_faces(reader, index) for v in face}))
+        for row in generated["axial_landmarks"]["head"].values():
+            for entry in row.values():
+                assert samples.pack(entry, ids)[0].size > 0
+        assert samples.pack(generated["cranium_samples"], ids)[0].size > 0
+    finally:
+        release_dna_handle(reader)
+
+
+@pytest.mark.parametrize("identifier", ["metahuman/full_body", "3d_scan_store/full_body"])
+@pytest.mark.parametrize("mode", ["OFF", "LIMBS", "SPINE", "ALL"])
+def test_regional_profiles_select_only_requested_joints(identifier, mode):
+    profile = pose_profiles.resolve({"pose_normalization": mode}, identifier)
+    active = {name for name, row in profile["joints"].items() if row["solve"]}
+    spine = {f"spine_{i:02}" for i in range(1, 6)} | {"neck_01", "neck_02", "head"}
+    limbs = {name for name, row in profile["joints"].items() if row["region"] == "LIMBS"}
+    assert active == {"OFF": set(), "LIMBS": limbs, "SPINE": spine, "ALL": spine | limbs}[mode]
+    assert set(profile["carry_joints"]) == (limbs if mode == "SPINE" else set())
+    assert not {"root", "pelvis"} & active
+    assert profile["axial_landmarks"]["head"].keys() == {"neck_01", "neck_02", "head"}
 
 
 def test_orientation_guard_detects_local_fold():

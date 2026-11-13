@@ -808,5 +808,5 @@ def test_configuration_exposes_components_before_relationships(setup_scene):
         "constrain_head_to_body",
         "adjust_seam",
         "zero_shape_deltas",
-        "normalize_to_a_pose",
+        "pose_normalization",
     }

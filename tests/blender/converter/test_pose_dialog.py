@@ -40,7 +40,7 @@ def test_native_range_error_retains_all_joints_and_closes_worker():
         job.commit()
     assert error.value.issues == ISSUES
     assert "Normalize to A-Pose" in str(error.value)
-    assert "Turn off" in str(error.value)
+    assert "to Off" in str(error.value)
     assert calls == ["closed"]
 
 
@@ -99,3 +99,19 @@ def test_stale_dialog_cannot_approve_a_new_conversion():
     assert errors and "expired" in errors[0][1]
     pose_dialog.CHARACTER_DNA_OT_confirm_partial_a_pose.cancel(operator, bpy.context)
     assert pose_dialog._pending is not None
+
+
+def test_mode_change_expires_confirmation():
+    props = pose_dialog.get_converter_properties()
+    before = props.pose_normalization
+    try:
+        props.pose_normalization = "LIMBS"
+        pose_dialog.offer(ISSUES, "[]", bpy.context)
+        errors = []
+        operator = SimpleNamespace(session=pose_dialog._pending.token, report=lambda *args: errors.append(args))
+        props.pose_normalization = "SPINE"
+        assert pose_dialog.CHARACTER_DNA_OT_confirm_partial_a_pose.execute(operator, bpy.context) == {"CANCELLED"}
+        assert errors and "expired" in errors[0][1]
+        assert pose_dialog._pending is None
+    finally:
+        props.pose_normalization = before

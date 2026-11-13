@@ -52,7 +52,7 @@ def configure_template(props, folder, preset="basic", components=("head", "body"
     recipe["dna_files"] = {kind: str(folder / f"{kind}.dna") for kind in components}
     recipe["meshes"] = [row for row in recipe["meshes"] if row["component"] in components]
     # Head-only fixtures exercise fitting/publication without a body pose model.
-    recipe["normalize_to_a_pose"] = "body" in components
+    recipe["pose_normalization"] = "LIMBS" if "body" in components else "OFF"
     apply_template(props, recipe)
     for item in props.extra_meshes:
         item.scene_object = bpy.data.objects.get(item.dna_mesh_name) if item.role in components else None
@@ -83,7 +83,7 @@ def test_convert_meshes_to_dna(  # noqa: PLR0915 - complete conversion contract
         item.validate_uvs = False
     # This contract copies the already-conformed observations without changing
     # their pose. Pose normalization has its own end-to-end contracts below.
-    properties.normalize_to_a_pose = False
+    properties.pose_normalization = "OFF"
     properties.constrain_head_to_body = True
 
     from character_dna.editors.converter.templates import export_template
@@ -187,8 +187,9 @@ def test_convert_meshes_to_dna(  # noqa: PLR0915 - complete conversion contract
     )
 
 
+@pytest.mark.parametrize("mode", ["OFF", "LIMBS", "SPINE", "ALL"])
 def test_template_pose_normalization_roundtrip(
-    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, conversion_diagnostics
+    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, conversion_diagnostics, mode
 ):
     import numpy as np
 
@@ -197,7 +198,8 @@ def test_template_pose_normalization_roundtrip(
     from character_dna.editors.converter.pipeline import positions, write_positions
 
     props = get_converter_properties()
-    rows = configure_template(props, base_dna_folder, components=("body",))
+    components = ("head", "body") if mode in {"SPINE", "ALL"} else ("body",)
+    rows = configure_template(props, base_dna_folder, components=components)
     body = rows["body"].scene_object
     reader = get_dna_reader(base_dna_folder / "body.dna")
     try:
@@ -216,14 +218,25 @@ def test_template_pose_normalization_roundtrip(
         write_positions(body, reference)
     finally:
         release_dna_handle(reader)
+    if "head" in components:
+        from character_dna.bindings import load_converter_core
+
+        template = load_converter_core().DnaTemplate(str(base_dna_folder / "head.dna"))
+        head = np.frombuffer(template.mesh("head_lod0_mesh")["positions"], np.float32).reshape(-1, 3)
+        write_positions(rows["head"].scene_object, head)
     original = positions(body)
     props.new_name = "PoseNormalizationRoundtrip"
     props.new_folder = str(tmp_path)
     for item in props.extra_meshes:
         item.validate_uvs = False
-    assert props.normalize_to_a_pose
+    assert props.pose_normalization == "LIMBS"
+    props.pose_normalization = mode
     assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
-    assert conversion_diagnostics["a_pose"]["status"] == "already_template"
+    if mode == "OFF":
+        assert "a_pose" not in conversion_diagnostics
+    else:
+        assert conversion_diagnostics["a_pose"]["status"] == "already_template"
+        assert conversion_diagnostics["a_pose"]["mode"] == mode
     assert conversion_diagnostics["meshes"]["body"]["export_max_error_m"] < 2e-6
     np.testing.assert_array_equal(positions(body), original)
     assert (tmp_path / "body.dna").is_file()
@@ -268,7 +281,7 @@ def test_known_limb_pose_full_operator(
     props.new_name, props.new_folder = "KnownLimbPose", str(tmp_path)
     for item in props.extra_meshes:
         item.validate_uvs = False
-    assert props.normalize_to_a_pose
+    assert props.pose_normalization == "LIMBS"
     assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
     instance = bpy.context.scene.character_dna.rig_instance_list[props.new_name]
     error = np.linalg.norm(positions(instance.body_mesh) - reference, axis=1)
@@ -308,7 +321,7 @@ def test_joined_input_conversion_preserves_each_component_domain(
         props.joined_mesh = joined
         for kind in sources:
             rows[kind].scene_object = None
-        props.normalize_to_a_pose = False
+        props.pose_normalization = "OFF"
         props.adjust_seam = False
         for item in props.extra_meshes:
             item.validate_uvs = False
@@ -345,7 +358,7 @@ def test_pose_quality_warning_allows_artist_review(
     props.new_folder = str(tmp_path)
     for item in props.extra_meshes:
         item.validate_uvs = False
-    assert props.normalize_to_a_pose
+    assert props.pose_normalization == "LIMBS"
     before = {row.scene_object: positions(row.scene_object) for role, row in rows.items() if role in {"head", "body"}}
     (tmp_path / "head.dna").write_bytes(b"previous output")
     # Pose quality is advisory so artists can inspect and correct the result.
@@ -515,7 +528,7 @@ def test_custom_mesh_names_and_all_supplied_anatomy(  # noqa: PLR0915
     if preset == "exact":
         for row in recipe["meshes"]:
             row["method"] = "COPY"
-    recipe["normalize_to_a_pose"] = False
+    recipe["pose_normalization"] = "OFF"
     recipe["meshes"] = [row for row in recipe["meshes"] if row["component"] == "head"]
     recipe["dna_files"] = {"head": str(path)}
     for row in recipe["meshes"]:

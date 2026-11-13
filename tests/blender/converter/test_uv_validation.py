@@ -153,4 +153,6 @@ def test_converter_always_requests_preserved_shading():
 def test_all_bundled_templates_enable_uv_validation(path):
     import json
 
-    assert all(row["validate_uvs"] for row in json.loads(path.read_text())["meshes"])
+    # Replacement attachments bind roots to a reference surface; they do not
+    # participate in UV correspondence with the destination DNA mesh.
+    assert all(row["validate_uvs"] for row in json.loads(path.read_text())["meshes"] if row["method"] == "COPY")
