@@ -1,4 +1,5 @@
 # standard library imports
+import json
 import logging
 import re
 
@@ -37,7 +38,7 @@ DataLayer = Literal[
 ]
 
 
-def _json_input_stream(file_path: Path, memory_resource: Any) -> Any:
+def _json_input_stream(file_path: Path, memory_resource: Any) -> tuple[Any, list]:
     """Flush subnormal JSON floats that the SDK's C++ reader rejects on macOS."""
     from ..bindings import dna
 
@@ -51,10 +52,25 @@ def _json_input_stream(file_path: Path, memory_resource: Any) -> Any:
         return b"0.0" if 0 < abs(float(token)) < minimum else token
 
     data = re.sub(rb'"(?:[^"\\]|\\.)*"|(?<![0-9.])-?\d+(?:\.\d+)?[eE]-\d+', normalize, file_path.read_bytes())
+    text = data.decode("utf-8")
+    descriptor_metadata = []
+    match = re.search(r'(?<!\\)"metadata"\s*:\s*', text)
+    if match:
+        descriptor_metadata, end = json.JSONDecoder().raw_decode(text, match.end())
+        if not isinstance(descriptor_metadata, list) or any(
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or any(not isinstance(value, str) or "\0" in value for value in pair)
+            for pair in descriptor_metadata
+        ):
+            raise ValueError("DNA metadata requires string key/value pairs without NUL characters.")
+        # SDK JSON string parsing cannot round-trip escaped quotes. Transport
+        # metadata through the native writer after reading the geometry instead.
+        text = text[: match.end()] + "[]" + text[end:]
     stream = dna.MemoryStream(memory_resource)
-    stream.write(data.decode("utf-8"), len(data))
+    stream.write(text, len(text.encode("utf-8")))
     stream.seek(0)
-    return stream
+    return stream, descriptor_metadata
 
 
 def release_dna_handle(handle: Any) -> None:
@@ -112,7 +128,7 @@ def get_dna_reader(
     if file_format.lower() == "json":
         # JSON has no Configuration overload. Transform it through a configured
         # binary reader below, respecting the JSON file's declared source basis.
-        stream = _json_input_stream(file_path, memory_resource)
+        stream, descriptor_metadata = _json_input_stream(file_path, memory_resource)
         reader = dna.JSONStreamReader(stream, memory_resource)
     elif file_format.lower() == "binary":
         stream = dna.FileStream(str(file_path), dna.AccessMode_Read, dna.OpenMode_Binary, memory_resource)
@@ -132,10 +148,18 @@ def get_dna_reader(
         release_dna_handle(reader)
         raise RuntimeError(f'Error loading DNA: {status.message} from "{file_path}"')
     if file_format.lower() == "json":
-        transformed = transform_reader(reader, data_layer=data_layer)
+        transformed = transform_reader(reader, data_layer=data_layer, descriptor_metadata=descriptor_metadata)
         release_dna_handle(reader)
         return transformed
     return reader
+
+
+def get_mesh_lods(reader: "dna.BinaryStreamReader") -> list[int]:
+    """LOD slots containing meshes; retained behavior slots can be empty.
+
+    Requires Definition (or All), rather than Descriptor alone.
+    """
+    return [lod for lod in range(reader.getLODCount()) if len(reader.getMeshIndicesForLOD(lod))]
 
 
 def get_dna_writer(file_path: Path, file_format: FileFormat = "binary") -> CanonicalDNAWriter:
@@ -281,8 +305,15 @@ def apply_blend_shape_deltas(
 
     scaled = deltas * linear_modifier
 
+    if vertex_count != reader.getVertexPositionCount(mesh_index):
+        used = sorted(set(reader.getVertexLayoutPositionIndices(mesh_index)))
+        if len(used) != vertex_count:
+            raise ValueError(f"{mesh_object.name} no longer has its DNA topology")
+        inverse = {dna: local for local, dna in enumerate(used)}
+        vertex_indices = np.asarray([inverse.get(int(v), -1) for v in vertex_indices], dtype=np.int64)
+
     # guard against vertex indices that no longer exist on the base mesh
-    valid = vertex_indices < vertex_count
+    valid = (vertex_indices >= 0) & (vertex_indices < vertex_count)
     if not valid.all():
         logger.warning(
             f'Some vertex indices are missing for shape key "{name}". '

@@ -5,12 +5,16 @@ which component a runtime binding evaluates.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import bpy
 import numpy as np
 
 from . import shape_names
+
+
+if TYPE_CHECKING:
+    from .mesh_sampling import MeshSample
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,21 @@ class RigComponent:
     @property
     def mesh(self) -> bpy.types.Object | None:
         return getattr(self.instance, f"{self.kind}_mesh")
+
+    def sample_mesh(self, mesh_index: int) -> "MeshSample":
+        """Read evaluated canonical positions, including uncommitted merged edits."""
+        from .mesh_sampling import sample_mesh
+
+        return sample_mesh(self, mesh_index)
+
+    def topology_fingerprint(self, mesh_index: int) -> dict:
+        """Identify the indexed topology of this component's canonical DNA mesh."""
+        from .dna_io import mesh_data
+
+        reader = self.dna_reader
+        if hasattr(reader, "getTopologyFingerprint"):
+            return reader.getTopologyFingerprint(mesh_index)
+        return mesh_data.topology(reader.getVertexPositionCount(mesh_index), mesh_data.reader_faces(reader, mesh_index))
 
     @property
     def dna_file_path(self) -> str:
@@ -164,15 +183,42 @@ class RigComponent:
         """Resolve stable scene IDs even while writeback has released cached readers."""
         if reader is None:
             return {}
+        scene_objects = self.instance.id_data.objects
         # Imported metadata survives user renames. Names support older blends.
         tagged = {
             obj.get("ca_dna_mesh_index"): obj
-            for obj in bpy.data.objects
+            for obj in scene_objects
             if obj.type == "MESH" and obj.get("ca_dna_rig") == self.rig and obj.get("ca_dna_component") == self.kind
         }
+        # A DNA merge deliberately detaches its canonical views. Only the
+        # instance's live surface registry can grant those IDs binding ownership.
+        registry = self.instance.get("dna_merged_surfaces")
+        surfaces = list(registry.values()) if registry else [self.instance.get("dna_merge_proxy")]
+        working = {}
+        for surface in surfaces:
+            if surface is None or surface.name not in scene_objects:
+                continue
+            obj = surface.get(f"dna_merge_{self.kind}")
+            if (
+                obj is not None
+                and obj.type == "MESH"
+                and obj.get("dna_working_source")
+                and obj.get("ca_dna_rig") == self.rig
+                and obj.get("ca_dna_component") == self.kind
+            ):
+                working[obj.get("ca_dna_mesh_index")] = obj
         result = {}
         for index in range(reader.getMeshCount()):
-            obj = tagged.get(index) or bpy.data.objects.get(f"{self.instance.name}_{reader.getMeshName(index)}")
+            # The explicitly linked main mesh can replace the imported template.
+            # Retained IDs outside this scene must never steal its shape bindings.
+            if index == 0 and self.mesh and self.mesh.name in scene_objects:
+                obj = self.mesh
+            else:
+                obj = (
+                    tagged.get(index)
+                    or working.get(index)
+                    or scene_objects.get(f"{self.instance.name}_{reader.getMeshName(index)}")
+                )
             if obj is not None:
                 result[index] = obj
         return result

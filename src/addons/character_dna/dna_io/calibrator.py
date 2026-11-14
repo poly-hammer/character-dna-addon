@@ -19,6 +19,7 @@ from ..constants import (
     SHAPE_KEY_DELTA_THRESHOLD,
 )
 from ..typing import *  # noqa: F403  # noqa: F403
+from . import mesh_data, vertex_indices as position_indices
 from .exporter import DNAExporter
 from .importer import DNAImporter
 from .misc import get_dna_reader
@@ -36,9 +37,8 @@ class DNACalibrator(DNAExporter, DNAImporter):
         return bool(self._instance.output.auto_update_lods) and self._instance.is_pro
 
     def validate(self) -> tuple[bool, str, str, Callable | None]:
-        valid, title, message, fix = super().validate()
-        if not valid:
-            return (valid, title, message, fix)
+        if not self._rig_object or not self._include_meshes:
+            return super().validate()
 
         # A calibration writes back into the DNA's own vertex arrays by index, so a mesh that
         # gained vertices has nowhere to write them. Overwriting is unaffected, hence the override.
@@ -54,10 +54,10 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 mesh_index = mesh_index_lookup.get(real_name)
                 if mesh_index is None:
                     continue
-                dna_vertex_count = len(self._dna_reader.getVertexPositionXs(mesh_index))
-                scene_vertex_count = len(mesh_object.data.vertices)
-                if scene_vertex_count != dna_vertex_count:
-                    mismatched.append(f'"{mesh_object.name}" has {scene_vertex_count}, DNA has {dna_vertex_count}')
+                try:
+                    position_indices.for_mesh(self._dna_reader, mesh_index, mesh_object.data)
+                except ValueError as error:
+                    mismatched.append(f"{mesh_object.name}: {error}")
 
         if mismatched:
             return (
@@ -68,7 +68,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 None,
             )
 
-        return (True, "Success", "All validations passed.", None)
+        return super().validate()
 
     def _get_body_mesh_lookup(
         self, lod_index: int, mesh_name: str, head_to_body_edge_loop_mapping: dict[str, dict[int, int]]
@@ -76,23 +76,39 @@ class DNACalibrator(DNAExporter, DNAImporter):
         # If this is the head, and the align head and body option is on, then we want to use the
         # exact same vertex positions for the body and head vertices where they overlap. This needs to
         # be precised to the exact floating point value.
-        if mesh_name != f"{self._instance.name}_head_lod{lod_index}_mesh":
+        if (
+            self._component_type != "head"
+            or self._seam_follower != "head"
+            or self._instance.output.method != "calibrate"
+            or not self._instance.output.align_head_and_body
+            or mesh_name != f"{self._instance.name}_head_lod{lod_index}_mesh"
+        ):
             return {}
 
-        body_lod_index = HEAD_TO_BODY_LOD_MAPPING.get(lod_index)
+        custom = mesh_data.has_custom_topology(self._dna_reader, "head")
+        body_lod_index = lod_index if custom else HEAD_TO_BODY_LOD_MAPPING.get(lod_index)
         body_mesh_name = f"{self._instance.name}_body_lod{body_lod_index}_mesh"
         body_mesh_lod = bpy.data.objects.get(body_mesh_name)
-        if (
-            self._component_type == "head"
-            and self._seam_follower == "head"
-            and self._instance.output.method == "calibrate"
-            and self._instance.output.align_head_and_body
-            and body_mesh_lod
-        ):
+        if body_mesh_lod:
             bmesh_object = self.get_bmesh(body_mesh_lod)
             vertex_indices, vertex_positions = self.get_mesh_vertex_positions(bmesh_object)
             bmesh_object.free()
             vert_lookup = dict(zip(vertex_indices, vertex_positions, strict=False))
+
+            if custom:
+                head = bpy.data.objects.get(mesh_name)
+                head_ring = mesh_data.object_boundary(head) if head else None
+                body_ring = mesh_data.object_boundary(body_mesh_lod)
+                if head_ring is None or body_ring is None:
+                    raise ValueError(f"Both LOD{lod_index} meshes need {mesh_data.SEAM_GROUP} for alignment.")
+                seam = mesh_data.match_boundaries(
+                    head_ring,
+                    body_ring,
+                    [v.co[:] for v in head.data.vertices],
+                    [v.co[:] for v in body_mesh_lod.data.vertices],
+                    tolerance=0.001,
+                )
+                return {h: Vector(vert_lookup[b]) for h, b in seam.items()}
 
             try:
                 return {
@@ -150,6 +166,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 bmesh_object.free()
 
                 # Read these from the DNA file and modify these arrays so that they match the vertex indices match
+                dna_indices = position_indices.for_mesh(self._dna_reader, mesh_index, mesh_object.data)
                 x_values = self._dna_reader.getVertexPositionXs(mesh_index)
                 y_values = self._dna_reader.getVertexPositionYs(mesh_index)
                 z_values = self._dna_reader.getVertexPositionZs(mesh_index)
@@ -164,19 +181,18 @@ class DNACalibrator(DNAExporter, DNAImporter):
                     continue
 
                 for vertex_index in vertex_indices:
+                    dna_index = dna_indices[vertex_index]
                     # See if we can get the vertex position from the body mesh lookup first,
                     # so that we have an exact match
                     vertex_position = body_mesh_lookup.get(int(vertex_index), Vector(vertex_positions[vertex_index]))
-                    dna_vertex_position = Vector(
-                        (x_values[vertex_index], y_values[vertex_index], z_values[vertex_index])
-                    )
+                    dna_vertex_position = Vector((x_values[dna_index], y_values[dna_index], z_values[dna_index]))
                     delta = vertex_position - dna_vertex_position
                     # This ensures that we only modify the vertex positions that are different to
                     # avoid floating value drift
                     if delta.length > 1e-6:
-                        x_values[vertex_index] = vertex_position.x
-                        y_values[vertex_index] = vertex_position.y
-                        z_values[vertex_index] = vertex_position.z
+                        x_values[dna_index] = vertex_position.x
+                        y_values[dna_index] = vertex_position.y
+                        z_values[dna_index] = vertex_position.z
 
                 positions = [[x, y, z] for x, y, z in zip(x_values, y_values, z_values, strict=False)]
                 self._dna_writer.setVertexPositions(meshIndex=mesh_index, positions=positions)
@@ -337,8 +353,23 @@ class DNACalibrator(DNAExporter, DNAImporter):
         the same LOD (teeth, eyes, ...) are ignored -- their vertex indices are
         unrelated to the head-to-body mapping."""
         lod_index = utilities.get_lod_index(mesh_name)
-        if lod_index == -1:
+        if lod_index == -1 or mesh_name != f"{self._component_type}_lod{lod_index}_mesh":
             return None
+
+        if mesh_data.has_custom_topology(self._dna_reader, self._component_type):
+            other = "body" if self._component_type == "head" else "head"
+            reference = self._seam_reference_reader()
+            if reference is None:
+                raise ValueError("The other component DNA is required for custom neckline alignment.")
+            try:
+                pairs = mesh_data.reader_seam({self._component_type: self._dna_reader, other: reference}, lod_index)
+                values = list(pairs.items()) if self._component_type == "head" else [(b, h) for h, b in pairs.items()]
+                return f"{other}_lod{lod_index}_mesh", values
+            finally:
+                if self._seam_reference_dna_path is not None:
+                    from .misc import release_dna_handle
+
+                    release_dna_handle(reference)
 
         if self._seam_follower == "head":
             if mesh_name != f"head_lod{lod_index}_mesh":
@@ -474,6 +505,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
                 vertex_indices, _ = self.get_mesh_vertex_positions(bmesh_object)
                 bmesh_object.free()
 
+                dna_indices = position_indices.for_mesh(self._dna_reader, mesh_index, mesh_object.data)
                 for index in range(self._dna_reader.getBlendShapeTargetCount(mesh_index)):
                     channel_index = self._dna_reader.getBlendShapeChannelIndex(mesh_index, index)
                     shape_key_name = self._dna_reader.getBlendShapeChannelName(channel_index)
@@ -494,6 +526,18 @@ class DNACalibrator(DNAExporter, DNAImporter):
 
                     dna_delta_vertex_indices = []
                     dna_delta_values = []
+                    visible = set(dna_indices)
+                    original_ids = self._dna_reader.getBlendShapeTargetVertexIndices(mesh_index, index)
+                    original_deltas = zip(
+                        self._dna_reader.getBlendShapeTargetDeltaXs(mesh_index, index),
+                        self._dna_reader.getBlendShapeTargetDeltaYs(mesh_index, index),
+                        self._dna_reader.getBlendShapeTargetDeltaZs(mesh_index, index),
+                        strict=True,
+                    )
+                    for dna_index, delta in zip(original_ids, original_deltas, strict=True):
+                        if dna_index not in visible:
+                            dna_delta_vertex_indices.append(dna_index)
+                            dna_delta_values.append(list(delta))
 
                     # the new shape key is the dna shape key with the deltas from the blender shape key applied
                     for vertex_index in vertex_indices:
@@ -508,7 +552,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
                             # Apply the coordinate system conversion and linear modifier for the
                             # scene units to the delta
                             converted_delta = new_delta / self._linear_modifier
-                            dna_delta_vertex_indices.append(vertex_index)
+                            dna_delta_vertex_indices.append(dna_indices[vertex_index])
                             # The DNA writer's typemap requires a list of [x, y, z] lists of plain
                             # Python floats (matching ``setVertexPositions``); tuples or mathutils
                             # scalars are rejected with a SystemError/TypeError.
@@ -576,9 +620,8 @@ class DNACalibrator(DNAExporter, DNAImporter):
                     )
                     continue
 
-                self._dna_writer.clearSkinWeights(meshIndex=mesh_index)
-                if mesh_object.data.vertices:
-                    self._dna_writer.setSkinWeightsValues(mesh_index, len(mesh_object.data.vertices) - 1, [])
+                dna_indices = position_indices.for_mesh(self._dna_reader, mesh_index, mesh_object.data)
+                # Patch visible vertices; preserve weights on unused DNA slots.
                 groups_by_name = {group.name: group for group in mesh_object.vertex_groups}
                 # Create a lookup table for the vertex group names by their index
                 vertex_group_lookup = {
@@ -604,10 +647,10 @@ class DNACalibrator(DNAExporter, DNAImporter):
                             weights.append(weight)
 
                     self._dna_writer.setSkinWeightsJointIndices(
-                        meshIndex=mesh_index, vertexIndex=vertex.index, jointIndices=bone_indices
+                        meshIndex=mesh_index, vertexIndex=dna_indices[vertex.index], jointIndices=bone_indices
                     )
                     self._dna_writer.setSkinWeightsValues(
-                        meshIndex=mesh_index, vertexIndex=vertex.index, weights=weights
+                        meshIndex=mesh_index, vertexIndex=dna_indices[vertex.index], weights=weights
                     )
 
     def calibrate_bone_transforms(self):
@@ -691,6 +734,7 @@ class DNACalibrator(DNAExporter, DNAImporter):
     def run(self) -> tuple[bool, str, str, Callable | None]:
         self._prepare_merged_export()
         self.initialize_scene_data()
+        self._topology_type()
         if self._instance.output.run_validations:
             valid, title, message, fix = self.validate()
             if not valid:
@@ -715,6 +759,20 @@ class DNACalibrator(DNAExporter, DNAImporter):
             self.calibrate_bone_transforms()
 
         logger.info(f'Saving DNA to: "{self._target_dna_file}"...')
+        for objects in self._export_lods.values():
+            for obj, _ in objects:
+                name = self._explicit_names.get(obj, utilities.remove_instance_prefix(obj.name, self._prefix))
+                index = next(
+                    (i for i in range(self._dna_reader.getMeshCount()) if self._dna_reader.getMeshName(i) == name), None
+                )
+                if index is not None:
+                    self._capture_mesh_metadata(
+                        obj,
+                        index,
+                        name,
+                        self._dna_reader.getVertexPositionCount(index),
+                        mesh_data.reader_faces(self._dna_reader, index),
+                    )
         self._export_component_extensions()
         self._dna_writer.write()
 

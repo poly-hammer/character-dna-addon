@@ -13,7 +13,7 @@ import pytest
 from character_dna import shape_names
 from character_dna.constants import HEAD_TO_BODY_EDGE_LOOP_FILE_PATH
 from character_dna.dna_io import document, get_dna_reader, get_dna_writer, release_dna_handle
-from character_dna.editors.converter import scene_merge
+from character_dna.editors.converter.scene import merge as scene_merge
 from character_dna.runtime import controller, engine
 from character_dna.utilities import get_active_rig_instance
 from constants import TEST_DNA_FOLDER
@@ -174,29 +174,20 @@ def test_raw_jaw_edit_keeps_merged_surface_and_canonical_target(character, commi
     assert np.max(np.linalg.norm(posed - coordinates(proxy.data.vertices), axis=1)) > 0.01
     editor = RawControlEditor.for_instance(instance)
     editor.enter(bpy.context)
-    assert bpy.context.object == proxy
+    target = instance.raw_control_editor.target_meshes[0].scene_object
+    assert bpy.context.object == target
+    assert target != proxy and not target.hide_get()
+    assert all(mod.show_viewport for mod in proxy.modifiers)
     np.testing.assert_allclose(evaluated_coordinates(proxy), posed, atol=1e-6)
     for mode in ("POSE", "EDIT", "OBJECT", "SCULPT"):
         instance.raw_control_editor.view_mode = mode
         np.testing.assert_allclose(evaluated_coordinates(proxy), posed, atol=1e-6, err_msg=mode)
     assert all(obj.hide_get() for obj in (instance.head_mesh, instance.body_mesh))
-    target = next(
-        row.scene_object
-        for row in instance.raw_control_editor.target_meshes
-        if row.scene_object.get("dna_edit_surface")
-    )
     assert len(target.data.vertices) == len(instance.head_mesh.data.vertices)
     bpy.ops.object.mode_set(mode="OBJECT")
-    reference = proxy.data.shape_keys.key_blocks["DNA_edit_reference"]
-    assert reference.lock_shape
-    reference_positions = coordinates(reference.data)
     before = coordinates(target.data.vertices).copy()
-    index = next(index for index, item in enumerate(proxy.data.attributes["DNA_head_vertex"].data) if item.value == 0)
-    proxy.active_shape_key.data[index].co.x += 0.01
-    expected = posed.copy()
-    expected[index, 0] += 0.01
-    np.testing.assert_allclose(evaluated_coordinates(proxy), expected, atol=1e-6)
-    np.testing.assert_array_equal(coordinates(reference.data), reference_positions)
+    target.data.vertices[0].co.x += 0.01
+    np.testing.assert_allclose(evaluated_coordinates(proxy), posed, atol=1e-6)
     utilities._flush_sculpt_to_mesh(target)
     np.testing.assert_allclose(coordinates(target.data.vertices)[0], before[0] + [0.01, 0, 0], atol=1e-6)
     if commit:
@@ -218,6 +209,191 @@ def test_raw_jaw_edit_keeps_merged_surface_and_canonical_target(character, commi
     editor.enter(bpy.context)
     np.testing.assert_allclose(evaluated_coordinates(proxy), posed, atol=1e-6)
     editor.revert(bpy.context)
+
+
+@pytest.mark.parametrize(
+    ("kind", "control_name", "bone_name"),
+    [
+        ("head", "default", "FACIAL_L_LipCorner"),
+        ("head", "CTRL_expressions.jawOpen", "FACIAL_L_LipCorner"),
+        ("body", "default", "calf_l"),
+    ],
+)
+@pytest.mark.parametrize("offset", [False, True], ids=["in_place", "offset"])
+@pytest.mark.rig_profile(document_mode="scene")
+def test_raw_merged_source_follows_bones_while_targets_stay_fixed(character, kind, control_name, bone_name, offset):
+    from character_dna.editors.converter.source.views import evaluated_source
+    from character_dna.editors.raw_control_editor.editor import RawControlEditor
+
+    instance = character
+    instance.editor_component = kind
+    component = instance.edit_target
+    props = instance.raw_control_editor
+    props.raw_controls_active_index = props.raw_controls.find(control_name)
+    proxy = scene_merge.proxy_for(instance)
+    editor = RawControlEditor.for_instance(instance)
+    editor.enter(bpy.context)
+    try:
+        props.target_mesh_offset = offset
+        props.view_mode = "POSE"
+        assert bpy.context.mode == "POSE" and bpy.context.object == component.rig
+        target = props.target_meshes[0].scene_object
+        target_coordinates = coordinates(target.data.vertices).copy()
+        before = evaluated_coordinates(proxy)
+        bone = component.rig.pose.bones[bone_name]
+        bone.location.z += 0.02
+        component.rig.update_tag()
+        after = evaluated_coordinates(proxy)
+        assert np.max(np.linalg.norm(after - before, axis=1)) > 0.001
+        np.testing.assert_array_equal(coordinates(target.data.vertices), target_coordinates)
+        assert all(mod.show_viewport and mod.show_render for mod in proxy.modifiers)
+        with evaluated_source(component.mesh):
+            expected = evaluated_coordinates(component.mesh)
+        indices = np.array([item.value for item in proxy.data.attributes[f"DNA_{kind}_vertex"].data])
+        other_kind = "body" if kind == "head" else "head"
+        other_indices = np.array([item.value for item in proxy.data.attributes[f"DNA_{other_kind}_vertex"].data])
+        valid = (indices >= 0) & (other_indices < 0)
+        np.testing.assert_allclose(after[valid], expected[indices[valid]], atol=2e-5)
+        for mode in ("OBJECT", "SCULPT", "EDIT", "POSE"):
+            props.view_mode = mode
+            assert bpy.context.mode == ("EDIT_MESH" if mode == "EDIT" else mode)
+            np.testing.assert_allclose(evaluated_coordinates(proxy), after, atol=2e-5)
+    finally:
+        editor.revert(bpy.context)
+
+
+@pytest.mark.parametrize("offset", [False, True], ids=["in_place", "offset"])
+@pytest.mark.rig_profile(document_mode="scene", compact=True)
+def test_raw_recovers_baked_session_without_losing_sculpt_or_pose(character, offset):
+    from character_dna.editors.raw_control_editor.editor import RawControlEditor
+
+    instance = character
+    props = instance.raw_control_editor
+    props.raw_controls_active_index = props.raw_controls.find("default")
+    proxy = scene_merge.proxy_for(instance)
+    editor = RawControlEditor.for_instance(instance)
+    editor.enter(bpy.context)
+    try:
+        props.target_mesh_offset = offset
+        props.view_mode = "OBJECT"
+        target = props.target_meshes[0].scene_object
+        initial = coordinates(target.data.vertices).copy()
+        expected = initial.copy()
+        expected[0, 0] += 0.01
+        # Recreate the saved representation used by previous merged raw sessions.
+        baked = evaluated_coordinates(proxy)
+        for name in ("DNA_edit_reference", "DNA_edit_preview"):
+            key = proxy.shape_key_add(name=name, from_mix=False)
+            key.data.foreach_set("co", baked.reshape(-1))
+        proxy.data.shape_keys.key_blocks["DNA_edit_reference"].mute = True
+        proxy.data.shape_keys.key_blocks["DNA_edit_preview"].value = 1
+        for modifier in proxy.modifiers:
+            modifier.show_viewport = modifier.show_render = False
+        target["dna_edit_surface"] = proxy
+        target["dna_edit_kind"] = "head"
+        attribute = target.data.attributes.new("DNA_raw_initial", "FLOAT_VECTOR", "POINT")
+        attribute.data.foreach_set("vector", initial.reshape(-1))
+        if offset:
+            target["dna_edit_offset"] = True
+            target.data.vertices.foreach_set("co", expected.reshape(-1))
+        else:
+            indices = [item.value for item in proxy.data.attributes["DNA_head_vertex"].data]
+            proxy.data.shape_keys.key_blocks["DNA_edit_preview"].data[indices.index(0)].co.x += 0.01
+            target.hide_set(True)
+            target.hide_render = True
+        bone = instance.head_rig.pose.bones[0]
+        bone.location.z += 0.02
+        pose = bone.matrix_basis.copy()
+
+        props.view_mode = "POSE"
+        assert bpy.context.mode == "POSE"
+        assert not target.get("dna_edit_surface")
+        assert not target.hide_get() and not target.hide_render
+        np.testing.assert_allclose(coordinates(target.data.vertices), expected, atol=1e-6)
+        np.testing.assert_array_equal(bone.matrix_basis, pose)
+        assert all(mod.show_viewport and mod.show_render for mod in proxy.modifiers)
+        assert "DNA_edit_preview" not in proxy.data.shape_keys.key_blocks
+        assert "DNA_raw_initial" not in target.data.attributes
+        assert proxy.get("dna_edit_snapshot")  # Revert still owns the original snapshot.
+    finally:
+        editor.revert(bpy.context)
+
+
+@pytest.mark.parametrize("control_name", ["default", "CTRL_expressions.jawOpen"])
+@pytest.mark.parametrize("commit", [False, True], ids=["revert", "commit"])
+@pytest.mark.rig_profile(document_mode="scene", compact=True)
+def test_raw_target_offset_keeps_merged_character_stationary(character, control_name, commit):  # noqa: PLR0915
+    from character_dna.editors.raw_control_editor import utilities
+    from character_dna.editors.raw_control_editor.editor import RawControlEditor
+
+    instance = character
+    props = instance.raw_control_editor
+    props.filter_target_meshes_by_displacement = False
+    props.raw_controls_active_index = props.raw_controls.find(control_name)
+    props.auto_update_lods = False
+    props.update_mesh = True
+    proxy = scene_merge.proxy_for(instance)
+    matrix = proxy.matrix_world.copy()
+    body = coordinates(instance.body_mesh.data.vertices).copy()
+    head = coordinates(instance.head_mesh.data.vertices).copy()
+    editor = RawControlEditor.for_instance(instance)
+    editor.enter(bpy.context)
+    target = props.target_meshes[0].scene_object
+    target_name = target.name
+    assert not target.get("dna_edit_surface")
+    initial = coordinates(target.data.vertices).copy()
+    try:
+        bpy.ops.object.mode_set(mode="OBJECT")
+        target.data.vertices[0].co.x += 0.01
+        props.view_mode = "SCULPT"
+        props.target_mesh_offset = True
+        assert proxy.matrix_world == matrix
+        assert bpy.context.object == target and bpy.context.mode == "SCULPT"
+        assert not target.hide_get() and not target.hide_render
+        assert target.location.x < instance.head_mesh.location.x
+        np.testing.assert_allclose(coordinates(target.data.vertices)[0], initial[0] + [0.01, 0, 0], atol=1e-6)
+
+        # Reads and mesh operations must keep using the visible standalone target.
+        bpy.ops.object.mode_set(mode="OBJECT")
+        target.data.vertices[0].co.x += 0.02
+        expected = coordinates(target.data.vertices).copy()
+        utilities._flush_sculpt_to_mesh(target)
+        np.testing.assert_array_equal(coordinates(target.data.vertices), expected)
+        utilities._write_mesh_vertices_local(target, expected.tolist())
+        for mode in ("POSE", "EDIT", "OBJECT", "SCULPT"):
+            props.view_mode = mode
+            assert proxy.matrix_world == matrix
+            if mode in {"EDIT", "SCULPT"}:
+                assert bpy.context.object == target
+            props.solo_visibility = True
+            assert not target.hide_get()
+            props.solo_visibility = False
+        for _cycle in range(2):
+            props.target_mesh_offset = False
+            assert bpy.context.object == target
+            assert not target.hide_get() and not target.hide_render
+            assert proxy.matrix_world == matrix
+            props.target_mesh_offset = True
+            assert bpy.context.object == target
+            np.testing.assert_allclose(coordinates(target.data.vertices), expected, atol=1e-6)
+        np.testing.assert_array_equal(coordinates(instance.body_mesh.data.vertices), body)
+        if commit:
+            editor.commit(bpy.context)
+        else:
+            editor.revert(bpy.context)
+    finally:
+        if editor.is_editing:
+            editor.revert(bpy.context)
+    assert scene_merge.proxy_for(instance) == proxy
+    assert proxy.matrix_world == matrix
+    assert bpy.data.objects.get(target_name) is None
+    assert "DNA_edit_preview" not in proxy.data.shape_keys.key_blocks
+    np.testing.assert_array_equal(coordinates(instance.body_mesh.data.vertices), body)
+    if control_name == "default":
+        if commit:
+            head[0, 0] += 0.03
+        np.testing.assert_allclose(coordinates(instance.head_mesh.data.vertices), head, atol=1e-6)
+    assert engine.binding_issues(instance) == []
 
 
 @pytest.mark.rig_profile(document_mode="scene", compact=True)
@@ -307,10 +483,8 @@ def test_raw_rest_sculpt_preserves_merge_and_writes_selected_component(character
     editor = RawControlEditor.for_instance(instance)
     editor.enter(bpy.context)
     bpy.ops.object.mode_set(mode="OBJECT")
-    vertex = next(
-        index for index, item in enumerate(proxy.data.attributes[f"DNA_{kind}_vertex"].data) if item.value == 0
-    )
-    proxy.active_shape_key.data[vertex].co.x += 0.01
+    target = instance.raw_control_editor.target_meshes[0].scene_object
+    target.data.vertices[0].co.x += 0.01
     if commit:
         editor.commit(bpy.context)
     else:
@@ -388,6 +562,63 @@ def test_rbf_keeps_merged_surface(character, kind, commit):
     assert scene_merge.proxy_for(instance) == proxy
     assert identity == (proxy.as_pointer(), proxy.data.as_pointer(), proxy.data.shape_keys.as_pointer())
     assert all(obj.hide_get() for obj in (instance.head_mesh, instance.body_mesh))
+
+
+@pytest.mark.parametrize(
+    ("editor_name", "kind", "bone_name"),
+    [
+        ("rbf", "head", "FACIAL_L_LipCorner"),
+        ("rbf", "body", "calf_l"),
+        ("shape", "head", "FACIAL_L_LipCorner"),
+        ("swing_twist", "body", "calf_l"),
+    ],
+)
+@pytest.mark.rig_profile(document_mode="scene")
+def test_other_merged_editors_keep_live_skinning(character, editor_name, kind, bone_name):
+    from character_dna.dna_io.misc import create_shape_key
+    from character_dna.editors.converter.surface.session import refresh
+    from character_dna.editors.rbf_editor.editor import RBFEditor
+    from character_dna.editors.shape_key_editor.editor import ShapeKeyEditor
+    from character_dna.editors.swing_twist_editor.editor import SwingTwistEditor
+
+    instance = character
+    instance.editor_component = kind
+    if editor_name == "shape":
+        reader = instance.head_dna_reader
+        mesh_index = next(index for index, obj in instance.head_mesh_index_lookup.items() if obj == instance.head_mesh)
+        channel = reader.getBlendShapeChannelIndex(mesh_index, 0)
+        with controller.authoring_operation(instance):
+            key = create_shape_key(
+                0,
+                mesh_index,
+                instance.head_mesh,
+                reader,
+                reader.getBlendShapeChannelName(channel),
+                prefix=f"{reader.getMeshName(mesh_index)}__",
+                linear_modifier=0.01,
+            )
+            instance.destroy_references()
+            instance.sync_shape_key_list()
+            refresh(instance)
+        instance.shape_key_editor.shape_key_list_active_index = instance.shape_key_editor.shape_key_list.find(key.name)
+    editor_type = {"rbf": RBFEditor, "shape": ShapeKeyEditor, "swing_twist": SwingTwistEditor}[editor_name]
+    editor = editor_type.for_instance(instance)
+    editor.enter(bpy.context)
+    try:
+        proxy = scene_merge.proxy_for(instance)
+        before = evaluated_coordinates(proxy)
+        if editor_name == "swing_twist":
+            instance.swing_twist_editor.preview_offset = np.pi / 4
+            assert not instance.swing_twist_editor.error
+        else:
+            instance.edit_target.rig.pose.bones[bone_name].location.z += 0.02
+            instance.edit_target.rig.update_tag()
+        after = evaluated_coordinates(proxy)
+        assert np.max(np.linalg.norm(after - before, axis=1)) > 0.001
+        assert all(mod.show_viewport and mod.show_render for mod in proxy.modifiers)
+        assert "DNA_edit_preview" not in proxy.data.shape_keys.key_blocks
+    finally:
+        editor.revert(bpy.context)
 
 
 def test_scene_split_rejects_shape_ownership_collision_without_mutation(character):
@@ -595,7 +826,7 @@ def test_shape_editor_uses_welded_surface_and_restores_canonical_order(character
 
 
 def test_document_merge_requires_shared_output_folder(minimal_character, tmp_path):
-    from character_dna.editors.converter.merge_split import _output_directory
+    from character_dna.editors.converter.mesh.merge_split import _output_directory
 
     instance = minimal_character
     instance["head_dna_file_path"] = str(tmp_path / "head.dna")
@@ -743,7 +974,7 @@ def test_failed_split_rebinding_keeps_merged_scene_and_file_ownership(character,
     from types import SimpleNamespace
 
     from character_dna.dna_io import shape_dependencies
-    from character_dna.editors.converter.merge_split import SplitComponents
+    from character_dna.editors.converter.mesh.merge_split import SplitComponents
 
     instance = character
     assert bpy.ops.character_dna.merge_components() == {"FINISHED"}

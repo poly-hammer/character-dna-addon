@@ -163,7 +163,7 @@ def test_document_view_cache_evicts_oldest_and_retains_one_oversized_document(mo
 def test_source_reload_preserves_deferred_channels(empty_character_scene, compact_two_target_asset):
     from character_dna.dna_io import get_dna_reader, release_dna_handle
     from character_dna.dna_io.misc import create_shape_key
-    from character_dna.editors.converter import source_views
+    from character_dna.editors.converter.source import views as source_views
 
     objects = []
     for name in ("BeforeReload", "AfterReload"):

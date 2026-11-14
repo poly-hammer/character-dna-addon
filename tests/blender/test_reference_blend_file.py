@@ -384,7 +384,8 @@ class _ReadonlyUILayout:
 
 
 @pytest.mark.parametrize("mode", ["APPEND", "LINK", "EDITABLE_LINK"])
-def test_reference_readonly_panel_states(mode: str, monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize("has_head_material", [True, False])
+def test_reference_readonly_panel_states(mode: str, has_head_material: bool, monkeypatch: pytest.MonkeyPatch):
     from types import SimpleNamespace
 
     from character_dna.ui import view_3d
@@ -398,7 +399,7 @@ def test_reference_readonly_panel_states(mode: str, monkeypatch: pytest.MonkeyPa
         body_rig=owner,
         face_board=owner,
         control_rig=owner,
-        head_material=owner,
+        head_material=owner if has_head_material else None,
         head_mesh=owner,
         view_options=view_options,
         auto_evaluate=True,
@@ -413,7 +414,9 @@ def test_reference_readonly_panel_states(mode: str, monkeypatch: pytest.MonkeyPa
         is_pro=False,
     )
     properties = SimpleNamespace(rig_instance_list=[instance], rig_instance_list_active_index=0, face_board=object())
-    context = SimpleNamespace(scene=SimpleNamespace(character_dna=properties))
+    context = SimpleNamespace(
+        scene=SimpleNamespace(character_dna=properties), window_manager=SimpleNamespace(character_dna=object())
+    )
     monkeypatch.setattr(view_3d, "get_active_rig_instance", lambda: instance)
     monkeypatch.setattr(view_3d, "valid_rig_instance_exists", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(engine, "carriers", lambda _instance: [])
@@ -465,7 +468,8 @@ def test_reference_readonly_panel_states(mode: str, monkeypatch: pytest.MonkeyPa
             panel.draw_header(panel_self, cast("Any", context))
         panel.draw(panel_self, cast("Any", context))
         for name in names:
-            assert layout.writable(name) == (mode == "APPEND"), (panel.__name__, name, mode)
+            expected = mode == "APPEND" and (name != "active_material_preview" or has_head_material)
+            assert layout.writable(name) == expected, (panel.__name__, name, mode, has_head_material)
     assert layout.writable("character_dna.force_evaluate")
     layout = _ReadonlyUILayout()
     view_3d.CHARACTER_DNA_PT_face_board.draw(cast("Any", SimpleNamespace(layout=layout)), cast("Any", context))
@@ -588,6 +592,63 @@ def test_reference_rollback(tmp_path: Path, mode: str, monkeypatch: pytest.Monke
     assert properties.rig_instance_list_active_index == active_index
     assert released == ["Rollback"]
     assert notified == []
+
+
+def test_reference_editable_indirect_objects(tmp_path: Path):
+    """Objects without local users must be promoted before making protected overrides."""
+    from character_dna.utilities import reference
+
+    before = set(bpy.data.user_map())
+    try:
+        control = bpy.data.objects.new("Indirect_control", bpy.data.armatures.new("Indirect_controls"))
+        output = bpy.data.objects.new("Indirect_output", bpy.data.meshes.new("Indirect_geometry"))
+        output.data.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+        output.parent = control
+        output.modifiers.new("Binding", "ARMATURE").object = control
+        output.shape_key_add(name="Basis")
+        shape = output.shape_key_add(name="Expression")
+        curve = shape.driver_add("value")
+        variable = curve.driver.variables.new()
+        variable.type = "TRANSFORMS"
+        variable.targets[0].id = control
+        curve.driver.expression = variable.name
+        holder = bpy.data.objects.new("Indirect_holder", None)
+        holder["output"] = output
+        source = tmp_path / "indirect.blend"
+        bpy.data.libraries.write(str(source), {holder})
+        bpy.data.batch_remove(ids=set(bpy.data.user_map()) - before)
+
+        # Loading only the holder reproduces indirect object IDs even on Blender
+        # versions that mark explicitly requested objects as directly linked.
+        with bpy.data.libraries.load(str(source), link=True) as (_, data_to):
+            data_to.objects = ["Indirect_holder"]
+        source_output = data_to.objects[0]["output"]
+        source_control = source_output.parent
+        assert source_output.is_library_indirect
+        assert source_control.is_library_indirect
+        collections = set(bpy.data.collections)
+        loaded = reference._editable_objects(
+            {"control": source_control, "output": source_output},
+            {"pointers": {"face_board": "control"}},
+        )
+        control, output = loaded["control"], loaded["output"]
+        assert control.library is None and control.override_library is None
+        assert control.data.library is None
+        assert output.override_library.reference == source_output
+        assert output.override_library.is_system_override
+        assert output.data.override_library.reference == source_output.data
+        assert output.data.override_library.is_system_override
+        assert output.parent == control
+        assert output.modifiers[0].object == control
+        assert output.data.shape_keys.animation_data.drivers[0].driver.variables[0].targets[0].id == control
+        assert source_output.parent == source_control
+        assert source_output.modifiers[0].object == source_control
+        assert (
+            source_output.data.shape_keys.animation_data.drivers[0].driver.variables[0].targets[0].id == source_control
+        )
+        assert set(bpy.data.collections) == collections
+    finally:
+        bpy.data.batch_remove(ids=set(bpy.data.user_map()) - before)
 
 
 @pytest.mark.parametrize("mode", ["APPEND", "LINK", "EDITABLE_LINK"])

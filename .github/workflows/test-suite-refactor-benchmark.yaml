@@ -120,16 +120,16 @@ jobs:
           uv pip install "bpy==${{ matrix.blender }}.*" pytest==9.0.2 coverage==7.13.5
       - name: Prepare identical bindings
         working-directory: candidate
-        run: uv run --no-sync python scripts/test_suite_refactor/prepare_ci.py --bindings ../character-dna-bindings ../baseline .
+        run: uv run --no-sync python tests/benchmarks/prepare_ci.py --bindings ../character-dna-bindings ../baseline .
       - name: Measure one complete matched pair
         id: measurement
         continue-on-error: true
         working-directory: candidate
-        run: uv run --no-sync python scripts/test_suite_refactor/run_benchmarks.py --baseline-root ../baseline --repeat 1 --repeat-start ${{ matrix.repetition }} --label ci-matched
+        run: uv run --no-sync python tests/benchmarks/run_benchmarks.py --baseline-root ../baseline --repeat 1 --repeat-start ${{ matrix.repetition }} --label ci-matched
       - name: Compare the complete pair
         if: ${{ !cancelled() }}
         working-directory: candidate
-        run: uv run --no-sync python scripts/test_suite_refactor/summarize_benchmarks.py reports/test-suite-refactor/ci-matched/runs.json --minimum-pairs 1
+        run: uv run --no-sync python tests/benchmarks/summarize_benchmarks.py reports/test-suite-refactor/ci-matched/runs.json --minimum-pairs 1
       - name: Preserve complete and interrupted evidence
         if: always()
         uses: actions/upload-artifact@v7

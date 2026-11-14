@@ -9,7 +9,7 @@ import pytest
 from test_merge_split import character as character_fixture, coordinates
 
 from character_dna.dna_io.misc import create_shape_key
-from character_dna.editors.converter import scene_merge
+from character_dna.editors.converter.scene import merge as scene_merge
 from character_dna.editors.raw_control_editor.utilities import (
     _read_evaluated_mesh_vertices_local,
     create_target_mesh_for_dna_mesh,

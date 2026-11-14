@@ -3,7 +3,7 @@
 import bpy
 import pytest
 
-from character_dna.editors.converter.source_animation import copy_animation
+from character_dna.editors.converter.source.animation import copy_animation
 from character_dna.utilities.reference import remap_id_users
 
 

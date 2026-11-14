@@ -67,7 +67,7 @@ class CharacterComponentHead(CharacterComponentBase):
                 clip=clip,
             )
 
-    def ingest(self, align: bool = True, constrain: bool = True) -> tuple[bool, str]:
+    def ingest(self, align: bool = True, constrain: bool = True) -> tuple[bool, str]:  # noqa: PLR0912
         valid, message = self.dna_importer.run()
         self.rig_instance.head_rig = self.dna_importer.rig_object
 
@@ -78,7 +78,7 @@ class CharacterComponentHead(CharacterComponentBase):
         # import the face board if one does not already exist in the scene
         if not any(i.face_board for i in self.scene_properties.rig_instance_list):
             if self.dna_import_properties.import_face_board:
-                face_board_object = utilities.import_face_board(name=self.name)
+                face_board_object = utilities.import_face_board(name=self.name, bulk=self._bulk_scene)
 
         elif not self.rig_instance.face_board and not self.dna_import_properties.reuse_face_board:
             if self.dna_import_properties.import_face_board:
@@ -135,8 +135,8 @@ class CharacterComponentHead(CharacterComponentBase):
             utilities.select_only(self.rig_instance.head_mesh)
             utilities.focus_on_selected()
 
-        # collapse the outliner
-        utilities.toggle_expand_in_outliner()
+        if not self._bulk_scene:
+            utilities.toggle_expand_in_outliner()
 
         # switch to pose mode on the face gui object
         if face_board_object and utilities.set_active(face_board_object):

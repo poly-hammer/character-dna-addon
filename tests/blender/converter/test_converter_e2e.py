@@ -51,13 +51,15 @@ def configure_template(props, folder, preset="basic", components=("head", "body"
     recipe = default_template(preset)
     recipe["dna_files"] = {kind: str(folder / f"{kind}.dna") for kind in components}
     recipe["meshes"] = [row for row in recipe["meshes"] if row["component"] in components]
+    # Head-only fixtures exercise fitting/publication without a body pose model.
+    recipe["pose_normalization"] = "LIMBS" if "body" in components else "OFF"
     apply_template(props, recipe)
     for item in props.extra_meshes:
         item.scene_object = bpy.data.objects.get(item.dna_mesh_name) if item.role in components else None
     return {item.role: item for item in props.extra_meshes}
 
 
-def test_convert_meshes_to_dna(
+def test_convert_meshes_to_dna(  # noqa: PLR0915 - complete conversion contract
     load_mhc_conformed_topology_meshes,
     base_dna_folder,
     temp_folder: Path,
@@ -77,17 +79,32 @@ def test_convert_meshes_to_dna(
         component.filepath = "{CHARACTER_DNA_TEST_BASE}/" + component.component + ".dna"
     properties.new_name = name
     properties.new_folder = str(output_folder)
-    properties.validate_uvs = False
+    for item in properties.extra_meshes:
+        item.validate_uvs = False
+    # This contract copies the already-conformed observations without changing
+    # their pose. Pose normalization has its own end-to-end contracts below.
+    properties.pose_normalization = "OFF"
     properties.constrain_head_to_body = True
 
-    # Interactive conversion yields to timers before finalization; background
-    # conversion does not. Reproduce the deferred native binding at that boundary.
+    from character_dna.editors.converter.templates import export_template
+
+    export_template(properties, temp_folder / "full-body-template.zip")
+    assert properties.template_id.startswith("custom:")
+
+    # Template data must stay native until the final scene is created.
+    from character_dna.components.base import CharacterComponentBase
+    from character_dna.editors.converter.native.direct import DirectPipeline
     from character_dna.editors.converter.pipeline import Transition, positions
     from character_dna.runtime import controller, engine
 
     commit_transition = Transition.commit
     input_positions = {obj: positions(obj) for obj in (rows["head"].scene_object, rows["body"].scene_object)}
     phases = []
+
+    def unexpected_texture_loading(*_args):
+        pytest.fail("Converter imports must not load texture maps from folders")
+
+    monkeypatch.setattr(CharacterComponentBase, "_set_image_textures", unexpected_texture_loading)
 
     def commit_with_native_bindings(transition):
         controller.reconcile()
@@ -99,14 +116,27 @@ def test_convert_meshes_to_dna(
         commit_transition(transition)
 
     monkeypatch.setattr(Transition, "commit", commit_with_native_bindings)
+    create_scene = DirectPipeline._create_scene
+    scene_commits = []
+
+    def create_final_scene(pipeline):
+        assert pipeline.geometry_complete
+        assert all((pipeline.operator._staging_folder / f"{kind}.dna").is_file() for kind in ("head", "body"))
+        assert not any(obj.name.startswith(name + "_") for obj in bpy.data.objects)
+        assert pipeline.native_joint_results["reconciled_joints"]
+        create_scene(pipeline)
+        scene_commits.append(True)
+
+    monkeypatch.setattr(DirectPipeline, "_create_scene", create_final_scene)
     result = bpy.ops.character_dna.convert_to_dna()  # type: ignore[attr-defined]
     assert result == {"FINISHED"}, "Conversion operator should finish successfully"
     import numpy as np
 
     for obj, before in input_positions.items():
         np.testing.assert_array_equal(positions(obj), before)
-    assert phases[0] == "Fit supplied surfaces"
-    assert "Fit head joints" in phases
+        assert obj.hide_get() and obj.hide_render
+    assert phases == []
+    assert scene_commits == [True]
     assert not list(temp_folder.rglob("ConversionReport.json"))
     report = conversion_diagnostics
     assert report["models"] == []
@@ -116,6 +146,10 @@ def test_convert_meshes_to_dna(
     instance = bpy.context.scene.character_dna.rig_instance_list.get(name)  # type: ignore[attr-defined]
     assert instance is not None, "Rig instance should be created"
     assert instance.name == name, f"Instance name should be {name}"
+    eye_edge = bpy.data.objects[f"{name}_eyeEdge_lod0_mesh"]
+    assert eye_edge.hide_viewport and eye_edge.hide_get() and eye_edge.hide_render
+    instance.view_options.active_lod = "lod0"
+    assert eye_edge.hide_viewport and eye_edge.hide_get() and eye_edge.hide_render
 
     assert instance.head_rig is not None, "Head rig should be created"
     assert instance.head_mesh is not None, "Head mesh should be created"
@@ -153,32 +187,256 @@ def test_convert_meshes_to_dna(
     )
 
 
+@pytest.mark.parametrize("mode", ["OFF", "LIMBS", "SPINE", "ALL"])
+def test_template_pose_normalization_roundtrip(
+    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, conversion_diagnostics, mode
+):
+    import numpy as np
+
+    from character_dna.dna_io import get_dna_reader, release_dna_handle
+    from character_dna.dna_io.mesh_data import reader_faces
+    from character_dna.editors.converter.pipeline import positions, write_positions
+
+    props = get_converter_properties()
+    components = ("head", "body") if mode in {"SPINE", "ALL"} else ("body",)
+    rows = configure_template(props, base_dna_folder, components=components)
+    body = rows["body"].scene_object
+    reader = get_dna_reader(base_dna_folder / "body.dna")
+    try:
+        index = next(i for i in reader.getMeshIndicesForLOD(0) if reader.getMeshName(i) == "body_lod0_mesh")
+        ids = sorted({v for face in reader_faces(reader, index) for v in face})
+        reference = (
+            np.column_stack(
+                (
+                    reader.getVertexPositionXs(index),
+                    reader.getVertexPositionYs(index),
+                    reader.getVertexPositionZs(index),
+                )
+            )[ids]
+            * 0.01
+        )
+        write_positions(body, reference)
+    finally:
+        release_dna_handle(reader)
+    if "head" in components:
+        from character_dna.bindings import load_converter_core
+
+        template = load_converter_core().DnaTemplate(str(base_dna_folder / "head.dna"))
+        head = np.frombuffer(template.mesh("head_lod0_mesh")["positions"], np.float32).reshape(-1, 3)
+        write_positions(rows["head"].scene_object, head)
+    original = positions(body)
+    props.new_name = "PoseNormalizationRoundtrip"
+    props.new_folder = str(tmp_path)
+    for item in props.extra_meshes:
+        item.validate_uvs = False
+    assert props.pose_normalization == "LIMBS"
+    props.pose_normalization = mode
+    assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
+    if mode == "OFF":
+        assert "a_pose" not in conversion_diagnostics
+    else:
+        assert conversion_diagnostics["a_pose"]["status"] == "already_template"
+        assert conversion_diagnostics["a_pose"]["mode"] == mode
+    assert conversion_diagnostics["meshes"]["body"]["export_max_error_m"] < 2e-6
+    np.testing.assert_array_equal(positions(body), original)
+    assert (tmp_path / "body.dna").is_file()
+    assert not list(tmp_path.rglob("ConversionReport.json"))
+
+
+def test_known_limb_pose_full_operator(
+    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, conversion_diagnostics
+):
+    """Include the established nontrivial pose workload in click-to-ready timing."""
+    import numpy as np
+
+    from character_dna.bindings import load_converter_core
+    from character_dna.editors.converter.pipeline import positions, write_positions
+    from character_dna.editors.converter.pose import profiles
+    from character_dna.editors.converter.pose.fit import geometry
+
+    props = get_converter_properties()
+    rows = configure_template(props, base_dna_folder, components=("body",))
+    native = load_converter_core()
+    template = native.DnaTemplate(str(base_dna_folder / "body.dna"))
+    info = json.loads(template.info())
+    name = rows["body"].dna_mesh_name
+    names, parents = info["names"], info["parents"]
+    bind = np.asarray([info["states"][name]["matrix"] for name in names]).reshape(-1, 4, 4)
+    reference = np.frombuffer(template.mesh(name)["positions"], dtype=np.float32).reshape(-1, 3).astype(float)
+    weights = np.frombuffer(template.weights(name, names), dtype=np.float64).reshape(-1, len(names))
+    weights = geometry.normalized_weights(weights)
+    profile = profiles.load("metahuman/full_body")
+    posed = bind.copy()
+    for index, name in enumerate(names):
+        parent = parents[index]
+        if parent >= 0:
+            posed[index] = posed[parent] @ np.linalg.inv(bind[parent]) @ bind[index]
+        if name.startswith(("upperarm_", "thigh_")) and name in profile["joints"]:
+            posed[index, :3, :3] = geometry.rotation(np.array([0.05, 0.12, -0.08])) @ posed[index, :3, :3]
+        if name in {"index_01_l", "thumb_01_r", "foot_l", "hand_r"}:
+            posed[index, :3, :3] = geometry.rotation(np.array([0.15, -0.05, 0.1])) @ posed[index, :3, :3]
+    body = rows["body"].scene_object
+    write_positions(body, geometry.apply(geometry.blend(weights, posed, bind), reference))
+    original = positions(body)
+    props.new_name, props.new_folder = "KnownLimbPose", str(tmp_path)
+    for item in props.extra_meshes:
+        item.validate_uvs = False
+    assert props.pose_normalization == "LIMBS"
+    assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
+    instance = bpy.context.scene.character_dna.rig_instance_list[props.new_name]
+    error = np.linalg.norm(positions(instance.body_mesh) - reference, axis=1)
+    assert conversion_diagnostics["a_pose"]["status"] == "rigid_control"
+    assert np.sqrt(np.mean(error**2)) < 1e-4
+    assert error.max() < 5e-4
+    assert conversion_diagnostics["meshes"]["body"]["export_max_error_m"] < 2e-6
+    np.testing.assert_array_equal(positions(body), original)
+    assert (tmp_path / "body.dna").is_file()
+
+
+def test_joined_input_conversion_preserves_each_component_domain(
+    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, conversion_diagnostics
+):
+    import numpy as np
+
+    from character_dna.dna_io import get_dna_reader, release_dna_handle
+    from character_dna.editors.converter import assembly
+    from character_dna.editors.converter.pipeline import positions
+
+    props = get_converter_properties()
+    rows = configure_template(props, base_dna_folder)
+    sources = {kind: rows[kind].scene_object for kind in ("head", "body")}
+    original = {kind: positions(obj) for kind, obj in sources.items()}
+    readers = {kind: get_dna_reader(base_dna_folder / f"{kind}.dna") for kind in sources}
+    try:
+        domain = assembly.prepare(sources, readers, {kind: rows[kind].dna_mesh_name for kind in sources})
+    finally:
+        for reader in readers.values():
+            release_dna_handle(reader)
+    joined = bpy.data.objects.new("Joined supplied character", domain.mesh)
+    bpy.context.scene.collection.objects.link(joined)
+    before = positions(joined)
+    expected = {kind: before[ids].copy() for kind, ids in domain.component_to_assembly.items()}
+    try:
+        props.input_layout = "JOINED"
+        props.joined_mesh = joined
+        for kind in sources:
+            rows[kind].scene_object = None
+        props.pose_normalization = "OFF"
+        props.adjust_seam = False
+        for item in props.extra_meshes:
+            item.validate_uvs = False
+        props.new_name = "JoinedInputRoundtrip"
+        props.new_folder = str(tmp_path)
+        assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
+        instance = bpy.context.scene.character_dna.rig_instance_list.get(props.new_name)
+        assert instance is not None
+        for kind, source in sources.items():
+            np.testing.assert_allclose(positions(getattr(instance, f"{kind}_mesh")), expected[kind], atol=2e-6, rtol=0)
+            np.testing.assert_array_equal(positions(source), original[kind])
+            assert conversion_diagnostics["meshes"][kind]["binding"] == "full_body"
+            assert conversion_diagnostics["meshes"][kind]["export_max_error_m"] < 2e-6
+            assert (tmp_path / f"{kind}.dna").is_file()
+        np.testing.assert_array_equal(positions(joined), before)
+        assert joined.hide_get() and joined.hide_render
+        assert conversion_diagnostics["assembly"]["seam_pairs"] == len(domain.seam)
+    finally:
+        props.joined_mesh = None
+        bpy.data.objects.remove(joined, do_unlink=True)
+        domain.close()
+
+
+def test_pose_quality_warning_allows_artist_review(
+    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, conversion_diagnostics
+):
+    import numpy as np
+
+    from character_dna.editors.converter.pipeline import positions
+
+    props = get_converter_properties()
+    rows = configure_template(props, base_dna_folder)
+    props.new_name = "ReviewPose"
+    props.new_folder = str(tmp_path)
+    for item in props.extra_meshes:
+        item.validate_uvs = False
+    assert props.pose_normalization == "LIMBS"
+    before = {row.scene_object: positions(row.scene_object) for role, row in rows.items() if role in {"head", "body"}}
+    (tmp_path / "head.dna").write_bytes(b"previous output")
+    # Pose quality is advisory so artists can inspect and correct the result.
+    assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
+    assert any("inverted a local surface triangle" in warning for warning in conversion_diagnostics["warnings"])
+    for obj, original in before.items():
+        np.testing.assert_array_equal(positions(obj), original)
+        assert obj.hide_get() and obj.hide_render
+    assert (tmp_path / "head.dna").stat().st_size > len(b"previous output")
+    assert bpy.context.scene.character_dna.rig_instance_list.get("ReviewPose")
+
+
+def test_runtime_initialization_failure_restores_scene_and_published_files(
+    load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, monkeypatch
+):
+    from character_dna.rig_instance import RigInstance
+
+    props = get_converter_properties()
+    configure_template(props, base_dna_folder, components=("head",))
+    props.new_name = "RejectedRuntime"
+    props.new_folder = str(tmp_path)
+    output = tmp_path / "head.dna"
+    output.write_bytes(b"previous accepted output")
+    evaluate = RigInstance.evaluate
+
+    def reject(instance, *args, **kwargs):
+        if instance.name == props.new_name:
+            assert output.read_bytes() != b"previous accepted output"
+            raise ValueError("injected runtime initialization failure")
+        return evaluate(instance, *args, **kwargs)
+
+    monkeypatch.setattr(RigInstance, "evaluate", reject)
+    with pytest.raises(RuntimeError, match="injected runtime initialization failure"):
+        bpy.ops.character_dna.convert_to_dna()
+    assert output.read_bytes() == b"previous accepted output"
+    assert not (tmp_path / "ExportManifest.json").exists()
+    assert not bpy.context.scene.character_dna.rig_instance_list.get(props.new_name)
+    assert not any(obj.name.startswith(props.new_name + "_") for obj in bpy.data.objects)
+
+
 def test_failure_restores_owned_data_without_removing_unrelated_objects(
     load_mhc_conformed_topology_meshes, base_dna_folder, tmp_path, monkeypatch
 ):
-    from character_dna.editors.converter.pipeline import Transition, positions
+    from character_dna.editors.converter.native.direct import DirectPipeline
+    from character_dna.editors.converter.pipeline import positions
     from character_dna.utilities import get_addon_window_manager_properties
 
     props = get_converter_properties()
     rows = configure_template(props, base_dna_folder, components=("head",))
     head = rows["head"].scene_object
+    material = bpy.data.materials.new("Cancellation source")
+    material.use_fake_user = True
+    head.data.materials.clear()
+    head.data.materials.append(material)
+    rows["head"].material_source = head
     props.new_name = "CancelledConversion"
     props.new_folder = str(tmp_path)
     original = positions(head)
     was_hidden = head.hide_get()
+    was_render_disabled = head.hide_render
     wm = get_addon_window_manager_properties()
     previous_evaluation = wm.evaluate_dependency_graph
     wm.evaluate_dependency_graph = False
     (tmp_path / "head.dna").write_bytes(b"original output")
     unrelated = []
 
-    def interrupted(_transition):
+    create_scene = DirectPipeline._create_scene
+
+    def interrupted(pipeline):
+        create_scene(pipeline)
+        copied = bpy.data.materials.get("CancelledConversion_head_shader")
+        assert copied is not None and copied != material
         obj = bpy.data.objects.new("UnrelatedDuringConversion", None)
         bpy.context.scene.collection.objects.link(obj)
         unrelated.append(obj)
         raise ValueError("injected conversion failure")
 
-    monkeypatch.setattr(Transition, "commit", interrupted)
+    monkeypatch.setattr(DirectPipeline, "_create_scene", interrupted)
     try:
         with pytest.raises(RuntimeError, match="injected conversion failure"):
             bpy.ops.character_dna.convert_to_dna()
@@ -186,13 +444,18 @@ def test_failure_restores_owned_data_without_removing_unrelated_objects(
 
         np.testing.assert_array_equal(positions(head), original)
         assert head.hide_get() == was_hidden
+        assert head.hide_render == was_render_disabled
         assert wm.evaluate_dependency_graph is False
         assert bpy.data.objects.get("UnrelatedDuringConversion") is unrelated[0]
         assert not any(obj.name.startswith("CancelledConversion_") for obj in bpy.data.objects)
+        assert not bpy.data.materials.get("CancelledConversion_head_shader")
+        assert head.data.materials[0] == material
+        assert material.use_fake_user
         assert not bpy.context.scene.character_dna.rig_instance_list.get("CancelledConversion")
         assert (tmp_path / "head.dna").read_bytes() == b"original output"
     finally:
         wm.evaluate_dependency_graph = previous_evaluation
+        bpy.data.materials.remove(material, do_unlink=True)
         for obj in unrelated:
             bpy.data.objects.remove(obj, do_unlink=True)
 
@@ -259,7 +522,13 @@ def test_custom_mesh_names_and_all_supplied_anatomy(  # noqa: PLR0915
         created.append((old_name, obj, positions(obj)))
     release_dna_handle(reader)
     (base_dna_folder / "renamed.dna").replace(path)
-    recipe = default_template(preset)
+    # The bundled Exact preset was retired. Keep the all-supplied-anatomy case
+    # as an explicit custom recipe, including every COPY/export assertion below.
+    recipe = default_template("advanced")
+    if preset == "exact":
+        for row in recipe["meshes"]:
+            row["method"] = "COPY"
+    recipe["pose_normalization"] = "OFF"
     recipe["meshes"] = [row for row in recipe["meshes"] if row["component"] == "head"]
     recipe["dna_files"] = {"head": str(path)}
     for row in recipe["meshes"]:
@@ -281,7 +550,7 @@ def test_custom_mesh_names_and_all_supplied_anatomy(  # noqa: PLR0915
         assert bpy.ops.character_dna.convert_to_dna() == {"FINISHED"}
         assert not list(tmp_path.rglob("ConversionReport.json"))
         report = conversion_diagnostics
-        for role in (row["id"] for row in recipe["meshes"] if row["method"] == "WRAP"):
+        for role in (row["id"] for row in recipe["meshes"] if row["method"] == "COPY"):
             assert report["meshes"][role]["status"] == "provided"
             assert report["meshes"][role]["export_max_error_m"] < 2e-6
         exported = get_dna_reader(tmp_path / "head.dna")

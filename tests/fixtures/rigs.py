@@ -203,7 +203,8 @@ class RigFactory:
             instance = self._import(profile, folder)
             if profile.document_mode == "combined":
                 from character_dna.dna_io import document
-                from character_dna.editors.converter import scene_merge, source_views
+                from character_dna.editors.converter.scene import merge as scene_merge
+                from character_dna.editors.converter.source import views as source_views
                 from character_dna.runtime import controller
 
                 combined = Path(instance["combined_dna_path"])

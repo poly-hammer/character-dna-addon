@@ -208,7 +208,7 @@ def test_canonical_writer_invalidates_pending_undo_model(model_cache):
 
 def test_backup_restore_invalidates_even_with_preserved_timestamps(model_cache, monkeypatch):
     core = pytest.importorskip("character_dna.editors.backup_manager.core")
-    surfaces = pytest.importorskip("character_dna.editors.converter.surface_session")
+    surfaces = pytest.importorskip("character_dna.editors.converter.surface.session")
     path, _loads, _hashes = model_cache
     stamp = path.stat()
     old = engine._model(str(path), False)

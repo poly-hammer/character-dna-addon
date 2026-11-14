@@ -320,7 +320,7 @@ def test_apply_shape_value_and_mirror_membership(character):
 def test_merged_shape_commit_and_split(paired_character, mode, tmp_path):
     character = paired_character
     from character_dna.dna_io import document, get_dna_reader
-    from character_dna.editors.converter import scene_merge
+    from character_dna.editors.converter.scene import merge as scene_merge
     from character_dna.shape_names import stored_name
 
     instance = character

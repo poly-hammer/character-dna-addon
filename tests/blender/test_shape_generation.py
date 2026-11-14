@@ -17,7 +17,7 @@ from character_dna import shape_names
 from character_dna.bindings import riglogic
 from character_dna.dna_io import release_dna_handle
 from character_dna.editors.backup_manager import core as backups
-from character_dna.editors.converter import scene_merge
+from character_dna.editors.converter.scene import merge as scene_merge
 from character_dna.editors.rbf_editor import generation
 from character_dna.editors.shape_key_editor.operators import (
     GenerateNeutralShapeKeys,

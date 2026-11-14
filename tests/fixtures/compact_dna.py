@@ -113,7 +113,7 @@ def compact_two_target_asset(compact_dna_asset, tmp_path_factory):
 def compact_dna(compact_dna_asset, monkeypatch):
     """Use the matching seam only within a test leasing the compact asset."""
     from character_dna.dna_io import merged_graph
-    from character_dna.editors.converter import scene_merge
+    from character_dna.editors.converter.scene import merge as scene_merge
 
     for module in (merged_graph, scene_merge):
         monkeypatch.setattr(module, "HEAD_TO_BODY_EDGE_LOOP_FILE_PATH", compact_dna_asset / "necklines.json")

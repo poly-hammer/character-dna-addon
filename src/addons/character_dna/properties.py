@@ -188,6 +188,16 @@ class CharacterOutputProperties(bpy.types.PropertyGroup):
             ),
         ],
     )  # pyright: ignore[reportInvalidTypeForm]
+    head_topology_type: bpy.props.StringProperty(
+        name="Head Topology Type",
+        description="Topology family stored in head DNA metadata, for example, MetaHuman, 3D Scan Store, etc.",
+        default="",
+    )  # pyright: ignore[reportInvalidTypeForm]
+    body_topology_type: bpy.props.StringProperty(
+        name="Body Topology Type",
+        description="Topology family stored in body DNA metadata, for example, MetaHuman, 3D Scan Store, etc.",
+        default="",
+    )  # pyright: ignore[reportInvalidTypeForm]
     format: bpy.props.EnumProperty(
         name="File Format",
         description="The file format to use when output the dna file. Either binary or json",
@@ -341,6 +351,12 @@ class CharacterAddonProperties:
 
 
 class CharacterImportProperties(get_dna_import_property_group_base_class()):
+    preserve_viewport_shading: bpy.props.BoolProperty(
+        default=False,
+        options={"HIDDEN", "SKIP_SAVE"},
+        description="Keep the current viewport shading when importing materials",
+    )  # pyright: ignore[reportInvalidTypeForm]
+
     import_mesh: bpy.props.BoolProperty(default=True, name="Mesh", description="Whether to import the head meshes")  # pyright: ignore[reportInvalidTypeForm]
     import_normals: bpy.props.BoolProperty(
         default=False,
@@ -423,10 +439,21 @@ class CharacterWindowManagerProperties(bpy.types.PropertyGroup, CharacterImportP
     """
 
     errors = {}
-    dna_info = {"_previous_file_path": None, "_dna_reader": None}
+    dna_info = {"_file_stamp": None, "_dna_reader": None}
 
     # Global, per-session cache shared across the whole addon.
     data = {}
+
+    # Scene-owned enum buttons make Blender resolve their RNA path for every
+    # popup entry, walking all rig-instance data each time. This UI-only proxy
+    # avoids that traversal; the selected pose still lives in the scene.
+    face_pose_previews: bpy.props.EnumProperty(
+        name="Face Poses",
+        items=callbacks.get_face_pose_ui_items,
+        get=callbacks.get_face_pose_ui_value,
+        set=callbacks.set_face_pose_ui_value,
+        options={"SKIP_SAVE"},
+    )  # pyright: ignore[reportInvalidTypeForm]
 
     error_message: bpy.props.StringProperty(default="")  # pyright: ignore[reportInvalidTypeForm]
     progress: bpy.props.FloatProperty(default=1.0)  # pyright: ignore[reportInvalidTypeForm]

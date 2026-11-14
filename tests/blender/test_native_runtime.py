@@ -463,6 +463,36 @@ def test_native_operator_has_undo():
     assert "UNDO" in controller.CHARACTER_DNA_OT_sync_native_runtime.bl_options
 
 
+def test_install_reuses_the_model_already_checked_for_each_component(native_head, monkeypatch):
+    engine.discard(native_head)
+    original = engine._model
+    calls = []
+
+    def load(path, body):
+        calls.append((path, body))
+        return original(path, body)
+
+    monkeypatch.setattr(engine, "_model", load)
+    engine.install(native_head)
+    assert len(calls) == 1
+    assert engine.active(native_head)
+
+
+def test_install_rolls_back_if_dna_changes_after_model_preparation(native_head, monkeypatch):
+    engine.discard(native_head)
+    original = engine.install_targets
+
+    def install(carrier, targets):
+        original(carrier, targets)
+        monkeypatch.setattr(engine, "_file_signature", lambda _path: (-1,))
+
+    monkeypatch.setattr(engine, "install_targets", install)
+    with pytest.raises(RuntimeError, match="DNA changed while installing"):
+        engine.install(native_head)
+    assert not engine.carriers(native_head)
+    assert not engine.active(native_head)
+
+
 @pytest.mark.rig_profile(pose_bones=STATE_BONES)
 def test_native_raw_input_sampling_preserves_authored_expressions(native_head):
     """Sampling neck quaternions must not erase a tool's manually set expression."""

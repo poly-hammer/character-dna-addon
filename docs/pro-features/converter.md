@@ -28,11 +28,19 @@ This uses the UV layout of your wrapped mesh to relocate the DNA's bones and sha
 
 Expand **Advanced** for finer control:
 
-- **Extra Meshes** — additional base-DNA meshes (eyes, teeth, etc.) to fit during conversion. Each can use a **Wrap** or **Relative** fit method.
-- **Maps Folder** — textures used when fitting auxiliary meshes.
+- **Reference Meshes** — Base-DNA meshes (eyes, teeth, etc.) to fit during conversion. Each can use a **Wrap** or **Relative** fit method.
 - **Constrain Head to Body** — align overlapping head/body bones so the two components meet cleanly (avoids a seam).
 - **Zero Shape Deltas** — reset shape key deltas during conversion.
 - **Validate UVs** / **Tolerance** — check UV consistency within a tolerance before fitting.
+
+**Normalize to A-Pose** selects the regions whose posture is corrected during conversion:
+
+| Mode | Behavior |
+| ---- | -------- |
+| Off | Retain the input posture. |
+| Limbs Only (default) | Normalize clavicles, arms, hands, fingers, legs, feet, and toes. |
+| Spine Only | Normalize the spine, neck, and head alignment. Limbs follow their attachments while retaining local articulation. |
+| All | Normalize the limbs and spine together. |
 
 ## LOD Calibration
 

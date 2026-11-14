@@ -67,7 +67,7 @@ def benchmark(args: Namespace, root: Path, recorder: Any) -> dict:
     if args.scene_mode == "scene":
         assert bpy.ops.character_dna.merge_components() == {"FINISHED"}
     elif args.scene_mode == "combined":
-        from character_dna.editors.converter import surface_session
+        from character_dna.editors.converter.surface import session as surface_session
 
         # Direct single-key creation above stands in for the UI importer, whose
         # finish hook also refreshes the merged surface's key signatures.
@@ -81,7 +81,8 @@ def benchmark(args: Namespace, root: Path, recorder: Any) -> dict:
     ]
     if args.scene_mode != "release":
         from character_dna.dna_io import document, merged_graph, metadata
-        from character_dna.editors.converter import scene_merge, surface_session
+        from character_dna.editors.converter.scene import merge as scene_merge
+        from character_dna.editors.converter.surface import session as surface_session
 
         targets += [
             (document, name)

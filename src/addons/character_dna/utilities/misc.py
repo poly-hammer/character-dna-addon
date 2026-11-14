@@ -271,6 +271,14 @@ def switch_to_bone_edit_mode(*armature_object: bpy.types.Object):
 
 
 def switch_to_pose_mode(*scene_object: bpy.types.Object):
+    if (
+        scene_object
+        and bpy.context.mode == "POSE"
+        and bpy.context.view_layer.objects.active == scene_object[-1]
+        and set(bpy.context.selected_objects) == set(scene_object)
+        and all(not obj.hide_viewport and not obj.hide_get() for obj in scene_object)
+    ):
+        return
     switch_to_object_mode()
     # A hidden object cannot be the active object for a mode switch, so the
     # mode_set poll would raise "Context missing active object". Unhide the
@@ -405,6 +413,8 @@ def setup_scene(*_: Any) -> None:
 def teardown_scene(*_: Any) -> None:
     from ..runtime import controller, engine
 
+    if editors := get_editors():
+        editors.cancel_conversions()
     engine.invalidate()
     scene_properties = getattr(bpy.context.scene, ToolInfo.NAME, object)
 
@@ -417,6 +427,8 @@ def teardown_scene(*_: Any) -> None:
 def pre_undo(*_: Any) -> None:
     from ..runtime.controller import before_undo
 
+    if editors := get_editors():
+        editors.cancel_conversions()
     before_undo()
     context: "Context" = bpy.context  # type: ignore[attr-defined]  # noqa: UP037
     addon_window_manager_properties = get_addon_window_manager_properties(context)
@@ -1060,7 +1072,23 @@ def purge_face_board_components():
                     bpy.data.objects.remove(scene_object, do_unlink=True)
 
 
-def import_face_board(name: str) -> bpy.types.Object | None:
+def import_face_board(name: str, *, bulk: bool = False) -> bpy.types.Object | None:
+    if bulk:
+        # Load the board and its widget dependencies together without an append
+        # operator, selection changes, or intermediate dependency-graph updates.
+        with bpy.data.libraries.load(str(FACE_BOARD_FILE_PATH), link=False) as (source, target):
+            names = list(source.objects)
+            board_index = names.index(FACE_BOARD_NAME)
+            target.objects = names
+        board = target.objects[board_index]
+        for obj in target.objects:
+            if obj is not None and obj != board:
+                obj.use_fake_user = True
+        bpy.context.scene.collection.objects.link(board)
+        board.name = f"{name}_{FACE_BOARD_NAME}"
+        if isinstance(board.data, bpy.types.Armature):
+            board.data.relation_line_position = "HEAD"
+        return board
     sep = "\\"
     if sys.platform != "win32":
         sep = "/"

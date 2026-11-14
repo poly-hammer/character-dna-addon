@@ -1,6 +1,7 @@
 """Component selection must reset the owning rig and reflect available DNA shapes."""
 
 from types import MethodType, SimpleNamespace
+from unittest.mock import MagicMock, create_autospec
 
 import bpy
 import numpy as np
@@ -86,6 +87,102 @@ def test_solver_list_refresh_preserves_live_pose(character):
 
     assert instance.rbf_editor.rbf_solver_list[0].poses_active_index == pose_index
     np.testing.assert_allclose(bone.matrix_basis, before, atol=2e-5)
+
+
+def test_component_switch_refreshes_both_solver_editors(character, monkeypatch):
+    from character_dna.editors.rbf_editor import ui, utilities
+    from character_dna.editors.swing_twist_editor import core
+    from character_dna.editors.swing_twist_editor.ui import CHARACTER_DNA_PT_swing_twist_editor
+
+    def draw_list(_layout, context, **kwargs):
+        for key in ("list_path", "active_index_path"):
+            context.scene.path_resolve(kwargs[key].removeprefix("scene."))
+
+    monkeypatch.setattr(ui, "draw_ui_list", create_autospec(ui.draw_ui_list, side_effect=draw_list))
+    for kind in ("body", "head", "body", "head"):
+        character.editor_component = kind
+        properties = character.rbf_editor
+        assert len(properties.rbf_solver_list) == character.edit_target.dna_reader.getRBFSolverCount()
+        assert utilities.get_active_solver(character) is not None
+        assert utilities.get_active_pose(character) is not None
+        assert len(character.swing_twist_editor.setups) == len(core.read_setups(character.edit_target.dna_reader))
+        panel = SimpleNamespace(layout=MagicMock())
+        ui.CHARACTER_DNA_PT_rbf_editor.draw(panel, bpy.context)
+        CHARACTER_DNA_PT_swing_twist_editor.draw(panel, bpy.context)
+        assert not ui.RbfEditorSubPanelBase.poll(bpy.context)
+        assert not ui.CHARACTER_DNA_PT_rbf_editor_driven_sub_panel.poll(bpy.context)
+        if kind == "body":
+            assert len(properties.rbf_solver_list) > 3
+            properties.rbf_solver_list_active_index = 3
+            character.swing_twist_editor.active_index = len(character.swing_twist_editor.setups) - 1
+
+
+@pytest.mark.parametrize("index", [-1, 3])
+def test_rbf_panels_and_selection_helpers_handle_stale_indices(minimal_character, tmp_path, index):
+    from character_dna.editors.rbf_editor import ui, utilities
+
+    instance = minimal_character
+    dna_path = tmp_path / "head.dna"
+    dna_path.touch()
+    instance["head_dna_file_path"] = str(dna_path)
+    instance.data[instance.edit_target.cache_key("initialized")] = True
+    properties = instance.rbf_editor
+    solver = properties.rbf_solver_list.add()
+    pose = solver.poses.add()
+    pose.driven.add()
+    properties.is_editing = True
+    panel = SimpleNamespace(layout=MagicMock())
+
+    properties.rbf_solver_list_active_index = index
+    assert utilities.get_active_solver(instance) is None
+    assert utilities.get_active_pose(instance) is None
+    assert utilities.get_active_driven(instance) is None
+    assert not ui.RbfEditorSubPanelBase.poll(bpy.context)
+    assert not ui.CHARACTER_DNA_PT_rbf_editor_driven_sub_panel.poll(bpy.context)
+    for panel_type in (
+        ui.CHARACTER_DNA_PT_rbf_editor,
+        ui.CHARACTER_DNA_PT_rbf_editor_solver_settings_sub_panel,
+        ui.CHARACTER_DNA_PT_rbf_editor_poses_sub_panel,
+        ui.CHARACTER_DNA_PT_rbf_editor_drivers_sub_panel,
+        ui.CHARACTER_DNA_PT_rbf_editor_driven_sub_panel,
+    ):
+        panel_type.draw(panel, bpy.context)
+
+    properties.rbf_solver_list_active_index = 0
+    solver["poses_active_index"] = index
+    assert utilities.get_active_pose(instance) is None
+    assert utilities.get_active_driven(instance) is None
+    assert not ui.CHARACTER_DNA_PT_rbf_editor_driven_sub_panel.poll(bpy.context)
+    ui.CHARACTER_DNA_PT_rbf_editor_poses_sub_panel.draw(panel, bpy.context)
+    ui.CHARACTER_DNA_PT_rbf_editor_drivers_sub_panel.draw(panel, bpy.context)
+    ui.CHARACTER_DNA_PT_rbf_editor_driven_sub_panel.draw(panel, bpy.context)
+
+    solver["poses_active_index"] = 0
+    pose["driven_active_index"] = index
+    assert utilities.get_active_driven(instance) is None
+    properties.is_editing = False
+
+
+def test_rbf_refresh_recovers_stale_and_empty_selection(character, monkeypatch):
+    from character_dna.editors.rbf_editor import core, utilities
+
+    properties = character.rbf_editor
+    for solver_index, pose_index in ((3, 0), (-1, 0), (0, 999), (0, -1)):
+        properties.rbf_solver_list_active_index = solver_index
+        properties.rbf_solver_list[0]["poses_active_index"] = pose_index
+        character.update_body_rbf_solver_list()
+        assert utilities.get_active_solver(character) is not None
+        assert utilities.get_active_pose(character) is not None
+
+    with monkeypatch.context() as patch:
+        patch.setattr(core, "get_rbf_solver_data", create_autospec(core.get_rbf_solver_data, return_value=[]))
+        character.update_body_rbf_solver_list()
+    assert not properties.rbf_solver_list
+    assert properties.rbf_solver_list_active_index == -1
+    assert utilities.get_active_solver(character) is None
+    character.update_body_rbf_solver_list()
+    assert properties.rbf_solver_list_active_index == 0
+    assert utilities.get_active_pose(character) is not None
 
 
 class EmptyStateLayout:

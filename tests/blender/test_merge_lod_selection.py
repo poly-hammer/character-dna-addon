@@ -7,7 +7,7 @@ import pytest
 
 from test_merge_split import character as character_fixture
 
-from character_dna.editors.converter import scene_merge
+from character_dna.editors.converter.scene import merge as scene_merge
 from character_dna.ui import callbacks
 
 

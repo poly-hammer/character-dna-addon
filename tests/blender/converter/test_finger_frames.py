@@ -6,7 +6,7 @@ import pytest
 
 from mathutils import Euler, Matrix, Vector
 
-from character_dna.editors.converter.finger_frames import (
+from character_dna.editors.converter.joints.fingers import (
     fit_finger_orientations,
     hand_bind_transforms,
     skin_hand_positions,
@@ -31,7 +31,7 @@ def test_collinear_samples_do_not_invent_roll():
 
 
 @pytest.mark.parametrize("changed", [False, True])
-def test_finger_and_corrective_frames_follow_wrap_without_moving_origins(addon, changed):
+def test_finger_and_corrective_frames_follow_input_without_moving_origins(addon, changed):
     armature = bpy.data.armatures.new("finger_fit_test")
     rig = bpy.data.objects.new("finger_fit_test", armature)
     bpy.context.scene.collection.objects.link(rig)
@@ -111,9 +111,9 @@ def test_hand_alignment_recovers_reference_pose_preserving_shape_and_body(addon,
     try:
         shape = [Vector((0.5, 0.007, 1.008)), Vector((0.46, -0.012, 1.009))]
         shaped = [wrist + shift + 1.3 * (point - wrist) for point in shape]
-        wrapped = [wrist + shift + rotation.to_3x3() @ (1.3 * (point - wrist)) for point in shape]
+        copied = [wrist + shift + rotation.to_3x3() @ (1.3 * (point - wrist)) for point in shape]
         untouched = Vector((0.012, -0.042, 0.98))
-        mesh.from_pydata([*wrapped, untouched], [], [])
+        mesh.from_pydata([*copied, untouched], [], [])
         obj.vertex_groups.new(name=names[2]).add([0, 1], 0.3, "REPLACE")
         obj.vertex_groups.new(name=names[3]).add([0, 1], 0.7, "REPLACE")
         obj.vertex_groups.new(name="pelvis").add([2], 1, "REPLACE")

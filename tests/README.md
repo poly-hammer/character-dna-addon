@@ -96,11 +96,12 @@ the complete run.
 Mock a collaborator only when that collaborator is outside the behavior being
 asserted. Prefer autospecced boundaries and verify arguments and effects. Keep a
 real integration anchor for the behavior moved out of a parameter matrix, and
-record the boundary in `scripts/test_suite_refactor/contracts.json`. Do not mock
+record the boundary in [contracts.json](contracts.json). Do not mock
 the calculation being checked, replace numerical goldens, loosen tolerances or
 drop parameter cases to meet a runtime budget.
 
-The [benchmark guide](../scripts/test_suite_refactor/README.md) covers complete
-matched runs, cold caches, exact case/coverage comparison and mutation checks.
+The [benchmark guide](benchmarks/README.md) covers the opt-in tools in
+`tests/benchmarks`: complete matched runs, cold caches and exact case/coverage
+comparison. Their regression tests remain in `tests/unit`.
 Parallel local Blender runs, incomplete baselines and focused microbenchmarks
 cannot establish the full-suite runtime target.

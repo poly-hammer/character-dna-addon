@@ -125,7 +125,7 @@ def test_failed_editor_entry_restores_runtime(character, monkeypatch, editor_nam
 
 
 def test_failed_merged_entry_restores_surface_and_removes_snapshots(character, monkeypatch):
-    from character_dna.editors.converter import scene_merge
+    from character_dna.editors.converter.scene import merge as scene_merge
     from character_dna.editors.rbf_editor.editor import RBFEditor
 
     proxy = scene_merge.merge(character)

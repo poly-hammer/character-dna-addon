@@ -109,7 +109,7 @@ def test_scoped_commit_keeps_other_keys_and_all_lod_revisions(character, monkeyp
     from test_merge_split import coordinates
 
     from character_dna.dna_io.misc import create_shape_key
-    from character_dna.editors.converter import scene_merge
+    from character_dna.editors.converter.scene import merge as scene_merge
     from character_dna.editors.shape_key_editor.editor import ShapeKeyEditor
     from character_dna.runtime import controller
 

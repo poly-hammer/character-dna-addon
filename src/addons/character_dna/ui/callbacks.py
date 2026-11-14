@@ -205,8 +205,38 @@ def get_face_pose_previews_items(
     # Cache the enum item values and the key for later retrieval. We must keep a
     # reference to the returned tuples alive to avoid a Blender enum GC crash.
     preview_collection.face_pose_previews = enum_items
+    preview_collection.face_pose_preview_values = {item[4] for item in enum_items}
     preview_collection.face_pose_previews_cache_key = cache_key
     return preview_collection.face_pose_previews
+
+
+def get_face_pose_ui_items(
+    self: "CharacterWindowManagerProperties",  # noqa: ARG001
+    context: "Context",
+) -> Iterable[tuple[str, str, str, int, int]]:
+    if context is None or context.scene is None:
+        return ()
+    return get_face_pose_previews_items(getattr(context.scene, ToolInfo.NAME).face_board, context)
+
+
+def get_face_pose_ui_value(self: "CharacterWindowManagerProperties") -> int:  # noqa: ARG001
+    from ..properties import face_pose_preview_collections
+
+    face_board = getattr(bpy.context.scene, ToolInfo.NAME).face_board
+    value = face_board.get("face_pose_previews", 0)
+    items = get_face_pose_previews_items(face_board, bpy.context)
+    return value if value in face_pose_preview_collections["face_poses"].face_pose_preview_values else items[0][4]
+
+
+def set_face_pose_ui_value(self: "CharacterWindowManagerProperties", value: int) -> None:  # noqa: ARG001
+    face_board = getattr(bpy.context.scene, ToolInfo.NAME).face_board
+    if is_readonly_id(face_board.id_data) or is_face_board_readonly(get_active_rig_instance()):
+        return
+    for identifier, _name, _description, _icon, number in get_face_pose_previews_items(face_board, bpy.context):
+        if number == value and identifier != NO_FACE_POSE:
+            # Keep scene persistence, API access, and the normal pose update callback.
+            face_board.face_pose_previews = identifier
+            return
 
 
 def ensure_face_pose_metadata(force: bool = False) -> list[dict]:
@@ -623,6 +653,14 @@ def set_active_lod(self: "CharacterViewOptionsProperties", value: int):
             and scene_object.type == "MESH"
             and not is_readonly_id(scene_object)
         ):
+            visibility = scene_object.get("dna_converter_visibility")
+            if visibility is not None:
+                lod = HEAD_TO_BODY_LOD_MAPPING.get(value) if visibility["component"] == "body" else value
+                inactive = visibility["lod"] != lod
+                scene_object.hide_viewport = bool(visibility["hide_viewport"])
+                scene_object.hide_render = inactive or bool(visibility["hide_render"])
+                set_hidden(scene_object, inactive or bool(visibility["hide_viewport"]))
+                continue
             ignored_names = [
                 f"{instance.name}_eyeshell_lod{value}_mesh",
                 f"{instance.name}_eyeEdge_lod{value}_mesh",
@@ -637,10 +675,14 @@ def set_active_lod(self: "CharacterViewOptionsProperties", value: int):
     # un-hide the body lod. There are 2 head lods per body lod
     body_lod_index = HEAD_TO_BODY_LOD_MAPPING.get(value)
     body_lod_object = bpy.data.objects.get(f"{instance.name}_body_lod{body_lod_index}_mesh")
-    if body_lod_object and not is_readonly_id(body_lod_object):
+    if (
+        body_lod_object
+        and not is_readonly_id(body_lod_object)
+        and body_lod_object.get("dna_converter_visibility") is None
+    ):
         set_hidden(body_lod_object, False)
     if instance.get("dna_merge_proxy"):
-        from ..editors.converter.scene_merge import sync_visibility
+        from ..editors.converter.scene.merge import sync_visibility
 
         sync_visibility(instance)
 
@@ -963,27 +1005,23 @@ def update_head_to_body_constraint_influence(self: "RigInstance", context: "Cont
 
 
 def get_head_mesh_output_items(instance: "RigInstance") -> list[bpy.types.Object]:
-    mesh_objects = []
-
-    # get all mesh objects that are skinned to the head rig
-    for scene_object in bpy.data.objects:
-        if scene_object.type == "MESH":
-            for modifier in scene_object.modifiers:
-                if modifier.type == "ARMATURE" and getattr(modifier, "object", None) == instance.head_rig:
-                    mesh_objects.append(scene_object)
-                    break
-
-    return mesh_objects
+    return _get_mesh_output_items(instance, instance.head_rig)
 
 
 def get_body_mesh_output_items(instance: "RigInstance") -> list[bpy.types.Object]:
-    mesh_objects = []
+    return _get_mesh_output_items(instance, instance.body_rig)
 
-    # get all mesh objects that are skinned to the body rig
-    for scene_object in bpy.data.objects:
+
+def _get_mesh_output_items(instance: "RigInstance", rig: bpy.types.Object | None) -> list[bpy.types.Object]:
+    if rig is None:
+        return []
+
+    mesh_objects = []
+    # Output pointers can keep unlinked objects alive. They are not scene assets.
+    for scene_object in instance.id_data.objects:
         if scene_object.type == "MESH":
             for modifier in scene_object.modifiers:
-                if modifier.type == "ARMATURE" and getattr(modifier, "object", None) == instance.body_rig:
+                if modifier.type == "ARMATURE" and getattr(modifier, "object", None) == rig:
                     mesh_objects.append(scene_object)
                     break
 
@@ -999,7 +1037,7 @@ def get_head_image_output_items(instance: "RigInstance") -> list[tuple[bpy.types
                 node_input = head_texture_logic_node.inputs.get(input_name)
                 if node_input and node_input.links:
                     image_node = node_input.links[0].from_node
-                    if image_node and image_node.type == "TEX_IMAGE":
+                    if image_node and image_node.type == "TEX_IMAGE" and image_node.image:
                         image_nodes.append((image_node.image, file_name))  # type: ignore[reportAttributeAccessIssue]
     return image_nodes
 
@@ -1013,7 +1051,7 @@ def get_body_image_output_items(instance: "RigInstance") -> list[tuple[bpy.types
                 node_input = body_texture_logic_node.inputs.get(input_name)
                 if node_input and node_input.links:
                     image_node = node_input.links[0].from_node
-                    if image_node and image_node.type == "TEX_IMAGE":
+                    if image_node and image_node.type == "TEX_IMAGE" and image_node.image:
                         image_nodes.append((image_node.image, file_name))  # type: ignore[attr-defined]
     return image_nodes
 
@@ -1037,7 +1075,15 @@ def update_instance_name(self: "RigInstance", context: "Context"):
         self.old_name = self.name
 
 
-def update_body_output_items(self: "RigInstance | None", context: "Context"):  # noqa: ARG001, PLR0912
+def update_body_output_items(self: "RigInstance | None", context: "Context"):  # noqa: ARG001
+    _update_output_items(context, "body")
+
+
+def update_head_output_items(self: "RigInstance | None", context: "Context"):  # noqa: ARG001
+    _update_output_items(context, "head")
+
+
+def _update_output_items(context: "Context", component: str) -> None:  # noqa: PLR0912
     if not hasattr(context.scene, ToolInfo.NAME):
         return
 
@@ -1048,137 +1094,69 @@ def update_body_output_items(self: "RigInstance | None", context: "Context"):  #
     for instance in addon_scene_properties.rig_instance_list:
         if is_reference_readonly(instance) or is_readonly_id(instance.id_data):
             continue
-        # Recover a cleared body_mesh pointer from the canonically-named mesh that is
-        # still skinned to the body rig. A lost pointer otherwise blocks this sync.
-        if instance and instance.body_rig and not instance.body_mesh:
-            candidate = bpy.data.objects.get(f"{instance.name}_body_lod0_mesh")
-            if candidate and candidate in get_body_mesh_output_items(instance):
-                instance.body_mesh = candidate
+        rig = getattr(instance, f"{component}_rig")
+        main_mesh = getattr(instance, f"{component}_mesh")
+        meshes = _get_mesh_output_items(instance, rig)
+        if rig and not main_mesh:
+            candidate = instance.id_data.objects.get(f"{instance.name}_{component}_lod0_mesh")
+            if candidate and candidate in meshes:
+                setattr(instance, f"{component}_mesh", candidate)
+                main_mesh = candidate
 
-        if instance and instance.body_mesh and instance.body_rig:
-            # update the output items for the scene objects
-            for scene_object in [*get_body_mesh_output_items(instance), instance.body_rig]:
-                for i in instance.output.body_item_list:
-                    if not i.image_object and i.scene_object == scene_object:
-                        break
+        items = getattr(instance.output, f"{component}_item_list")
+        scene_objects = [*meshes]
+        if rig and rig.name in instance.id_data.objects:
+            scene_objects.append(rig)
+        images = get_head_image_output_items(instance) if component == "head" else get_body_image_output_items(instance)
+        valid_scene_objects = set(scene_objects)
+        valid_images = set(images)
+        seen_scene_objects = set()
+        seen_images = set()
+        stale_indices = []
+        # Synchronize even when the mesh, rig or material was cleared. A datablock
+        # staying alive is not evidence that it is still an output dependency.
+        for index, item in enumerate(items):
+            if item.image_object and not item.scene_object:
+                image_key = (item.image_object, item.name)
+                if image_key not in valid_images or image_key in seen_images:
+                    stale_indices.append(index)
                 else:
-                    new_item = instance.output.body_item_list.add()
-                    new_item.scene_object = scene_object
-                    if scene_object == instance.body_mesh:
-                        new_item.name = "body_lod0_mesh"
-                        new_item.editable_name = False
-                    elif scene_object == instance.body_rig:
-                        new_item.name = "rig"
-                        new_item.editable_name = False
-                    else:
-                        new_item.name = remove_instance_prefix(scene_object.name, instance.name)
-                        new_item.editable_name = True
-
-            # update the output items for the image textures
-            for image_object, file_name in get_body_image_output_items(instance):
-                for i in instance.output.body_item_list:
-                    if not i.scene_object and i.image_object == image_object:
-                        break
+                    seen_images.add(image_key)
+            elif item.scene_object and not item.image_object:
+                if item.scene_object not in valid_scene_objects or item.scene_object in seen_scene_objects:
+                    stale_indices.append(index)
                 else:
-                    new_item = instance.output.body_item_list.add()
-                    new_item.image_object = image_object
-                    new_item.name = file_name
-                    new_item.editable_name = False
+                    seen_scene_objects.add(item.scene_object)
+            else:
+                stale_indices.append(index)
+        for index in reversed(stale_indices):
+            items.remove(index)
 
-            # Remove stale output items. Iterate by index in reverse and remove by
-            # index (never by name) so duplicate-named items are handled correctly.
-            # An item is dropped when it has neither a scene object nor an image
-            # object, when its scene object is no longer skinned to the rig, or when
-            # it duplicates a scene/image object already kept.
-            valid_scene_objects = {*get_body_mesh_output_items(instance), instance.body_rig}
-            seen_scene_objects: set[bpy.types.Object] = set()
-            seen_image_objects: set[bpy.types.Image] = set()
-            for index in reversed(range(len(instance.output.body_item_list))):
-                item = instance.output.body_item_list[index]
-                if item.image_object:
-                    if item.image_object in seen_image_objects:
-                        instance.output.body_item_list.remove(index)
-                    else:
-                        seen_image_objects.add(item.image_object)
-                elif item.scene_object:
-                    if item.scene_object not in valid_scene_objects or item.scene_object in seen_scene_objects:
-                        instance.output.body_item_list.remove(index)
-                    else:
-                        seen_scene_objects.add(item.scene_object)
-                else:
-                    instance.output.body_item_list.remove(index)
+        for scene_object in scene_objects:
+            item = next((item for item in items if item.scene_object == scene_object), None)
+            if item is None:
+                item = items.add()
+                item.scene_object = scene_object
+                item.name = remove_instance_prefix(scene_object.name, instance.name)
+                item.editable_name = True
+            if scene_object == main_mesh:
+                item.name = f"{component}_lod0_mesh"
+                item.editable_name = False
+            elif scene_object == rig:
+                item.name = "rig"
+                item.editable_name = False
 
+        for image_object, file_name in images:
+            if (image_object, file_name) in seen_images:
+                continue
+            item = items.add()
+            item.image_object = image_object
+            item.name = file_name
+            item.editable_name = False
+            seen_images.add((image_object, file_name))
 
-def update_head_output_items(self: "RigInstance | None", context: "Context"):  # noqa: ARG001, PLR0912
-    if not hasattr(context.scene, ToolInfo.NAME):
-        return
-
-    from ..utilities import get_addon_scene_properties, remove_instance_prefix
-
-    addon_scene_properties = get_addon_scene_properties(context)
-
-    for instance in addon_scene_properties.rig_instance_list:
-        if is_reference_readonly(instance) or is_readonly_id(instance.id_data):
-            continue
-        # Recover a cleared head_mesh pointer from the canonically-named mesh that is
-        # still skinned to the head rig. A lost pointer otherwise blocks this sync.
-        if instance and instance.head_rig and not instance.head_mesh:
-            candidate = bpy.data.objects.get(f"{instance.name}_head_lod0_mesh")
-            if candidate and candidate in get_head_mesh_output_items(instance):
-                instance.head_mesh = candidate
-
-        if instance and instance.head_mesh and instance.head_rig:
-            # update the output items for the scene objects
-            for scene_object in [*get_head_mesh_output_items(instance), instance.head_rig]:
-                for i in instance.output.head_item_list:
-                    if not i.image_object and i.scene_object == scene_object:
-                        break
-                else:
-                    new_item = instance.output.head_item_list.add()
-                    new_item.scene_object = scene_object
-                    if scene_object == instance.head_mesh:
-                        new_item.name = "head_lod0_mesh"
-                        new_item.editable_name = False
-                    elif scene_object == instance.head_rig:
-                        new_item.name = "rig"
-                        new_item.editable_name = False
-                    else:
-                        new_item.name = remove_instance_prefix(scene_object.name, instance.name)
-                        new_item.editable_name = True
-
-            # update the output items for the image textures
-            for image_object, file_name in get_head_image_output_items(instance):
-                for i in instance.output.head_item_list:
-                    if not i.scene_object and i.image_object == image_object:
-                        break
-                else:
-                    new_item = instance.output.head_item_list.add()
-                    new_item.image_object = image_object
-                    new_item.name = file_name
-                    new_item.editable_name = False
-
-            # Remove stale output items. Iterate by index in reverse and remove by
-            # index (never by name) so duplicate-named items are handled correctly.
-            # An item is dropped when it has neither a scene object nor an image
-            # object, when its scene object is no longer skinned to the rig, or when
-            # it duplicates a scene/image object already kept.
-            valid_scene_objects = {*get_head_mesh_output_items(instance), instance.head_rig}
-            seen_scene_objects: set[bpy.types.Object] = set()
-            seen_image_objects: set[bpy.types.Image] = set()
-            for index in reversed(range(len(instance.output.head_item_list))):
-                item = instance.output.head_item_list[index]
-                if item.image_object:
-                    if item.image_object in seen_image_objects:
-                        instance.output.head_item_list.remove(index)
-                    else:
-                        seen_image_objects.add(item.image_object)
-                elif item.scene_object:
-                    if item.scene_object not in valid_scene_objects or item.scene_object in seen_scene_objects:
-                        instance.output.head_item_list.remove(index)
-                    else:
-                        seen_scene_objects.add(item.scene_object)
-                else:
-                    instance.output.head_item_list.remove(index)
+        active_index = f"{component}_item_active_index"
+        setattr(instance.output, active_index, min(getattr(instance.output, active_index), max(0, len(items) - 1)))
 
 
 # Cache of LOD enum items keyed by rig-instance name. The value is the tuple of

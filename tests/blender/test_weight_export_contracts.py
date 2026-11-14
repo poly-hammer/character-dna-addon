@@ -6,7 +6,7 @@ import bpy
 import pytest
 
 from character_dna.bindings import dna
-from character_dna.dna_io import get_dna_reader, get_dna_writer, release_dna_handle
+from character_dna.dna_io import get_dna_reader, get_dna_writer, mesh_data, release_dna_handle
 from character_dna.dna_io.calibrator import DNACalibrator
 from character_dna.dna_io.exporter import DNAExporter
 from character_dna.dna_io.importer import DNAImporter
@@ -21,7 +21,18 @@ def test_weight_export_preserves_native_rows_and_replaced_groups(
     writer = result = None
     try:
         mesh = bpy.data.meshes.new("WeightContract")
-        mesh.vertices.add(reader.getVertexPositionCount(0))
+        mesh.from_pydata(
+            list(
+                zip(
+                    reader.getVertexPositionXs(0),
+                    reader.getVertexPositionYs(0),
+                    reader.getVertexPositionZs(0),
+                    strict=True,
+                )
+            ),
+            [],
+            mesh_data.reader_faces(reader, 0),
+        )
         obj = bpy.data.objects.new("WeightContract_" + reader.getMeshName(0), mesh)
         empty_character_scene.collection.objects.link(obj)
         DNAImporter.set_vertex_groups(SimpleNamespace(_dna_reader=reader), 0, obj)

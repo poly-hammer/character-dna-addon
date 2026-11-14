@@ -120,6 +120,21 @@ def test_switch_to_pose_mode_does_not_raise_outside_the_view_layer(empty_scene):
     assert bpy.context.mode == "OBJECT"
 
 
+def test_switch_to_pose_mode_preserves_selection_and_active_rig(empty_scene):
+    first, second = _armature_object("first_rig"), _armature_object("second_rig")
+    for obj in (first, second):
+        empty_scene.collection.objects.link(obj)
+    switch_to_pose_mode(first)
+    switch_to_pose_mode(first)
+    assert bpy.context.mode == "POSE"
+    assert bpy.context.view_layer.objects.active == first
+    assert set(bpy.context.selected_objects) == {first}
+    switch_to_pose_mode(second)
+    assert bpy.context.mode == "POSE"
+    assert bpy.context.view_layer.objects.active == second
+    assert set(bpy.context.selected_objects) == {second}
+
+
 def test_move_to_collection_relinks_a_collection_left_outside_the_scene(empty_scene):
     orphan = bpy.data.collections.new("Ada")
     scene_object = _armature_object("Ada_head_rig")

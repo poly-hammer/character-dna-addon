@@ -11,7 +11,8 @@ from test_merge_split import character as character_fixture, coordinates
 from character_dna import shape_names
 from character_dna.dna_io.importer import DNAImporter
 from character_dna.dna_io.misc import create_shape_key
-from character_dna.editors.converter import scene_merge, source_views
+from character_dna.editors.converter.scene import merge as scene_merge
+from character_dna.editors.converter.source import views as source_views
 from character_dna.runtime import controller, engine
 
 

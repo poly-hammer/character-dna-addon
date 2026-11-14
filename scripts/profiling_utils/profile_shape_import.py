@@ -62,7 +62,7 @@ def instrument_steps(recorder: Recorder, targets: list) -> Iterator[None]:
 
 def surface_digest(instance: Any) -> str:
     """Compare every merged key's name and coordinates between benchmark runs."""
-    from character_dna.editors.converter import scene_merge
+    from character_dna.editors.converter.scene import merge as scene_merge
 
     result = hashlib.sha256()
     for lod, obj in sorted(scene_merge.surfaces(instance).items()):
@@ -79,7 +79,8 @@ def run_import(instance: Any, recorder: Recorder, profile_path: Path | None) -> 
     import bpy
 
     from character_dna.dna_io import document
-    from character_dna.editors.converter import scene_merge, surface_session
+    from character_dna.editors.converter.scene import merge as scene_merge
+    from character_dna.editors.converter.surface import session as surface_session
     from character_dna.editors.shape_key_editor.operators import ImportShapeKeys
     from character_dna.rig_instance import RigInstance
     from character_dna.runtime import controller, engine, retention

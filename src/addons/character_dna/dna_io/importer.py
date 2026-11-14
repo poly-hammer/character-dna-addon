@@ -18,7 +18,6 @@ from ..constants import (
     CUSTOM_BONE_SHAPE_SCALE,
     EXTRA_BONES,
     FIRST_BONE_HEIGHT,
-    MESH_VERTEX_COLORS_FILE_NAME,
     MESH_VERTEX_COLORS_FILE_PATH,
     NUMBER_OF_HEAD_LODS,
     SHAPE_KEY_BASIS_NAME,
@@ -27,8 +26,9 @@ from ..constants import (
     ComponentType,
 )
 from ..typing import *  # noqa: F403
+from . import mesh_data
 from .coordinates import COORDINATE_VERSION, DNA_ROTATION_MODE
-from .misc import get_dna_reader
+from .misc import get_dna_reader, get_mesh_lods
 
 
 logger = logging.getLogger(__name__)
@@ -49,12 +49,13 @@ class DNAImporter:
 
         self._instance = instance
         self._import_properties = import_properties
+        self._import_template_data = getattr(import_properties, "import_template_data", False)
         self._linear_modifier = linear_modifier
 
         if component_type == "head":
-            self.source_dna_file = Path(bpy.path.abspath(str(dna_file_path) or instance.head_dna_file_path))
+            self.source_dna_file = Path(bpy.path.abspath(str(dna_file_path or instance.head_dna_file_path)))
         elif component_type == "body":
-            self.source_dna_file = Path(bpy.path.abspath(str(dna_file_path) or instance.body_dna_file_path))
+            self.source_dna_file = Path(bpy.path.abspath(str(dna_file_path or instance.body_dna_file_path)))
 
         # Determine the file format of the DNA file
         file_format = "binary" if (dna_file_path or self.source_dna_file).suffix.lower() == ".dna" else "json"
@@ -75,14 +76,33 @@ class DNAImporter:
         self._index_to_face = {}
         self._vert_index_to_dna_index = {}
         self._face_index_to_dna_index = {}
-        self._vertex_color_data = []
-        self._default_vertex_color_layout = False
+        self._vertex_color_data = None
         self._component_type = component_type
+        self._custom_topology = mesh_data.has_custom_topology(self._dna_reader, component_type)
+        try:
+            self._mesh_metadata = mesh_data.read(self._dna_reader, component_type)
+        except ValueError:
+            if self._custom_topology or self._import_template_data:
+                raise
+            logger.warning("Invalid optional mesh metadata; importing the native UV map and bundled colors only.")
+            self._mesh_metadata = None
+        if self._mesh_metadata is not None and self._mesh_metadata.get("space", "component") != "component":
+            raise ValueError("Project merged DNA before importing component mesh metadata.")
 
     def _get_lod_settings(self) -> list[tuple[int, bool]]:
-        return [(i, getattr(self._import_properties, f"import_lod{i}")) for i in range(NUMBER_OF_HEAD_LODS)]
+        return [
+            (i, getattr(self._import_properties, f"import_lod{i}"))
+            for i in get_mesh_lods(self._dna_reader)
+            if i < NUMBER_OF_HEAD_LODS
+        ]
 
     def initialize_dna_data(self):
+        if hasattr(self._instance, "output"):
+            setattr(
+                self._instance.output,
+                f"{self._component_type}_topology_type",
+                mesh_data.type_name(self._dna_reader, self._component_type),
+            )
         for lod_index, should_import in self._get_lod_settings():
             if should_import:
                 self._import_lods[lod_index] = {}
@@ -124,20 +144,22 @@ class DNAImporter:
         return indices, positions
 
     def get_dna_vertex_colors(self, mesh_index: int) -> tuple[list[int], list[list[float]]]:
-        if self._component_type == "body":
+        """Read only the bundled MetaHuman head colors, addressed by DNA position."""
+        if self._custom_topology or self._component_type != "head":
             return [], []
-
-        # Avoid loading the vertex colors multiple times
-        if not self._vertex_color_data:
-            vertex_colors_file = self.source_dna_file.parent / f"{self._prefix}_{MESH_VERTEX_COLORS_FILE_NAME}"
-            if not vertex_colors_file.exists():
-                vertex_colors_file = MESH_VERTEX_COLORS_FILE_PATH
-                self._default_vertex_color_layout = True
-
-            with vertex_colors_file.open() as file:
+        if self._vertex_color_data is None:
+            with MESH_VERTEX_COLORS_FILE_PATH.open() as file:
                 self._vertex_color_data = json.load(file)
 
+        if mesh_index >= len(self._vertex_color_data):
+            return [], []
         data = self._vertex_color_data[mesh_index]
+        if data.get("mesh_name", self._dna_reader.getMeshName(mesh_index)) != self._dna_reader.getMeshName(mesh_index):
+            logger.warning(f"Vertex color mesh identity does not match mesh {mesh_index}; skipping colors.")
+            return [], []
+        if len(data["indices"]) != self._dna_reader.getVertexPositionCount(mesh_index):
+            logger.warning(f"Bundled vertex colors do not match the topology of mesh {mesh_index}; skipping colors.")
+            return [], []
         return (data["indices"], data["values"])
 
     def get_dna_vertex_normals(self, mesh_index: int) -> dict[int, Vector]:
@@ -164,10 +186,14 @@ class DNAImporter:
 
     def get_dna_vertex_groups(self, mesh_index: int) -> dict[str, list[tuple[int, float]]]:
         vertex_groups = {}
+        template_data = getattr(self, "_import_template_data", False)
         for layout_index, vertex_index in enumerate(self._dna_reader.getVertexLayoutPositionIndices(mesh_index)):
             vertex_bone_indices = self._dna_reader.getSkinWeightsJointIndices(mesh_index, vertex_index)
             vertex_weights = self._dna_reader.getSkinWeightsValues(mesh_index, vertex_index)
             for bone_index, weight in zip(vertex_bone_indices, vertex_weights, strict=False):
+                name = self._dna_reader.getJointName(bone_index)
+                if not template_data and (mesh_data.is_exclusion_group(name) or mesh_data.is_preservation_group(name)):
+                    continue
                 if bone_index in vertex_groups:
                     vertex_group_indices, vertex_group_weights = vertex_groups[bone_index]
                 else:
@@ -236,20 +262,60 @@ class DNAImporter:
         # Group membership is stable while this synchronous import runs. Avoid
         # Blender's linear name lookup for every influence on every vertex.
         joint_names = {}
+        template_data = getattr(self, "_import_template_data", False)
         vertex_groups = {group.name: group for group in mesh_object.vertex_groups}
+        position_ids = sorted(set(self._dna_reader.getVertexLayoutPositionIndices(mesh_index)))
         for vertex in mesh_object.data.vertices:
-            vertex_bone_indices = self._dna_reader.getSkinWeightsJointIndices(mesh_index, vertex.index)
-            vertex_weights = self._dna_reader.getSkinWeightsValues(mesh_index, vertex.index)
+            vertex_bone_indices = self._dna_reader.getSkinWeightsJointIndices(mesh_index, position_ids[vertex.index])
+            vertex_weights = self._dna_reader.getSkinWeightsValues(mesh_index, position_ids[vertex.index])
 
             for bone_index, weight in zip(vertex_bone_indices, vertex_weights, strict=False):
                 if bone_index not in joint_names:
                     joint_names[bone_index] = self._dna_reader.getJointName(bone_index)
                 vertex_group_name = joint_names[bone_index]
+                if not template_data and (
+                    mesh_data.is_exclusion_group(vertex_group_name)
+                    or mesh_data.is_preservation_group(vertex_group_name)
+                ):
+                    continue
                 vertex_group = vertex_groups.get(vertex_group_name)
                 if not vertex_group:
                     vertex_group = mesh_object.vertex_groups.new(name=vertex_group_name)
                     vertex_groups[vertex_group_name] = vertex_group
                 vertex_group.add(index=[vertex.index], weight=weight, type="REPLACE")
+
+    def _set_template_vertex_groups(self, mesh_index: int, mesh_object: bpy.types.Object) -> None:
+        """Restore authoring masks using DNA position IDs rather than UV layout IDs."""
+        if self._mesh_metadata is None:
+            return
+        record = next((r for r in self._mesh_metadata["meshes"] if r["mesh_index"] == mesh_index), None)
+        if record is None:
+            return
+        mesh_data.validate_record(
+            record,
+            mesh_data.topology(
+                self._dna_reader.getVertexPositionCount(mesh_index),
+                mesh_data.reader_faces(self._dna_reader, mesh_index),
+            ),
+        )
+        position_ids = sorted(set(self._dna_reader.getVertexLayoutPositionIndices(mesh_index)))
+        inverse = {dna: local for local, dna in enumerate(position_ids)}
+        groups = {name: dict.fromkeys(vertices, 1.0) for name, vertices in record.get("exclusions", {}).items()}
+        groups.update(
+            {
+                name: dict(zip(mask["vertices"], mask["weights"], strict=True))
+                for name, mask in record.get("preservations", {}).items()
+            }
+        )
+        for name, weights in groups.items():
+            group = mesh_object.vertex_groups.get(name)
+            if group is not None:
+                group.remove(list(range(len(mesh_object.data.vertices))))
+            else:
+                group = mesh_object.vertex_groups.new(name=name)
+            for position, weight in weights.items():
+                if position in inverse:
+                    group.add([inverse[position]], weight, "REPLACE")
 
     def set_mesh_normals(self, mesh_index: int, mesh: bpy.types.Mesh):
         """Import the DNA's own normals as custom split normals.
@@ -315,6 +381,9 @@ class DNAImporter:
         # sort the vertices so that they are in the same order as the DNA file
         bmesh_object.verts.sort(key=lambda v: self._vert_index_to_dna_index[v.index])
         bmesh_object.verts.ensure_lookup_table()
+        bmesh_object.verts.index_update()
+        self._index_to_vert = {dna: bmesh_object.verts[local] for local, dna in enumerate(sorted(self._index_to_vert))}
+        self._vert_index_to_dna_index = {vert.index: dna for dna, vert in self._index_to_vert.items()}
 
     def set_mesh_face_layout(self, mesh_index: int, bmesh_object: bmesh.types.BMesh):
         vertex_indices = self._dna_reader.getVertexLayoutPositionIndices(mesh_index)
@@ -323,7 +392,7 @@ class DNAImporter:
             try:
                 face = bmesh_object.faces.new(
                     [
-                        bmesh_object.verts[vertex_indices[i]]
+                        self._index_to_vert[vertex_indices[i]]
                         for i in self._dna_reader.getFaceVertexLayoutIndices(mesh_index, index)
                     ]
                 )
@@ -370,39 +439,38 @@ class DNAImporter:
             logger.debug(f"No vertex colors found for mesh index {mesh_index}. Skipping vertex color import.")
             return
 
-        color_layer = bmesh_object.loops.layers.color.get(
-            VERTEX_COLOR_ATTRIBUTE_NAME
-        ) or bmesh_object.loops.layers.color.new(VERTEX_COLOR_ATTRIBUTE_NAME)
+        data = self._vertex_color_data[mesh_index]
+        positions = self._dna_reader.getVertexLayoutPositionIndices(mesh_index)
+        # Validate before creating a layer; bundled colors address DNA positions.
+        assignments = []
+        try:
+            for face_index, face in self._index_to_face.items():
+                layouts = self._dna_reader.getFaceVertexLayoutIndices(mesh_index, face_index)
+                indices = [vertex_color_indices[positions[layout]] for layout in layouts]
+                by_vertex = {}
+                for layout, index in zip(layouts, indices, strict=True):
+                    if not 0 <= index < len(vertex_color_values):
+                        raise ValueError("color index out of range")
+                    value = vertex_color_values[index]
+                    if len(value) != 4 or not all(math.isfinite(channel) for channel in value):
+                        raise ValueError("invalid RGBA value")
+                    by_vertex[self._index_to_vert[positions[layout]]] = value
+                assignments.append((face_index, [by_vertex[loop.vert] for loop in face.loops]))
+        except (IndexError, KeyError, ValueError, TypeError) as error:
+            logger.warning(f"Invalid vertex colors for mesh {mesh_index}: {error}; skipping colors.")
+            return
 
-        if self._default_vertex_color_layout:
-            # The bundled default layout is keyed by the standard MetaHuman mesh
-            # ordering/vertex counts; when it is applied to a custom (overwrite)
-            # DNA whose mesh set or topology differs, the lookups can fall out of
-            # range. Guard every access so a mismatched layout skips gracefully
-            # instead of raising and dropping the whole mesh from the import.
-            vertex_count = len(bmesh_object.verts)
-            index_count = len(vertex_color_indices)
-            value_count = len(vertex_color_values)
-            for vertex_index in self._dna_reader.getVertexLayoutPositionIndices(mesh_index):
-                if vertex_index >= vertex_count or vertex_index >= index_count:
-                    continue
-                color_index = vertex_color_indices[vertex_index]
-                if color_index >= value_count:
-                    continue
-                vert = bmesh_object.verts[vertex_index]
-                value = vertex_color_values[color_index]
-                for loop in vert.link_loops:
-                    loop[color_layer] = Vector(value)
-
-        # Todo: Implement the custom vertex color layout from exported JSON file
-        # else:  # noqa: ERA001
-        #     for face in bmesh_object.faces:
-        #         face_vert_indices = [v.index for v in face.verts]  # noqa: ERA001
-        #         dna_face_vert_indices = self._dna_reader.getFaceVertexLayoutIndices(mesh_index, face.index)  # noqa: E501, ERA001
-        #         lookup = dict(zip(face_vert_indices, dna_face_vert_indices))  # noqa: ERA001
-        #         for loop in face.loops:
-        #             vertex_color_index = vertex_color_indices[lookup[loop.vert.index]]  # noqa: ERA001
-        #             loop[color_layer] = Vector(vertex_color_values[vertex_color_index])  # noqa: ERA001
+        layers = (
+            bmesh_object.loops.layers.float_color
+            if data.get("data_type") == "FLOAT_COLOR"
+            else bmesh_object.loops.layers.color
+        )
+        color_layer = layers.get(VERTEX_COLOR_ATTRIBUTE_NAME) or layers.new(VERTEX_COLOR_ATTRIBUTE_NAME)
+        # Adding a BMesh custom-data layer reallocates loops. Reacquire them
+        # instead of retaining BMLoop references across layers.new().
+        for face_index, values in assignments:
+            for loop, value in zip(self._index_to_face[face_index].loops, values, strict=True):
+                loop[color_layer] = value
 
     def normalize_color_attributes(self, mesh: bpy.types.Mesh):
         """Ensure the mesh has a single color attribute named"""
@@ -420,6 +488,33 @@ class DNAImporter:
                 color_attributes.active_color_index = index
                 color_attributes.render_color_index = index
                 break
+
+    def _apply_mesh_metadata(self, mesh_index: int, mesh_object: bpy.types.Object) -> None:
+        """Apply optional UV layers, custom colors, and the topology boundary."""
+        mesh = mesh_object.data
+        record = next((r for r in (self._mesh_metadata or {}).get("meshes", []) if r["mesh_index"] == mesh_index), None)
+        if not self._custom_topology:
+            self.normalize_color_attributes(mesh)
+        if record is None:
+            if self._custom_topology and self._mesh_metadata is None and self._import_properties.import_vertex_colors:
+                logger.warning(
+                    f"Custom {self._component_type} DNA has no embedded mesh metadata; importing without colors."
+                )
+            return
+        position_ids = sorted(set(self._dna_reader.getVertexLayoutPositionIndices(mesh_index)))
+        faces = mesh_data.reader_faces(self._dna_reader, mesh_index)
+        mesh_data.validate_record(
+            record, mesh_data.topology(self._dna_reader.getVertexPositionCount(mesh_index), faces)
+        )
+        if self._custom_topology:
+            if self._import_properties.import_vertex_colors:
+                mesh_data.apply_colors(mesh, record, position_ids)
+            if record.get("neckline") is not None:
+                inverse = {dna: local for local, dna in enumerate(position_ids)}
+                group = mesh_object.vertex_groups.new(name=mesh_data.SEAM_GROUP)
+                group.add([inverse[v] for v in record["neckline"]], 1.0, "REPLACE")
+        if "uv_layers" in record:
+            mesh_data.apply_uv_layers(mesh, record, mesh_data.corner_order(mesh, faces, position_ids))
 
     def create_mesh_object(self, lod_index: int, mesh_name: str) -> bpy.types.Object:
         name = f"{self._prefix}_{mesh_name}"
@@ -459,8 +554,7 @@ class DNAImporter:
         self.set_smooth(bmesh_object)
 
         # Add vertex colors
-        # Todo: See if we can import vertex colors on all LODs.
-        if self._import_properties.import_vertex_colors and lod_index == 0 and self._component_type == "head":
+        if self._import_properties.import_vertex_colors and not self._custom_topology:
             self.set_vertex_colors(mesh_index, bmesh_object)
 
         # Add UVs
@@ -470,8 +564,7 @@ class DNAImporter:
         bmesh_object.to_mesh(mesh)
         bmesh_object.free()
 
-        # Ensure a single, named color attribute that is both active and active-render
-        self.normalize_color_attributes(mesh)
+        self._apply_mesh_metadata(mesh_index, mesh_object)
 
         # The DNA's own normals, which are what makes the head sit seamlessly on the body.
         if self._import_properties.import_normals:
@@ -482,6 +575,9 @@ class DNAImporter:
             self.set_vertex_groups(mesh_index, mesh_object=mesh_object)
             # Attach the mesh to the armature
             self.set_armature_modifier(mesh_object)
+
+        if self._import_template_data:
+            self._set_template_vertex_groups(mesh_index, mesh_object)
 
         # The DNA reader already transformed the geometry into Blender space.
         # Persist the DNA identity independently of editable object/collection names.

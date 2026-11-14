@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import json
+import os
 import sys
 import traceback
 
@@ -31,7 +32,7 @@ class SavedAssemblyScene(bpy.types.PropertyGroup):
     rig_instance_proxies: bpy.props.CollectionProperty(type=SavedInstance)  # pyright: ignore[reportInvalidTypeForm]
 
 
-def main() -> None:
+def main() -> int:
     """Write a JSON descriptor; never enable an addon or save the opened blend."""
     import addon_utils
 
@@ -70,9 +71,19 @@ def main() -> None:
                     else:
                         data[name] = module.describe_instance(scene, edition, instance)
         data_file.write_text(json.dumps(data), encoding="utf-8")
+        return 0
     except Exception:
         data_file.with_name(f"{data_file.stem}_error.log").write_text(traceback.format_exc(), encoding="utf-8")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    status = main()
+    if not bpy.app.binary_path:
+        # The standalone bpy wheel can deadlock in CPython's C++ teardown after
+        # the descriptor is complete. Official Blender owns its normal shutdown.
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(status)
+    if status:
+        raise SystemExit(status)

@@ -9,7 +9,7 @@ from test_dna_operation_backups import configure_backups, entries
 from test_merge_split import character as character_fixture
 
 from character_dna.editors.backup_manager import core as backups
-from character_dna.editors.converter import scene_merge
+from character_dna.editors.converter.scene import merge as scene_merge
 
 
 character = character_fixture

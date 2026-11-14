@@ -11,7 +11,7 @@ import bpy
 import numpy as np
 import pytest
 
-from mathutils import Quaternion
+from mathutils import Matrix, Quaternion
 
 from character_dna.bindings import dna
 from character_dna.dna_io import get_dna_reader, get_dna_writer, release_dna_handle
@@ -174,6 +174,7 @@ def test_editor_preview_and_lifecycle(character, finish):
     bpy.context.view_layer.update()
     pose = np.array(instance.body_rig.pose.bones["calf_l"].matrix_basis)
     bpy.context.scene.tool_settings.use_keyframe_insert_auto = True
+    assert instance.swing_twist_editor.reset_pose_on_edit
     editor.enter(bpy.context)
     np.testing.assert_allclose(driver.matrix_basis, np.eye(4), atol=2e-5)
     assert controller.is_suspended(instance)
@@ -270,7 +271,7 @@ def test_external_edit_is_rejected(character):
 @pytest.mark.rig_profile(state_only=True)
 def test_combined_commit_preserves_head_and_surface(character, monkeypatch, fail_first):
     from character_dna.dna_io import document
-    from character_dna.editors.converter import scene_merge
+    from character_dna.editors.converter.scene import merge as scene_merge
 
     path = Path(character["combined_dna_path"])
     before = path.read_bytes()
@@ -306,11 +307,17 @@ def test_combined_commit_preserves_head_and_surface(character, monkeypatch, fail
     assert engine.binding_issues(character) == []
 
 
+@pytest.mark.parametrize("reset_pose", [True, False])
 @pytest.mark.parametrize("finish", ["commit", "revert"])
 @pytest.mark.rig_profile(state_only=True)
-def test_saved_session_recovers_draft_and_context(character, tmp_path, finish):
+def test_saved_session_recovers_draft_and_context(character, tmp_path, finish, reset_pose):
     path = Path(character.edit_target.dna_file_path)
     before = path.read_bytes()
+    character.swing_twist_editor.reset_pose_on_edit = reset_pose
+    driver = character.body_rig.pose.bones["calf_l"]
+    driver.rotation_mode = "XYZ"
+    driver.rotation_euler = (0.2, -0.3, 0.4)
+    original_pose = np.array(driver.matrix_basis)
     bpy.context.scene.tool_settings.use_keyframe_insert_auto = True
     SwingTwistEditor.for_instance(character).enter(bpy.context)
     character.swing_twist_editor.setups[0].outputs[0].weight = 0.25
@@ -321,6 +328,7 @@ def test_saved_session_recovers_draft_and_context(character, tmp_path, finish):
     bpy.ops.wm.open_mainfile(filepath=str(blend))
     restored = get_active_rig_instance()
     assert restored.swing_twist_editor.is_editing
+    assert restored.swing_twist_editor.reset_pose_on_edit == reset_pose
     assert restored.swing_twist_editor.setups[0].outputs[0].weight == 0.25
     assert restored.swing_twist_editor.preview_offset == pytest.approx(math.radians(-60))
     restored.swing_twist_editor.setups[0].outputs[0].weight = 0.3
@@ -331,6 +339,7 @@ def test_saved_session_recovers_draft_and_context(character, tmp_path, finish):
     assert not controller.is_suspended(restored)
     assert bpy.context.scene.tool_settings.use_keyframe_insert_auto
     assert engine.binding_issues(restored) == []
+    np.testing.assert_allclose(restored.body_rig.pose.bones["calf_l"].matrix_basis, original_pose, atol=2e-5)
     if finish == "revert":
         assert path.read_bytes() == before
     else:
@@ -727,6 +736,68 @@ def test_offset_is_absolute_preview_only_and_restores_pose(character, index, fin
     for name, pose in before_poses.items():
         np.testing.assert_allclose(rig.pose.bones[name].matrix_basis, pose, atol=2e-5, err_msg=name)
     assert core.read_setups(character.edit_target.dna_reader) == baseline
+
+
+@pytest.mark.parametrize("index", [0, 8])
+@pytest.mark.parametrize("finish", ["commit", "revert"])
+def test_preview_preserves_current_pose_when_reset_disabled(character, index, finish):
+    properties = character.swing_twist_editor
+    properties.reset_pose_on_edit = False
+    properties.active_index = index
+    baseline = core.read_setups(character.edit_target.dna_reader)
+    selected = baseline[index]
+    rig = character.body_rig
+    driver = rig.pose.bones[selected.driver]
+    other = rig.pose.bones[next(setup.driver for setup in baseline if setup.driver != selected.driver)]
+    for bone in (driver, other):
+        bone.rotation_mode = "XYZ"
+        bone.rotation_euler = (0.3, -0.4, 0.5)
+        bone.location = (0.1, 0.2, -0.1)
+        bone.scale = (1.1, 0.9, 1.2)
+    rig.update_tag()
+    bpy.context.view_layer.update()
+    original_pose = driver.matrix_basis.copy()
+    other_pose = np.array(other.matrix_basis)
+    evaluated = rig.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    posed = {bone.name: np.array(bone.matrix) for bone in evaluated.pose.bones}
+    editor = SwingTwistEditor.for_instance(character)
+    editor.enter(bpy.context)
+    assert properties.preview_offset == 0
+    np.testing.assert_allclose(driver.matrix_basis, original_pose, atol=2e-5)
+    for name, pose in posed.items():
+        np.testing.assert_allclose(rig.pose.bones[name].matrix, pose, atol=2e-5, err_msg=name)
+
+    output = rig.pose.bones[selected.output_names[0]]
+    row = properties.setups[index]
+    row.outputs[0].weight = 0.1
+    low = np.array(output.matrix_basis)
+    row.outputs[0].weight = 0.8
+    assert not properties.error
+    assert not np.allclose(output.matrix_basis, low)
+
+    location, rotation, scale = original_pose.decompose()
+    axis = selected.axis if selected.kind == "Twist" else (selected.axis + 1) % 3
+    direction = tuple(float(i == axis) for i in range(3))
+    expected = Matrix.LocRotScale(location, rotation @ Quaternion(direction, math.radians(45)), scale)
+    properties.preview_offset = math.radians(45)
+    np.testing.assert_allclose(driver.matrix_basis, expected, atol=2e-5)
+    first_output = np.array(output.matrix_basis)
+    for degrees in (-70, 10, 90, -30, 45):
+        properties.preview_offset = math.radians(degrees)
+        assert not properties.error
+    np.testing.assert_allclose(driver.matrix_basis, expected, atol=2e-5)
+    np.testing.assert_allclose(output.matrix_basis, first_output, atol=2e-5)
+    np.testing.assert_allclose(other.matrix_basis, other_pose, atol=2e-5)
+    assert bpy.ops.character_dna.reset_swing_twist_preview() == {"FINISHED"}
+    np.testing.assert_allclose(driver.matrix_basis, original_pose, atol=2e-5)
+
+    properties.preview_offset = math.radians(90)
+    getattr(editor, finish)(bpy.context)
+    np.testing.assert_allclose(rig.pose.bones[driver.name].matrix_basis, original_pose, atol=2e-5)
+    np.testing.assert_allclose(rig.pose.bones[other.name].matrix_basis, other_pose, atol=2e-5)
+    assert core.read_setups(character.edit_target.dna_reader)[index].weights[0] == pytest.approx(
+        0.8 if finish == "commit" else selected.weights[0]
+    )
 
 
 @pytest.mark.rig_profile(state_only=True)

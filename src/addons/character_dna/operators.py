@@ -851,6 +851,12 @@ class ImportCharacterDna(bpy.types.Operator, importer.ImportAsset, CharacterImpo
     bl_label = "Import DNA"
     filename_ext = ".dna"
 
+    import_template_data: bpy.props.BoolProperty(
+        default=False,
+        options={"HIDDEN", "SKIP_SAVE"},
+        description="Restore internal converter masks as editable vertex groups",
+    )  # pyright: ignore[reportInvalidTypeForm]
+
     filter_glob: bpy.props.StringProperty(
         default="*.dna",
         options={"HIDDEN"},
@@ -1195,7 +1201,60 @@ class MigrateLegacyData(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class SendToMetaHumanCreator(bpy.types.Operator):
+class TopologyTypeExportConfirmation:
+    """Confirm differing component types before starting an overwrite export."""
+
+    _pending_topology_confirmation: tuple | None = None
+
+    def invoke(self, context: "Context", event: bpy.types.Event) -> set[str]:
+        self._pending_topology_confirmation = None
+        return self.execute(context)
+
+    def cancel(self, context: "Context") -> None:
+        self._pending_topology_confirmation = None
+
+    def _confirm_topology_types(self, context: "Context", instance: "RigInstance | None") -> set[str] | None:
+        from .dna_io import mesh_data
+
+        if not instance or instance.output.method != "overwrite" or not instance.head_mesh or not instance.body_mesh:
+            self._pending_topology_confirmation = None
+            return None
+        names = []
+        for kind in ("head", "body"):
+            name = getattr(instance.output, f"{kind}_topology_type").strip()
+            if not name:
+                name = mesh_data.type_name(instance.component(kind).dna_reader, kind)
+            names.append(name)
+        # Missing types retain the component-specific validation error.
+        if not all(names) or names[0] == names[1]:
+            self._pending_topology_confirmation = None
+            return None
+        signature = (instance.as_pointer(), *names)
+        if self._pending_topology_confirmation == signature:
+            # Blender calls execute again only after the dialog is confirmed.
+            # Consume the confirmation so it cannot authorize a later export.
+            self._pending_topology_confirmation = None
+            return None
+        if bpy.app.background:
+            self.report({"ERROR"}, "Head and Body have different Topology Types. Confirm the export in Blender's UI.")
+            return {"CANCELLED"}
+        self._pending_topology_confirmation = signature
+        return context.window_manager.invoke_props_dialog(  # pyright: ignore[reportReturnType]
+            self, title="Different Topology Types", confirm_text="Export Anyway", cancel_default=True, width=500
+        )
+
+    def draw(self, context: "Context") -> None:
+        if not self.layout or not self._pending_topology_confirmation:
+            return
+        _, head, body = self._pending_topology_confirmation
+        self.layout.label(text="Head and Body have different Topology Types.", icon="ERROR")
+        self.layout.label(text=f"Head: {head}")
+        self.layout.label(text=f"Body: {body}")
+        self.layout.separator()
+        self.layout.label(text="Export with these different types, or cancel to correct them.")
+
+
+class SendToMetaHumanCreator(TopologyTypeExportConfirmation, bpy.types.Operator):
     """Exports the DNA head and body components, as well as, textures in a format supported by MetaHuman Creator."""
 
     bl_idname = f"{ToolInfo.NAME}.send_to_meta_human_creator"
@@ -1203,6 +1262,9 @@ class SendToMetaHumanCreator(bpy.types.Operator):
 
     def execute(self, context: "Context") -> set[str]:
         instance = callbacks.get_active_rig_instance()
+        confirmation = self._confirm_topology_types(context, instance)
+        if confirmation is not None:
+            return confirmation
         if instance:
             # store the current auto evaluate settings
             auto_evaluate_head = instance.auto_evaluate_head
@@ -1308,7 +1370,7 @@ class SendToMetaHumanCreator(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class ExportSelectedComponent(bpy.types.Operator):
+class ExportSelectedComponent(TopologyTypeExportConfirmation, bpy.types.Operator):
     """Export only the selected component to a single DNA file. No textures or supporting files will be exported."""
 
     bl_idname = f"{ToolInfo.NAME}.export_selected_component"
@@ -1316,6 +1378,9 @@ class ExportSelectedComponent(bpy.types.Operator):
 
     def execute(self, context: "Context") -> set[str]:
         instance = callbacks.get_active_rig_instance()
+        confirmation = self._confirm_topology_types(context, instance)
+        if confirmation is not None:
+            return confirmation
         if not instance:
             self.report(
                 {"ERROR"},
@@ -1924,9 +1989,15 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
     bl_label = "Remove Selected Entry"
 
     delete_associated_data: bpy.props.BoolProperty(
-        name="Delete associated data",
+        name="Delete All Associated Data",
         description="Delete all associated objects and collections linked to this rig instance",
         default=True,
+    )  # pyright: ignore[reportInvalidTypeForm]
+
+    apply_mesh_shape: bpy.props.BoolProperty(
+        name="Apply Mesh Shape and Delete Other Data",
+        description="Bake the current LOD mesh shapes, remove rig data, and move the meshes to the scene collection",
+        default=False,
     )  # pyright: ignore[reportInvalidTypeForm]
 
     @staticmethod
@@ -1946,9 +2017,11 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
                         objects.add(item.scene_object)
                     if item.image_object:
                         images.add(item.image_object)
-                for collection_name in [instance.name] + [
-                    f"{instance.name}_{component_type}_lod{index}" for index in range(NUMBER_OF_HEAD_LODS)
-                ]:
+                for collection_name in (
+                    [instance.name]
+                    + [f"{instance.name}_lod{index}" for index in range(NUMBER_OF_HEAD_LODS)]
+                    + [f"{instance.name}_{component_type}_lod{index}" for index in range(NUMBER_OF_HEAD_LODS)]
+                ):
                     collection = bpy.data.collections.get((collection_name, None))
                     if collection and collection not in collections:
                         collections.append(collection)
@@ -1969,11 +2042,21 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
             return {"CANCELLED"}
 
         instance = my_list[active_index]
-        engine.release_records(instance)
         objects = set()
         images = set()
-        if self.delete_associated_data:
+        candidates = set()
+        strip_rig = not self.delete_associated_data and self.apply_mesh_shape
+        if self.delete_associated_data or strip_rig:
             collections, objects, images = self._associated_data(instance)
+            if strip_rig:
+                from .utilities.rig_removal import bake_lod_meshes
+
+                try:
+                    _, candidates = bake_lod_meshes(context, instance, collections, objects)
+                except (ValueError, RuntimeError) as error:
+                    self.report({"ERROR"}, str(error))
+                    return {"CANCELLED"}
+            engine.release_records(instance)
             for collection in reversed(collections):
                 if collection.library or collection.override_library:
                     continue
@@ -1981,8 +2064,15 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
                     objects.add(owner)
                     collection.objects.unlink(owner)
                 bpy.data.collections.remove(collection, do_unlink=True)
+        else:
+            engine.release_records(instance)
 
         my_list.remove(active_index)
+        if strip_rig:
+            from .utilities.rig_removal import remove_orphans
+
+            remove_orphans(objects, candidates)
+            objects.clear()
         unused = {owner for owner in objects if owner.library is None and owner.users == 0}
         while unused:
             objects.difference_update(unused)
@@ -2018,6 +2108,8 @@ class UILIST_RIG_INSTANCE_OT_entry_remove(GenericUIListOperator, bpy.types.Opera
         row.label(text=f"Are you sure you want to remove the '{self.instance_name}' rig instance?", icon="ERROR")
         row = self.layout.row()
         row.prop(self, "delete_associated_data")
+        if not self.delete_associated_data:
+            self.layout.prop(self, "apply_mesh_shape")
 
 
 class UILIST_RIG_INSTANCE_OT_entry_add(GenericUIListOperator, bpy.types.Operator):

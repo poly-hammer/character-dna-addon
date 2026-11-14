@@ -215,15 +215,16 @@ class CHARACTER_DNA_PT_face_board(RigInstanceDependentPanel):
         if not error:
             scene_properties = getattr(context.scene, ToolInfo.NAME)
             face_board = scene_properties.face_board
+            pose_browser = getattr(context.window_manager, ToolInfo.NAME)
 
             row = self.layout.row(align=True)
             row.prop(face_board, "category", text="")
             row.popover(panel="CHARACTER_DNA_PT_face_pose_tags", text="", icon="FILTER")
 
             self.layout.label(text="Poses:")
-            self.layout.template_icon_view(face_board, "face_pose_previews", show_labels=True, scale_popup=5.0)
+            self.layout.template_icon_view(pose_browser, "face_pose_previews", show_labels=True, scale_popup=5.0)
             row = self.layout.row(align=True)
-            row.prop(face_board, "face_pose_previews", text="")
+            row.prop(pose_browser, "face_pose_previews", text="")
             row.operator(f"{ToolInfo.NAME}.face_board_search_pose", text="", icon="VIEWZOOM")
 
             column = self.layout.column(align=True)
@@ -356,9 +357,10 @@ class CHARACTER_DNA_PT_view_options(RigInstanceDependentPanel):
             control_rig = instance.control_rig
             grid = self.layout.grid_flow(row_major=True, columns=2, even_columns=True, even_rows=True, align=True)
             col = grid.column()
-            col.enabled = bool(instance.head_material)
-            col.label(text="Head Material Color:")
-            row = col.row()
+            material_col = col.column()
+            material_col.enabled = bool(instance.head_material)
+            material_col.label(text="Head Material Color:")
+            row = material_col.row()
             row.enabled = not readonly and not is_readonly_id(instance.head_material)
             row.prop(view_options, "active_material_preview", text="")
             row = col.row()
@@ -650,6 +652,10 @@ class CHARACTER_DNA_PT_output_panel(RigInstanceDependentPanel):
             self.layout.label(text="Method:")
             row = self.layout.row()
             row.prop(instance.output, "method", text="")
+            if instance.output.method == "overwrite":
+                split = self.layout.split(factor=0.45)
+                split.label(text="Topology Type:")
+                split.prop(instance.output, f"{instance.editor_component}_topology_type", text="")
 
             row = self.layout.row()
             column = None

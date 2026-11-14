@@ -266,6 +266,205 @@ def test_remove_reference_without_data_or_with_missing_root(
     assert get_active_rig_instance() is None
 
 
+def _world_vertices(obj):
+    evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    return [tuple(evaluated.matrix_world @ vertex.co) for vertex in evaluated.data.vertices]
+
+
+@pytest.fixture
+def skinned_removal_asset(removal_scene):
+    """Two armatures, driven shape keys/material, and a hidden secondary LOD."""
+    instance = removal_scene.character_dna.rig_instance_list.add()
+    instance["name"] = "MeshRemoval"
+    root = bpy.data.collections.new(instance.name)
+    removal_scene.collection.children.link(root)
+    lods = [bpy.data.collections.new(f"{instance.name}_lod{i}") for i in range(2)]
+    for lod in lods:
+        root.children.link(lod)
+    rigs = []
+    for i in range(2):
+        rig = bpy.data.objects.new(f"RemovalRig{i}", bpy.data.armatures.new(f"RemovalArmature{i}"))
+        root.objects.link(rig)
+        bpy.context.view_layer.objects.active = rig
+        rig.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bone = rig.data.edit_bones.new(f"Bone{i}")
+        bone.tail = (0, 0, 1)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        rig.pose.bones[0].rotation_mode = "XYZ"
+        rig.pose.bones[0].rotation_euler.y = 0.25 * (i + 1)
+        rig.select_set(False)
+        rigs.append(rig)
+    material = bpy.data.materials.new("RemovalMaterial")
+    if not material.node_tree:
+        material.use_nodes = True
+    node = material.node_tree.nodes.get("Principled BSDF")
+    node.inputs["Roughness"].driver_add("default_value").driver.expression = "0.37"
+    group = bpy.data.node_groups.new("RemovalDrivenGroup", "ShaderNodeTree")
+    value = group.nodes.new("ShaderNodeValue")
+    value.outputs[0].driver_add("default_value").driver.expression = "0.73"
+    material.node_tree.nodes.new("ShaderNodeGroup").node_tree = group
+    meshes = []
+    for i, lod in enumerate(lods):
+        mesh = bpy.data.meshes.new(f"RemovalMeshData{i}")
+        mesh.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 1)], [], [(0, 1, 2)])
+        mesh.uv_layers.new(name="DiffuseUV")
+        for loop, uv in zip(mesh.uv_layers[0].data, [(0, 0), (1, 0), (0, 1)], strict=True):
+            loop.uv = uv
+        mesh.materials.append(material)
+        obj = bpy.data.objects.new(f"RemovalMesh{i}", mesh)
+        lod.objects.link(obj)
+        obj.parent = rigs[0]
+        obj.location.x = i + 0.5
+        obj.shape_key_add(name="Basis")
+        shape = obj.shape_key_add(name="Expression")
+        shape.data[1].co.z += 0.5
+        shape.driver_add("value").driver.expression = "0.6"
+        for j, rig in enumerate(rigs):
+            obj.vertex_groups.new(name=f"Bone{j}").add([0, 1, 2], 1.0, "REPLACE")
+            mod = obj.modifiers.new(f"Skin{j}", "ARMATURE")
+            mod.object = rig
+        meshes.append(obj)
+    bpy.context.view_layer.update()
+    return instance, root, lods, rigs, meshes, material
+
+
+def test_remove_apply_mesh_shape_preserves_deformation_and_only_lods(skinned_removal_asset):
+    _instance, root, lods, rigs, meshes, material = skinned_removal_asset
+    # A trailing modifier must not be baked and then applied a second time.
+    meshes[0].modifiers.new("Subdivision", "SUBSURF").levels = 1
+    bpy.context.view_layer.update()
+    expected = {obj.name: _world_vertices(obj) for obj in meshes}
+    names = [obj.name for obj in meshes]
+    obsolete_names = [rig.name for rig in rigs]
+    collection_names = [root.name, *(lod.name for lod in lods)]
+    original_data = [obj.data.name for obj in meshes]
+    helper = bpy.data.objects.new("RemovalHelper", None)
+    root.objects.link(helper)
+    obsolete_names.append(helper.name)
+    meshes[0]["dna_merge_head"] = helper
+    meshes[1].hide_set(True)
+    bpy.context.view_layer.layer_collection.children[root.name].children[lods[1].name].exclude = True
+    material_name = material.name
+
+    assert bpy.ops.character_dna.rig_instance_entry_remove(
+        active_index=0, delete_associated_data=False, apply_mesh_shape=True
+    ) == {"FINISHED"}
+    bpy.context.view_layer.update()
+
+    assert not bpy.context.scene.character_dna.rig_instance_list
+    assert all(bpy.data.objects.get(name) is None for name in obsolete_names)
+    assert all(bpy.data.collections.get(name) is None for name in collection_names)
+    assert all(bpy.data.meshes.get(name) is None for name in original_data)
+    assert bpy.data.materials.get(material_name) is None
+    assert bpy.data.node_groups.get("RemovalDrivenGroup") is None
+    for name in names:
+        obj = bpy.data.objects[name]
+        assert list(obj.users_collection) == [bpy.context.scene.collection]
+        assert obj.parent is None
+        assert not obj.animation_data
+        assert not obj.data.shape_keys
+        assert all(mod.type != "ARMATURE" for mod in obj.modifiers)
+        assert "dna_merge_head" not in obj
+        assert obj.data.uv_layers[0].name == "DiffuseUV"
+        assert tuple(obj.data.uv_layers[0].data[1].uv) == (1, 0)
+        assert not obj.active_material.node_tree.animation_data
+        group = next(node.node_tree for node in obj.active_material.node_tree.nodes if node.type == "GROUP")
+        assert not group.animation_data
+        assert group.nodes[0].outputs[0].default_value == pytest.approx(0.73)
+        roughness = obj.active_material.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value
+        assert roughness == pytest.approx(0.37)
+        for actual, before in zip(_world_vertices(obj), expected[name], strict=True):
+            assert actual == pytest.approx(before, abs=1e-6)
+    assert bpy.data.objects[names[1]].hide_get()
+    assert len(bpy.data.objects[names[0]].modifiers) == 1
+
+
+def test_remove_apply_mesh_failure_preserves_asset(skinned_removal_asset, monkeypatch):
+    from character_dna.utilities import rig_removal
+
+    _instance, _root, _lods, _rigs, meshes, _material = skinned_removal_asset
+    before = set(bpy.data.user_map())
+    originals = {obj: obj.data for obj in meshes}
+
+    def fail(*_args):
+        raise ValueError("Capture failed")
+
+    monkeypatch.setattr(rig_removal, "_static_material", fail)
+    with pytest.raises(RuntimeError, match="Capture failed"):
+        bpy.ops.character_dna.rig_instance_entry_remove(
+            active_index=0, delete_associated_data=False, apply_mesh_shape=True
+        )
+    assert set(bpy.data.user_map()) == before
+    assert len(bpy.context.scene.character_dna.rig_instance_list) == 1
+    assert all(obj.data == mesh for obj, mesh in originals.items())
+    assert all(len(obj.modifiers) == 2 for obj in meshes)
+
+
+def test_remove_apply_mesh_preserves_shared_material(skinned_removal_asset):
+    _instance, _root, _lods, _rigs, meshes, material = skinned_removal_asset
+    unrelated = bpy.data.objects.new("UnrelatedMesh", meshes[0].data)
+    bpy.context.scene.collection.objects.link(unrelated)
+    original_data = unrelated.data
+    meshes[0].material_slots[0].link = "OBJECT"
+    meshes[0].material_slots[0].material = material
+    assert bpy.ops.character_dna.rig_instance_entry_remove(
+        active_index=0, delete_associated_data=False, apply_mesh_shape=True
+    ) == {"FINISHED"}
+    assert unrelated.data == original_data
+    assert original_data.shape_keys is not None
+    assert unrelated.active_material == material
+    assert material.node_tree.animation_data.drivers
+    assert meshes[0].data != original_data
+    assert meshes[0].active_material != material
+    assert not meshes[0].active_material.node_tree.animation_data
+
+
+@pytest.mark.parametrize("delete_all", [False, True])
+def test_remove_apply_mesh_is_explicit_and_delete_all_takes_precedence(skinned_removal_asset, delete_all):
+    _instance, root, _lods, _rigs, meshes, _material = skinned_removal_asset
+    name = meshes[0].name
+    root_name = root.name
+    assert bpy.ops.character_dna.rig_instance_entry_remove(
+        active_index=0, delete_associated_data=delete_all, apply_mesh_shape=delete_all
+    ) == {"FINISHED"}
+    if delete_all:
+        assert bpy.data.objects.get(name) is None
+        assert bpy.data.collections.get(root_name) is None
+    else:
+        assert bpy.data.objects.get(name) == meshes[0]
+        assert meshes[0].data.shape_keys is not None
+        assert len(meshes[0].modifiers) == 2
+        assert bpy.data.collections.get(root_name) == root
+
+
+def test_remove_apply_mesh_preserves_native_facial_pose(load_head_only_dna):
+    from character_dna.runtime import engine
+    from character_dna.utilities import get_active_rig_instance
+
+    instance = get_active_rig_instance()
+    instance.face_board.pose.bones["CTRL_C_jaw"].location.y = 0.7
+    instance.face_board.update_tag()
+    bpy.context.view_layer.update()
+    root = bpy.data.collections[instance.name]
+    meshes = [obj for child in root.children if "_lod" in child.name for obj in child.all_objects if obj.type == "MESH"]
+    expected = {obj.name: _world_vertices(obj) for obj in meshes}
+    assert expected
+    carriers = [obj.name for obj in engine.carriers(instance)]
+    assert carriers
+    assert bpy.ops.character_dna.rig_instance_entry_remove(
+        active_index=0, delete_associated_data=False, apply_mesh_shape=True
+    ) == {"FINISHED"}
+    bpy.context.view_layer.update()
+    assert all(bpy.data.objects.get(name) is None for name in carriers)
+    for name, coordinates in expected.items():
+        obj = bpy.data.objects[name]
+        assert list(obj.users_collection) == [bpy.context.scene.collection]
+        assert not obj.data.shape_keys
+        for before, after in zip(coordinates, _world_vertices(obj), strict=True):
+            assert after == pytest.approx(before, abs=1e-6)
+
+
 @pytest.mark.parametrize("reference_mode", ["", "APPEND"])
 def test_cancelled_duplicate_preserves_native_bindings(
     load_head_only_dna: Any, tmp_path: Path, reference_mode: str
