@@ -1,35 +1,14 @@
-name: Docs Build
+name: Publish documentation updates
 on:
   push:
-    branches:
-      - main
-    paths:
-      - "docs/**"
-
-jobs:
+    branches: [main]
   release:
-    name: Docs
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v6
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "latest"
-
-      - name: Install Dependencies
-        run: uv sync
-
-      - name: Create Release
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-          GITHUB_REPO: ${{ github.repository }}
-          DOCS_REPO: ${{ secrets.DOCS_REPO }}
-        run: uv run python -m poly_hammer_utils.addon.release docs
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  notify:
+    if: vars.DOCS_PIPELINE_ENABLED == 'true'
+    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-docs-notify.yaml@39a8928ba112ccf9d3054f6659bd8be7e6f9e667
+    secrets:
+      DOCS_DISPATCH_APP_KEY: ${{ secrets.DOCS_DISPATCH_APP_KEY }}

@@ -1,10 +1,12 @@
-# Output
+---
+title: Output
+description: Export your changes back to the .dna file format so you can update
+  your MetaHuman in Unreal Engine.
+---
 
 Export your changes back to the `.dna` file format so you can update your MetaHuman in Unreal Engine.
 
-<video autoplay loop muted playsinline class="rounded-image" style="width:100%" poster="../../images/output/export_dna.png">
-  <source src="../../images/output/export_dna.webm" type="video/webm">
-</video>
+<DocVideo src="../images/output/export_dna.webm" poster="../images/output/export_dna.png" title="export dna" autoPlay loop muted />
 
 ## Component
 
@@ -17,15 +19,21 @@ Choose which component to export — **Head** or **Body**. The asset list and op
 | **Calibrate** *(recommended)*  | Your vertex indices and bone names match the original DNA. Calibrates your bone and mesh changes into a new DNA. |
 | **Overwrite** *(experimental)* | Your vertex indices or bone names differ from the original DNA. Only use when calibration isn't possible.        |
 
-!!! warning
-    **Overwrite** is new and experimental — it doesn't work in every case yet.
+<Callout type="warn" title="Warning">
+
+**Overwrite** is new and experimental — it doesn't work in every case yet.
+
+</Callout>
 
 ## Asset List
 
 Lists the meshes, armatures, and images that will be exported. Uncheck any asset to exclude it, and edit the name on the left inline.
 
-!!! note
-    Mesh names must follow the MetaHuman **LOD naming convention** so the exporter knows which LOD each mesh belongs to.
+<Callout type="info" title="Note">
+
+Mesh names must follow the MetaHuman **LOD naming convention** so the exporter knows which LOD each mesh belongs to.
+
+</Callout>
 
 ## Options
 
@@ -37,8 +45,11 @@ Lists the meshes, armatures, and images that will be exported. Uncheck any asset
 
 A single folder where everything is written. The `.dna` components go here, and textures export to a `Maps` subfolder.
 
-!!! note
-    If your `.blend` is saved, you can use Blender's relative path syntax to help standardize your export folder. For example, setting `//Ada` will output your `head.dna`, `body.dna`, and `Maps` folder into a folder named `Ada` next to your `.blend` file.
+<Callout type="info" title="Note">
+
+If your `.blend` is saved, you can use Blender's relative path syntax to help standardize your export folder. For example, setting `//Ada` will output your `head.dna`, `body.dna`, and `Maps` folder into a folder named `Ada` next to your `.blend` file.
+
+</Callout>
 
 ## Export Buttons
 

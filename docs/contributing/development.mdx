@@ -1,4 +1,8 @@
-# Development
+---
+title: Development
+description: Contributions are welcome! Please create an issue to discuss
+  significant work before starting.
+---
 
 Contributions are welcome! Please create an issue to discuss significant work before starting.
 
@@ -9,8 +13,11 @@ Contributions are welcome! Please create an issue to discuss significant work be
 3. Run tests and ensure all pass.
 4. Submit PR to `dev` with updated documentation.
 
-!!! note
-    New features require accompanying unit tests to be approved.
+<Callout type="info" title="Note">
+
+New features require accompanying unit tests to be approved.
+
+</Callout>
 
 ## Prerequisites
 
@@ -48,11 +55,17 @@ Launch Blender/Unreal through VS Code build tasks (`CTRL+SHIFT+B`) to enable dev
 
 ![1](../images/contributing/development/1.gif)
 
-!!! note
-    Selecting "debug" will hang the app until you attach via debugpy in VS Code.
+<Callout type="info" title="Note">
 
-!!! note
-    Override executable paths via `.env`: `UNREAL_EXE_PATH`, `UNREAL_PROJECT`, `BLENDER_EXE_PATH`
+Selecting "debug" will hang the app until you attach via debugpy in VS Code.
+
+</Callout>
+
+<Callout type="info" title="Note">
+
+Override executable paths via `.env`: `UNREAL_EXE_PATH`, `UNREAL_PROJECT`, `BLENDER_EXE_PATH`
+
+</Callout>
 
 ## Launch Actions
 
@@ -94,5 +107,8 @@ uv venv .stubs-venv
 uv pip install --python .stubs-venv/Scripts/python.exe -e ".[stubs]"
 ```
 
-!!! warning
-    Do not install stubs into the main `.venv`—they conflict with the real `bpy` package.
+<Callout type="warn" title="Warning">
+
+Do not install stubs into the main `.venv`—they conflict with the real `bpy` package.
+
+</Callout>

@@ -1,12 +1,14 @@
-# Face Board
+---
+title: Face Board
+description: Drive the MetaHuman face board with GUI controls and facial poses
+  evaluated by RigLogic.
+---
 
-The face board is another Blender armature object, but more importantly, its pose bones are the [GUI Controls](../terminology.md#gui-controls) that RigLogic evaluates into a facial expression. This panel drives it with ready-made poses and options for eye and head behavior.
+The face board is another Blender armature object, but more importantly, its pose bones are the [GUI Controls](../terminology.mdx#gui-controls) that RigLogic evaluates into a facial expression. This panel drives it with ready-made poses and options for eye and head behavior.
 
 To pose the board by hand, select the face board armature, enter **Pose Mode**, and grab the yellow controls.
 
-<video autoplay loop muted playsinline class="rounded-image" style="width:100%" poster="../../images/face-board/face_board_poses.png">
-  <source src="../../images/face-board/face_board_poses.webm" type="video/webm">
-</video>
+<DocVideo src="../images/face-board/face_board_poses.webm" poster="../images/face-board/face_board_poses.png" title="face board poses" autoPlay loop muted />
 
 ## Pose Library
 
@@ -16,8 +18,11 @@ Pick a pose from the thumbnail preview or the dropdown to set the face board con
 - The **filter** popover (funnel icon) narrows poses by tag, matching **All** or **Any** of the selected tags.
 - The **search** button (magnifier) opens a searchable pose picker.
 
-!!! tip
-    The wrinkle map poses (`wrinkle_map_01`–`03`) make good base shapes for high-poly sculpts or scans that you later bake down to the texture maps in your material.
+<Callout type="idea" title="Tip">
+
+The wrinkle map poses (`wrinkle_map_01`–`03`) make good base shapes for high-poly sculpts or scans that you later bake down to the texture maps in your material.
+
+</Callout>
 
 ## Eye & Head Options
 
@@ -29,4 +34,4 @@ Pick a pose from the thumbnail preview or the dropdown to set the face board con
 
 ## Importing Animation
 
-Importing face board animation from MetaHuman Animator is done under the [Animation](./animation.md) panel.
+Importing face board animation from MetaHuman Animator is done under the [Animation](./animation.mdx) panel.

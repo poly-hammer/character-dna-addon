@@ -1,0 +1,12 @@
+{
+  "title": "Pro Features",
+  "pages": [
+    "converter",
+    "raw-editor",
+    "shape-key-editor",
+    "rbf-editor",
+    "swing-twist-editor",
+    "backup-manager",
+    "..."
+  ]
+}

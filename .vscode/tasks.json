@@ -43,8 +43,8 @@
             }
         },
         {
-            "label": "Mkdocs: Serve",
-            "command": "uv run mkdocs serve --dev-addr localhost:8080 --livereload --open",
+            "label": "Fumadocs: Preview",
+            "command": "npm --prefix ${input:docs-repository} run dev",
             "type": "shell",
             "group": {
                 "kind": "build"
@@ -148,6 +148,7 @@
         }
     ],
     "inputs": [
+        { "id": "docs-repository", "type": "promptString", "description": "Absolute path to the poly-hammer-docs checkout", "default": "E:/repos/poly-hammer-docs" },
         {
             "id": "addon-version",
             "type": "promptString",

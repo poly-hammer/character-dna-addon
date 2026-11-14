@@ -1,15 +1,20 @@
-# Raw Editor
+---
+title: Raw Editor
+description: The Raw Editor is part of the Pro edition and only appears when Pro
+  is installed.
+---
 
-!!! info "Pro Feature"
-    The Raw Editor is part of the **Pro** edition and only appears when Pro is installed.
+<Callout type="info" title="Pro Feature">
 
-Edit the [Raw Controls](../terminology.md#raw-controls) — more specifically **where** bones are posed when a [Raw Control](../terminology.md#raw-controls) is activated to a value of 1.
+The Raw Editor is part of the **Pro** edition and only appears when Pro is installed.
+
+</Callout>
+
+Edit the [Raw Controls](../terminology.mdx#raw-controls) — more specifically **where** bones are posed when a [Raw Control](../terminology.mdx#raw-controls) is activated to a value of 1.
 
 Choose **Head** or **Body** with the shared **Component** selector. The selector is locked during editing, and Commit writes to that component's DNA.
 
-<video autoplay loop muted playsinline class="rounded-image" style="width:100%" poster="../../images/raw-editor/raw_editor.png">
-  <source src="../../images/raw-editor/raw_editor.webm" type="video/webm">
-</video>
+<DocVideo src="../images/raw-editor/raw_editor.webm" poster="../images/raw-editor/raw_editor.png" title="raw editor" autoPlay loop muted />
 
 ## Choosing a Raw Control
 
@@ -24,8 +29,11 @@ The list shows scalar raw controls, plus a **Rest Pose** row at the top called `
 
 Select a control and click **Edit** to open an editing session for that expression's pose.
 
-!!! note
-    Some raw controls like `jawOpenExtreme` are "corrective" expressions, so they activate the expressions they add onto (for example, `jawOpen`).
+<Callout type="info" title="Note">
+
+Some raw controls like `jawOpenExtreme` are "corrective" expressions, so they activate the expressions they add onto (for example, `jawOpen`).
+
+</Callout>
 
 ## Editing a Pose
 
@@ -41,9 +49,7 @@ When done, **Commit** writes the change into the DNA, or **Revert** discards it.
 
 Instead of posing bones by hand, let the solver find the bone transforms that best fit a target mesh sculpt.
 
-<video autoplay loop muted playsinline class="rounded-image" style="width:100%" poster="../../images/raw-editor/bone_matching_solver.png">
-  <source src="../../images/raw-editor/bone_matching_solver.webm" type="video/webm">
-</video>
+<DocVideo src="../images/raw-editor/bone_matching_solver.webm" poster="../images/raw-editor/bone_matching_solver.png" title="bone matching solver" autoPlay loop muted />
 
 Sculpt your target mesh, then click **Match Bones to Mesh**. It runs a hyper-optimization algorithm to solve the bone transforms that reproduce your sculpt. The **Solver Settings** popover exposes the hyperparameters:
 
@@ -58,13 +64,16 @@ Sculpt your target mesh, then click **Match Bones to Mesh**. It runs a hyper-opt
 
 Enable **Reset Pose** to start each solve from the DNA pose, or disable this to start the solve from the current pose bone positions in the Blender scene.
 
-!!! tip
-    Start with the defaults. If the fit undershoots, raise iterations or learning rate; if it gets unstable or spiky, raise the regularization.
+<Callout type="idea" title="Tip">
+
+Start with the defaults. If the fit undershoots, raise iterations or learning rate; if it gets unstable or spiky, raise the regularization.
+
+</Callout>
 
 ## Setup and Hardware
 
 The bone matching process happens in another Python subprocess that utilizes [PyTorch](https://pytorch.org/) for accelerating compute on your hardware. This includes options for `CPU`, `CUDA`, and `MPS` on macOS. Setting this to `AUTO` will try to install the dependencies for the most optimal hardware that you have available.
 
-![hardware settings](../images/raw-editor/hardware_settings.png){: class="rounded-image center-image"}
+<DocImage src="../images/raw-editor/hardware_settings.png" alt="hardware settings" />
 
 You will have to run the installation process once before you can use the `Match Bones to Mesh` operator. If you have a preference for where the virtual environments should be on disk (these can be several GB), you can set that in the **Solver Environments Folder** preference.

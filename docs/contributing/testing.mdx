@@ -1,4 +1,8 @@
-# Testing
+---
+title: Testing
+description: Always run the test suite locally before opening a PR, and add test
+  cases for any new feature or fix.
+---
 
 Always run the test suite locally before opening a PR, and add test cases for any new feature or fix.
 
@@ -22,5 +26,8 @@ uv run pytest --cov=src/addons/character_dna --cov-report=html:reports/coverage/
 
 Open `reports/coverage/html/index.html` to review coverage.
 
-!!! note
-    New features require accompanying unit tests to be approved. Keep tests close to the behavior they cover and prefer testing through public entry points.
+<Callout type="info" title="Note">
+
+New features require accompanying unit tests to be approved. Keep tests close to the behavior they cover and prefer testing through public entry points.
+
+</Callout>

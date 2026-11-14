@@ -1,17 +1,21 @@
-# Customizing Materials
+---
+title: Customizing Materials
+description: Textures feed the Texture Logic node, which blends color and normal
+  map variants to produce animated wrinkle maps as RigLogic evaluates.
+---
 
-Textures feed the [Texture Logic](../terminology.md#texture-logic) node, which blends color and normal map variants to produce animated wrinkle maps as RigLogic evaluates.
+Textures feed the [Texture Logic](../terminology.mdx#texture-logic) node, which blends color and normal map variants to produce animated wrinkle maps as RigLogic evaluates.
 
-<div style="display:flex; gap:0; justify-content:center; align-items:flex-start;">
-  <img src="../../images/terminology/material-masks-evaluating.gif" alt="Material Masks Evaluating" class="rounded-image" style="height:350px; width:auto;">
-  <img src="../../images/terminology/texture-logic-node.gif" alt="Texture Logic Node" class="rounded-image" style="height:350px; width:auto;">
+<div style={{"display":"flex","gap":"0","justifyContent":"center","alignItems":"flex-start"}}>
+  <DocImage src="../images/terminology/material-masks-evaluating.gif" alt="Material Masks Evaluating" />
+  <DocImage src="../images/terminology/texture-logic-node.gif" alt="Texture Logic Node" />
 </div>
 
 ## Custom Materials
 
-You can build a fully custom material node tree. Just add one [Texture Logic](../terminology.md#texture-logic) node to the graph (`Add > Rig Logic > Head Texture Logic` in Blender's Shader Editor) and link your material in the [Rig Instance](../free-features/rig-instances.md) outputs.
+You can build a fully custom material node tree. Just add one [Texture Logic](../terminology.mdx#texture-logic) node to the graph (`Add > Rig Logic > Head Texture Logic` in Blender's Shader Editor) and link your material in the [Rig Instance](../free-features/rig-instances.mdx) outputs.
 
-![Custom material with Texture Logic node](../images/customizing-materials/add-texure-logic-node.gif){: class="rounded-image center-image"}
+<DocImage src="../images/customizing-materials/add-texure-logic-node.gif" alt="Custom material with Texture Logic node" />
 
 With that connected, RigLogic updates the wrinkle map masks for you as the GUI controls are evaluated.
 
@@ -19,9 +23,9 @@ With that connected, RigLogic updates the wrinkle map masks for you as the GUI c
 
 When importing or converting a mesh, you can set the `Maps` folder location. By default, if a `Maps` folder sits alongside the `.dna` file, the importer uses it; otherwise, point it at your folder.
 
-![Maps folder option](../images/customizing-materials/custom-maps-folder.png){: class="rounded-image center-image" style="width:500px"}
+<DocImage src="../images/customizing-materials/custom-maps-folder.png" alt="Maps folder option" />
 
-The importer links any `.tga` or `.png` textures to the [Texture Logic](../terminology.md#texture-logic) node inputs that follow one of these naming patterns:
+The importer links any `.tga` or `.png` textures to the [Texture Logic](../terminology.mdx#texture-logic) node inputs that follow one of these naming patterns:
 
 ### Pattern 1
 

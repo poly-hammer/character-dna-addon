@@ -147,11 +147,11 @@ jobs:
           submodules: true
           token: ${{ secrets.GH_PAT }}
           persist-credentials: false
-      # Pin the helper until its reviewed 0.4.4 update is published to PyPI.
+      # Pin packaging plus immutable release identity before collecting versioned docs.
       - uses: actions/checkout@v7
         with:
           repository: poly-hammer/poly-hammer-utils
-          ref: 60b6a63236581832e10330b2c0cefcc017e40528
+          ref: 2354d851722599b4b16ad414b764eb50ab3ff66e
           path: poly-hammer-utils
           token: ${{ secrets.GH_PAT }}
           persist-credentials: false

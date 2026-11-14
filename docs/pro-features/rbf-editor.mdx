@@ -1,15 +1,20 @@
-# RBF Editor
+---
+title: RBF Editor
+description: The RBF Editor is part of the Pro edition and only appears when Pro
+  is installed.
+---
 
-!!! info "Pro Feature"
-    The RBF Editor is part of the **Pro** edition and only appears when Pro is installed.
+<Callout type="info" title="Pro Feature">
+
+The RBF Editor is part of the **Pro** edition and only appears when Pro is installed.
+
+</Callout>
 
 Modify, add, and delete corrective bone poses on the selected **Head** or **Body** component. These correctives interpolate between one another using **Radial Basis Functions (RBF)**. As the driver bones move, the corresponding corrective outputs blend according to the solver's falloff function.
 
 The **Component** selector is shared with the Raw and Shape Key editors and is locked during editing. Head DNA can contain RBF solvers too. The Driven list also displays existing shape and animated-map relationships; shape geometry is edited in the Shape Key Editor.
 
-<video autoplay loop muted playsinline class="rounded-image" style="width:100%" poster="../../images/rbf-editor/rbf_editor.png">
-  <source src="../../images/rbf-editor/rbf_editor.webm" type="video/webm">
-</video>
+<DocVideo src="../images/rbf-editor/rbf_editor.webm" poster="../images/rbf-editor/rbf_editor.png" title="rbf editor" autoPlay loop muted />
 
 ## Solvers & Poses
 
@@ -26,5 +31,8 @@ Expand **Settings** while editing to choose the **Function Type**, the RBF kerne
 
 **Commit** writes your changes into the selected component's DNA; **Revert** discards them.
 
-!!! note
-    While in RBF editing mode, you must click **Apply Pose Transform Edits** before switching to another pose. This is how you associate the changes with a pose. Please note these are still ephemeral until committed to the DNA.
+<Callout type="info" title="Note">
+
+While in RBF editing mode, you must click **Apply Pose Transform Edits** before switching to another pose. This is how you associate the changes with a pose. Please note these are still ephemeral until committed to the DNA.
+
+</Callout>

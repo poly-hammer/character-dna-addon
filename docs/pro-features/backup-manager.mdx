@@ -1,13 +1,18 @@
-# Backup Manager
+---
+title: Backup Manager
+description: The Backup Manager is part of the Pro edition and only appears when
+  Pro is installed.
+---
 
-!!! info "Pro Feature"
-    The Backup Manager is part of the **Pro** edition and only appears when Pro is installed.
+<Callout type="info" title="Pro Feature">
+
+The Backup Manager is part of the **Pro** edition and only appears when Pro is installed.
+
+</Callout>
 
 Automatically snapshots your `.dna` before and after changes are committed, giving you a fast way to roll back to a previous state.
 
-<video autoplay loop muted playsinline class="rounded-image" style="width:100%" poster="../../images/backup-manager/backup_manager.png">
-  <source src="../../images/backup-manager/backup_manager.webm" type="video/webm">
-</video>
+<DocVideo src="../images/backup-manager/backup_manager.webm" poster="../images/backup-manager/backup_manager.png" title="backup manager" autoPlay loop muted />
 
 ## Backup Events
 
@@ -16,20 +21,23 @@ A backup is taken automatically around every point where your DNA could change, 
 | Event | Fires |
 | ----- | ----- |
 | Blender File Saved | Every time you save the `.blend` file |
-| Pre Raw Editor Commit | Right before committing an edit from the [Raw Editor](./raw-editor.md) |
-| Post Raw Editor Commit | Right after committing an edit from the [Raw Editor](./raw-editor.md) |
-| Pre Raw Editor (Rest Pose) Commit | Right before committing a Rest Pose (bind pose) edit from the [Raw Editor](./raw-editor.md) |
-| Post Raw Editor (Rest Pose) Commit | Right after committing a Rest Pose (bind pose) edit from the [Raw Editor](./raw-editor.md) |
-| Pre RBF Editor Commit | Right before committing an edit from the [RBF Editor](./rbf-editor.md) |
-| Post RBF Editor Commit | Right after committing an edit from the [RBF Editor](./rbf-editor.md) |
-| Pre Shape Key Editor Commit | Right before committing an edit from the [Shape Key Editor](./shape-key-editor.md) |
-| Post Shape Key Editor Commit | Right after committing an edit from the [Shape Key Editor](./shape-key-editor.md) |
+| Pre Raw Editor Commit | Right before committing an edit from the [Raw Editor](./raw-editor.mdx) |
+| Post Raw Editor Commit | Right after committing an edit from the [Raw Editor](./raw-editor.mdx) |
+| Pre Raw Editor (Rest Pose) Commit | Right before committing a Rest Pose (bind pose) edit from the [Raw Editor](./raw-editor.mdx) |
+| Post Raw Editor (Rest Pose) Commit | Right after committing a Rest Pose (bind pose) edit from the [Raw Editor](./raw-editor.mdx) |
+| Pre RBF Editor Commit | Right before committing an edit from the [RBF Editor](./rbf-editor.mdx) |
+| Post RBF Editor Commit | Right after committing an edit from the [RBF Editor](./rbf-editor.mdx) |
+| Pre Shape Key Editor Commit | Right before committing an edit from the [Shape Key Editor](./shape-key-editor.mdx) |
+| Post Shape Key Editor Commit | Right after committing an edit from the [Shape Key Editor](./shape-key-editor.mdx) |
 | Manual Backup | Whenever you click **Add** in the Backup Manager panel |
 
 Taking both a "pre" and "post" snapshot around each editor commit means you can always roll back to either side of a change — the state right before you committed, or the freshly committed result.
 
-!!! note
-    Automatic backups can be turned off entirely from the addon preferences (see [Preferences](#preferences) below). Manual backups are always available regardless of that setting.
+<Callout type="info" title="Note">
+
+Automatic backups can be turned off entirely from the addon preferences (see [Preferences](#preferences) below). Manual backups are always available regardless of that setting.
+
+</Callout>
 
 ## The Backup List
 
@@ -51,8 +59,11 @@ Select a backup and click **Restore**. Choose what to bring back:
 
 **Delete** removes the selected backup.
 
-!!! tip
-    It's good practice to create manual backups with clear descriptions as you make changes to your DNA files.
+<Callout type="idea" title="Tip">
+
+It's good practice to create manual backups with clear descriptions as you make changes to your DNA files.
+
+</Callout>
 
 ## Preferences
 

@@ -1,17 +1,25 @@
-# Shape Key Editor
+---
+title: Shape Key Editor
+description: The Shape Key Editor is part of the Pro edition and only appears
+  when Pro is installed.
+---
 
-!!! info "Pro Feature"
-    The Shape Key Editor is part of the **Pro** edition and only appears when Pro is installed.
+<Callout type="info" title="Pro Feature">
+
+The Shape Key Editor is part of the **Pro** edition and only appears when Pro is installed.
+
+</Callout>
 
 Edit the blend shapes (shape keys) a DNA drives. With this editor, you will sculpt directly onto the activated shape key while locking all others.
 
-!!! note
-    A basic shape key like `jaw_open` sits on top of a single `jawOpen` Raw Control value and its posed bones. Other shape keys like `MCornerDepress_NSwrinkle_Jopen_R` are only visible as correctives that activate in the face when other raw controls or shape keys are active as well.
-    Thus, entering editing mode activates the dependents backward from the desired shape key you want to edit.
+<Callout type="info" title="Note">
 
-<video autoplay loop muted playsinline class="rounded-image" style="width:100%" poster="../../images/shape-key-editor/shape_key_editor.png">
-  <source src="../../images/shape-key-editor/shape_key_editor.webm" type="video/webm">
-</video>
+A basic shape key like `jaw_open` sits on top of a single `jawOpen` Raw Control value and its posed bones. Other shape keys like `MCornerDepress_NSwrinkle_Jopen_R` are only visible as correctives that activate in the face when other raw controls or shape keys are active as well.
+Thus, entering editing mode activates the dependents backward from the desired shape key you want to edit.
+
+</Callout>
+
+<DocVideo src="../images/shape-key-editor/shape_key_editor.webm" poster="../images/shape-key-editor/shape_key_editor.png" title="shape key editor" autoPlay loop muted />
 
 ## Importing Shape Keys
 
@@ -33,7 +41,7 @@ The list shows every shape key channel. Filter by:
 
 ## Editing with Dependencies
 
-Select a channel and click **Edit**. Because expressions combine through [PSDs](../terminology.md#how-an-expression-is-evaluated), a shape key often depends on other shapes and raw controls. The editor shows a **dependency list** so you can see exactly what contributes to the shape you're editing:
+Select a channel and click **Edit**. Because expressions combine through [PSDs](../terminology.mdx#how-an-expression-is-evaluated), a shape key often depends on other shapes and raw controls. The editor shows a **dependency list** so you can see exactly what contributes to the shape you're editing:
 
 - The dependencies are **locked** (read-only context).
 - The edited key is **unlocked**.

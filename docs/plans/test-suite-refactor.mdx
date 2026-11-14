@@ -1,4 +1,9 @@
-# Character DNA test suite refactor plan
+---
+title: Character DNA test suite refactor plan
+description: The user accepted the current runtime and ended further timing
+  qualification. The remaining goal is a passing complete test suite on every
+  supported CI configuration.
+---
 
 ## Correctness completion (2026-10-30)
 
@@ -143,7 +148,7 @@ Snapshot iteration found two correctness traps. Reopening a blend alone left Pyt
 
 Coverage totals also need scrutiny: the passing six-case snapshot pilot covered 10,194 lines and 1,706 branches versus 10,187 and 1,703 initially, but still missed ten previously hit lines in runtime evaluation/context-buffer setup. Aggregate growth does not prove coverage preservation. Dedicated evaluation tests must retain those paths; compare exact covered lines and arcs across the complete migrated suite.
 
-The historical pilot scripts, phase-timing ledger, source-freezing helper and ad hoc mutation/lifetime diagnostics were retired after the refactor; their original versions remain in Git history (PR #380, commit `20a03d6`). The recorded phase timings used the instrumentation plugin's wider session clock, so they differ slightly from the pytest summary times above. Raw logs, collection graphs, timing JSON, native coverage data, and XML remain in `reports/test-suite-refactor/` locally. The retained complete-suite comparison tools now live under `tests/benchmarks`; see the [benchmark guide](../../tests/benchmarks/README.md).
+The historical pilot scripts, phase-timing ledger, source-freezing helper and ad hoc mutation/lifetime diagnostics were retired after the refactor; their original versions remain in Git history (PR #380, commit `20a03d6`). The recorded phase timings used the instrumentation plugin's wider session clock, so they differ slightly from the pytest summary times above. Raw logs, collection graphs, timing JSON, native coverage data, and XML remain in `reports/test-suite-refactor/` locally. The retained complete-suite comparison tools now live under `tests/benchmarks`; see the [benchmark guide](../../tests/benchmarks/README.mdx).
 
 ## Target suite structure
 
@@ -228,7 +233,7 @@ If a bucket exceeds budget, profile its remaining setup/call/teardown costs, spl
 4. **Migrate cheap UI and shared orchestration.** Port the pilot patterns, add failure permutations, preserve concrete editor/native integration anchors. Exit: same assertions, missing-resume and rollback mutations detected, measured bucket reduction.
 5. **Migrate RBF, swing/twist, merge and backups.** Work one family at a time, retaining all combined-document, all-LOD, pose and portability contracts. Run old and new suites side by side during migration; remove redundancy only after the contract/coverage comparison passes. Exit: per-family ratios and coverage meet the ledger, with no new skips.
 6. **Optimize remaining native and export costs.** Use measured profiles to select array/reference caching and fixture boundaries. Keep the reader-layer optimization optional because its first whole-test pilot regressed. Exit: all lane budgets accounted for, not estimated from parameter counts.
-7. **Validate the complete matrix and enforce the target.** Run at least three matched repetitions per lane, cold and warm, with coverage and actual process totals. Require <=25% for work and critical path, no lost contracts/arcs, no regression in failures, and no leaked state. Only then add a performance regression gate and retire the old execution path.
+7. **Validate the complete matrix and enforce the target.** Run at least three matched repetitions per lane, cold and warm, with coverage and actual process totals. Require at most 25% for work and critical path, no lost contracts/arcs, no regression in failures, and no leaked state. Only then add a performance regression gate and retire the old execution path.
 
 During iteration, preserve incremental per-case timing/result records so cancellation does not erase diagnostic evidence. In the reusable workflow, keep pytest's true exit code, publish existing diagnostics on failure, and treat absent reports as absent rather than uploading empty JUnit files. Pin the workflow revision during performance comparisons; a floating `@main` can otherwise change the benchmark conditions.
 
