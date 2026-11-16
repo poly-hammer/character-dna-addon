@@ -28,10 +28,15 @@ class MeshSample:
 
 @contextmanager
 def _sampling_source(component: "RigComponent", source: bpy.types.Object) -> Iterator[bpy.types.Object]:
+    from .utilities import get_scene_merge
+
+    merge = get_scene_merge(component.instance)
+    if merge is None:
+        yield source
+        return
+
     # The converter owns both the correspondence and the reconstruction of
     # pending edits. Apply its split updates only to a disposable source copy.
-    from .editors.converter.scene import merge
-
     surface = merge.proxy_for(component.instance, source)
     if surface is None:
         yield source

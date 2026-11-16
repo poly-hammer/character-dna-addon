@@ -24,7 +24,7 @@ keywords = ["blender", "metahuman", "dna", "riglogic", "animation", "3d"]
 name = "character-dna-addon"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
-version = "0.15.0"
+version = "0.15.1"
 
 [project.optional-dependencies]
 dev = [
@@ -37,7 +37,7 @@ dev = [
   "pytest-html>=4.1.1",
   "genbadge[all]>=1.1.2",
   "mkdocs>=1.6.1",
-  "poly-hammer-utils>=0.4.0",
+  "poly-hammer-utils>=0.4.5",
   "ruff>=0.8.0",
   "pre-commit>=4.0.0"
 ]
@@ -427,7 +427,7 @@ dev = [
   "pytest-html>=4.1.1",
   "genbadge[all]>=1.1.2",
   "mkdocs>=1.6.1",
-  "poly-hammer-utils",
+  "poly-hammer-utils>=0.4.4",
   "pyufbx",
   "ruff>=0.8.0",
   "pre-commit>=4.0.0",

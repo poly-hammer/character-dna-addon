@@ -240,7 +240,7 @@ wheels = [
 
 [[package]]
 name = "character-dna-addon"
-version = "0.15.0"
+version = "0.15.1"
 source = { editable = "." }
 dependencies = [
     { name = "sentry-sdk" },
@@ -298,7 +298,7 @@ requires-dist = [
     { name = "fake-bpy-module-latest", marker = "extra == 'stubs'" },
     { name = "genbadge", extras = ["all"], marker = "extra == 'dev'", specifier = ">=1.1.2" },
     { name = "mkdocs", marker = "extra == 'dev'", specifier = ">=1.6.1" },
-    { name = "poly-hammer-utils", marker = "extra == 'dev'", specifier = ">=0.4.0" },
+    { name = "poly-hammer-utils", marker = "extra == 'dev'", specifier = ">=0.4.5" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
@@ -318,7 +318,7 @@ dev = [
     { name = "genbadge", extras = ["all"], specifier = ">=1.1.2" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "pip", specifier = ">=25.3" },
-    { name = "poly-hammer-utils" },
+    { name = "poly-hammer-utils", specifier = ">=0.4.4" },
     { name = "pre-commit", specifier = ">=4.0.0" },
     { name = "pytest", specifier = ">=8.3.3" },
     { name = "pytest-cov", specifier = ">=6.0.0" },
@@ -1127,7 +1127,7 @@ wheels = [
 
 [[package]]
 name = "poly-hammer-utils"
-version = "0.4.0"
+version = "0.4.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -1137,9 +1137,9 @@ dependencies = [
     { name = "requirements-parser" },
     { name = "tomlkit" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/1a/b6a854b434e21eb74c2a76f4b76f49f07ab055eaa6f19ab608983b2541b7/poly_hammer_utils-0.4.0.tar.gz", hash = "sha256:4c63b56e693099c18a00cbcd8e01240bb717bd73f3be5b5a4a6821ff8cbb5b44", size = 29768, upload-time = "2026-06-18T09:33:19.105Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e5/94/6ad9f8a3aca63cbc8715086d74e058878bec689e82c036fdd48d00548d24/poly_hammer_utils-0.4.5.tar.gz", hash = "sha256:21df42720b88155422ac1cfae3b488f8229d8a5d4f97ca8a9e09b62a84780ba1", size = 32931, upload-time = "2026-11-16T21:29:39.041Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b4/f0/80dffc119c2bb9494961743799d93fde827e051cec807614e3ed31a22d0c/poly_hammer_utils-0.4.0-py3-none-any.whl", hash = "sha256:aae33a66128b698ae1576c2f788bf9e9de9dd79a94ebd1b98febcd00c096735c", size = 38743, upload-time = "2026-06-18T09:33:18.116Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/1d/20e94a047dcd82379183bbd1a2b3be345c8079a1fcdf34fd2289715d4730/poly_hammer_utils-0.4.5-py3-none-any.whl", hash = "sha256:eea9af6d4e0dd9de73cb37b5bc428384ad3ffbe7bd703f06d5d4ae2731bf68b0", size = 43592, upload-time = "2026-11-16T21:29:37.831Z" },
 ]
 
 [[package]]

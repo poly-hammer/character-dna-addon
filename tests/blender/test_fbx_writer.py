@@ -32,7 +32,7 @@ def test_face_board_writer_only_writes_allowed_controls(monkeypatch, extra_exclu
     container = object()
     write_curves = Mock()
     monkeypatch.setattr(writer, "get_channel_container", lambda *_args: container)
-    monkeypatch.setattr(writer, "frame_range", lambda _clip: np.array([1.0, 2.0]))
+    monkeypatch.setattr(writer, "frame_range", lambda _clip, *_timing: np.array([1.0, 2.0]))
     monkeypatch.setattr(writer, "write_bulk_fcurves", write_curves)
 
     written = writer.write_face_board_animation(
@@ -66,7 +66,7 @@ def test_native_dna_skeletal_tracks_change_local_basis(monkeypatch):
     rotations = Mock()
     locations = Mock()
     monkeypatch.setattr(writer, "get_channel_container", lambda *_args: object())
-    monkeypatch.setattr(writer, "frame_range", lambda _clip: np.array([1.0]))
+    monkeypatch.setattr(writer, "frame_range", lambda _clip, *_timing: np.array([1.0]))
     monkeypatch.setattr(writer, "_write_rotation", rotations)
     monkeypatch.setattr(writer, "write_bulk_fcurves", locations)
     writer.write_skeleton_animation(clip, armature, object())

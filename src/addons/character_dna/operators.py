@@ -264,10 +264,9 @@ class ImportAnimationBase(bpy.types.Operator):
 
     round_sub_frames: bpy.props.BoolProperty(
         name="Round Sub Frames",
-        default=True,
+        default=False,
         description=(
-            "Whether to round sub frames when importing the animation. This "
-            "ensure all keyframes are on whole frames with integer values"
+            "Round imported key times to whole frames. When keys land on the same frame, keep the last source key"
         ),
     )  # pyright: ignore[reportInvalidTypeForm]
 
@@ -318,7 +317,7 @@ class ImportAnimationBase(bpy.types.Operator):
             The loaded clip, or ``None`` when the file could not be read.
         """
         try:
-            return utilities.load_animation_clip(file_path, match_frame_rate=self.match_frame_rate)
+            return utilities.load_animation_clip(file_path)
         except (FileNotFoundError, ImportError, ValueError) as error:
             self.report({"ERROR"}, str(error))
             return None
@@ -370,7 +369,7 @@ class ConfirmAnimationImport(bpy.types.Operator):
     filepath: bpy.props.StringProperty(default="", subtype="FILE_PATH")  # pyright: ignore[reportInvalidTypeForm]
     component_type: bpy.props.StringProperty(default="body")  # pyright: ignore[reportInvalidTypeForm]
     message: bpy.props.StringProperty(default="")  # pyright: ignore[reportInvalidTypeForm]
-    round_sub_frames: bpy.props.BoolProperty(default=True)  # pyright: ignore[reportInvalidTypeForm]
+    round_sub_frames: bpy.props.BoolProperty(default=False)  # pyright: ignore[reportInvalidTypeForm]
     match_frame_rate: bpy.props.BoolProperty(default=True)  # pyright: ignore[reportInvalidTypeForm]
     prefix_instance_name: bpy.props.BoolProperty(default=True)  # pyright: ignore[reportInvalidTypeForm]
     prefix_component_name: bpy.props.BoolProperty(default=True)  # pyright: ignore[reportInvalidTypeForm]

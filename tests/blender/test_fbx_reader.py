@@ -136,7 +136,7 @@ def test_rejected_clip_closes_scene(monkeypatch, tmp_path, from_buffer):
     bindings = SimpleNamespace(load_file=lambda *_args, **_kwargs: scene, load_memory=lambda *_args, **_kwargs: scene)
     monkeypatch.setattr(reader, "_require_ufbx", lambda: bindings)
 
-    def reject_clip(scene, frame_rate):
+    def reject_clip(scene, frame_rate, *, preserve_key_times=False):
         raise ValueError("Clip exceeds animation buffer limit")
 
     monkeypatch.setattr(reader, "_build_clip", reject_clip)
@@ -210,3 +210,49 @@ def test_quat_multiply_matches_mathutils():
     for index in range(left.shape[0]):
         expected = Quaternion(left[index].tolist()) @ Quaternion(right[index].tolist())
         assert products[index] == pytest.approx(list(expected), abs=1e-6)
+
+
+@pytest.mark.parametrize("preserve", [False, True])
+def test_reader_retains_authored_subframe_times(monkeypatch, preserve):
+    node = SimpleNamespace(typed_id=1, name="root", parent=None, local_transform=np.eye(4), world_transform=np.eye(4))
+    times = np.array([0.0, 0.015, 1 / 30, 0.05])
+    track = SimpleNamespace(
+        typed_id=1,
+        rotation_times=np.array([]),
+        translation_times=times,
+        translation_values=np.array([[0, 0, 0], [3, 0, 0], [7, 0, 0], [9, 0, 0]]),
+    )
+    scene = SimpleNamespace(
+        settings=SimpleNamespace(
+            frames_per_second=30.0,
+            unit_meters=1.0,
+            axes=SimpleNamespace(up=4),
+        )
+    )
+    baked = SimpleNamespace(playback_duration=0.05, key_time_max=0.05, nodes=[track])
+    monkeypatch.setattr(reader, "_order_nodes", lambda _scene: [node])
+    monkeypatch.setattr(reader, "_select_baked_anim", lambda _scene, _rate: (baked, "Subframes"))
+    animation = reader._build_clip(scene, None, preserve_key_times=preserve)
+    if preserve:
+        np.testing.assert_array_equal(animation.sample_times, times)
+        np.testing.assert_array_equal(animation.translations[:, 0, 0], [0, 3, 7, 9])
+    else:
+        np.testing.assert_array_equal(animation.sample_times, np.array([0, 1, 2]) / 30)
+        np.testing.assert_array_equal(animation.translations[:, 0, 0], [0, 7, 9])
+
+
+def test_fractional_key_times_cannot_bypass_clip_budget(monkeypatch):
+    node = SimpleNamespace(typed_id=1, name="root", parent=None, local_transform=np.eye(4), world_transform=np.eye(4))
+    track = SimpleNamespace(typed_id=1, rotation_times=np.array([]), translation_times=np.linspace(0, 0.05, 5))
+    scene = SimpleNamespace(settings=SimpleNamespace(frames_per_second=30.0))
+    baked = SimpleNamespace(playback_duration=0.05, key_time_max=0.05, nodes=[track])
+    monkeypatch.setattr(reader, "_order_nodes", lambda _scene: [node])
+    monkeypatch.setattr(reader, "_select_baked_anim", lambda _scene, _rate: (baked, "Subframes"))
+    monkeypatch.setattr(reader, "MAX_CLIP_BUFFER_BYTES", 256)
+
+    def reject_allocation(*args, **kwargs):
+        pytest.fail("Fractional keys reached transform allocation above the budget")
+
+    monkeypatch.setattr(reader.np, "broadcast_to", reject_allocation)
+    with pytest.raises(ValueError, match="5 frames across 1 nodes"):
+        reader._build_clip(scene, None, preserve_key_times=True)

@@ -106,19 +106,16 @@ def get_scene_frame_rate() -> float:
     return float(scene.render.fps) / float(scene.render.fps_base or 1.0)
 
 
-def load_animation_clip(file_path: Path, match_frame_rate: bool = True) -> FbxAnimationClip:
-    """Read an FBX file into a resampled animation clip.
+def load_animation_clip(file_path: Path) -> FbxAnimationClip:
+    """Read an FBX file while retaining the source animation's key times.
 
     Args:
         file_path: Path to the FBX file.
-        match_frame_rate: Resample at the scene's frame rate. When ``False`` the
-            file's own frame rate is used instead.
 
     Returns:
-        The loaded clip, already sampled onto whole frames.
+        The loaded clip, with times in seconds relative to the take start.
     """
-    frame_rate = get_scene_frame_rate() if match_frame_rate else None
-    return load_fbx_animation(file_path, frame_rate=frame_rate)
+    return load_fbx_animation(file_path, preserve_key_times=True)
 
 
 def validate_animation_clip(
@@ -150,7 +147,7 @@ def import_action_from_fbx(
     component: ComponentType,
     armature: bpy.types.Object,
     include_only_bones: list[str] | None = None,
-    round_sub_frames: bool = True,  # noqa: ARG001
+    round_sub_frames: bool = False,
     match_frame_rate: bool = True,
     prefix_instance_name: bool = True,
     prefix_component_name: bool = True,
@@ -164,8 +161,8 @@ def import_action_from_fbx(
         component: Which component the animation is for.
         armature: The target armature object.
         include_only_bones: Only write these bones when given.
-        round_sub_frames: Unused; resampling always lands on whole frames.
-        match_frame_rate: Resample at the scene frame rate rather than the file's.
+        round_sub_frames: Round destination key times to whole frames.
+        match_frame_rate: Convert source times to scene frames, preserving playback duration.
         prefix_instance_name: Prefix the action name with the instance name.
         prefix_component_name: Prefix the action name with the component name.
         clip: An already loaded clip, to avoid reading the file twice.
@@ -185,10 +182,17 @@ def import_action_from_fbx(
 
     include_bones = set(include_only_bones) if include_only_bones else None
     if clip is None:
-        clip = load_animation_clip(file_path, match_frame_rate=match_frame_rate)
+        clip = load_animation_clip(file_path)
 
     action = ensure_action(action_name)
-    written = write_skeleton_animation(clip, armature, action, include_bones=include_bones)
+    written = write_skeleton_animation(
+        clip,
+        armature,
+        action,
+        include_bones=include_bones,
+        frame_rate=get_scene_frame_rate() if match_frame_rate else None,
+        round_sub_frames=round_sub_frames,
+    )
     if not written:
         logger.warning(f"No bones in '{armature.name}' matched any node in {file_path.name}.")
 
@@ -200,7 +204,7 @@ def import_face_board_action_from_fbx(
     instance: "RigInstance",
     file_path: Path,
     armature: bpy.types.Object,
-    round_sub_frames: bool = True,  # noqa: ARG001
+    round_sub_frames: bool = False,
     match_frame_rate: bool = True,
     prefix_instance_name: bool = True,
     prefix_component_name: bool = True,
@@ -212,8 +216,8 @@ def import_face_board_action_from_fbx(
         instance: The rig instance the face board belongs to.
         file_path: Path to the FBX file.
         armature: The face board armature object.
-        round_sub_frames: Unused; resampling always lands on whole frames.
-        match_frame_rate: Resample at the scene frame rate rather than the file's.
+        round_sub_frames: Round destination key times to whole frames.
+        match_frame_rate: Convert source times to scene frames, preserving playback duration.
         prefix_instance_name: Prefix the action name with the instance name.
         prefix_component_name: Prefix the action name with the component name.
         clip: An already loaded clip, to avoid reading the file twice.
@@ -232,10 +236,17 @@ def import_face_board_action_from_fbx(
     )
 
     if clip is None:
-        clip = load_animation_clip(file_path, match_frame_rate=match_frame_rate)
+        clip = load_animation_clip(file_path)
 
     action = ensure_action(action_name)
-    written = write_face_board_animation(clip, armature, action, exclude_bones=FACE_BOARD_EXCLUDED_CONTROLS)
+    written = write_face_board_animation(
+        clip,
+        armature,
+        action,
+        exclude_bones=FACE_BOARD_EXCLUDED_CONTROLS,
+        frame_rate=get_scene_frame_rate() if match_frame_rate else None,
+        round_sub_frames=round_sub_frames,
+    )
     if not written:
         logger.warning(f"No face board controls matched any node in {file_path.name}.")
 

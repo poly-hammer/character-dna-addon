@@ -1372,6 +1372,29 @@ def editors_available() -> bool:
     return cache["editors_available"]
 
 
+def get_scene_merge(instance: "RigInstance") -> ModuleType | None:
+    """Resolve the converter only for scenes that actually contain merged surfaces.
+
+    Archived component meshes can be stale while a merged surface has pending
+    edits. Without the converter, refuse those operations rather than sampling
+    or exporting the archived geometry.
+    """
+    registry = instance.get("dna_merged_surfaces")
+    merged = (
+        any(obj is not None for obj in registry.values())
+        if registry is not None
+        else bool(instance.get("dna_merge_proxy"))
+    )
+    if not merged:
+        return None
+    if not editors_available():
+        raise ValueError(
+            "This character has merged surfaces. Split the surfaces in Character DNA Pro "
+            "before using this operation in the free edition."
+        )
+    return importlib.import_module("..editors.converter.scene.merge", package=__package__)
+
+
 def get_editors() -> ModuleType | None:
     """Return the imported ``editors`` registry module, or ``None`` when absent.
 

@@ -4,8 +4,9 @@ import bpy
 import numpy as np
 import pytest
 
-from character_dna.editors.converter.scene import merge
 from test_merge_split import character as character_fixture, coordinates
+
+from character_dna.editors.converter.scene import merge
 
 
 character = character_fixture
@@ -91,7 +92,7 @@ def test_sampling_rejects_topology_modifiers(character):
     assert not sample.positions.flags.writeable
     modifier = component.mesh.modifiers.new("Changed topology", "SUBSURF")
     try:
-        with pytest.raises(ValueError, match="DNA has|changed DNA face topology"):
+        with pytest.raises(ValueError, match=r"DNA has|changed DNA face topology"):
             component.sample_mesh(0)
     finally:
         component.mesh.modifiers.remove(modifier)
@@ -110,3 +111,33 @@ def test_sampling_rejects_unflushed_merged_edit_mode(character):
         assert proxy.mode == "EDIT"
     finally:
         bpy.ops.object.mode_set(mode="OBJECT")
+
+
+@pytest.mark.rig_profile(compact=True)
+@pytest.mark.parametrize("registry", ["legacy", "lods"])
+def test_merged_operations_require_converter(character, monkeypatch, registry):
+    from types import SimpleNamespace
+
+    from character_dna.dna_io.exporter import DNAExporter
+    from character_dna.ui.callbacks import set_active_lod
+    from character_dna.utilities import misc
+
+    proxy = merge.merge(character)
+    if registry == "legacy":
+        del character["dna_merged_surfaces"]
+    else:
+        del character["dna_merge_proxy"]
+    original = coordinates(proxy.data.vertices)
+    lod = character.view_options.active_lod
+    monkeypatch.setattr(misc, "editors_available", lambda: False)
+    exporter = SimpleNamespace(_instance=character)
+    for operation in (
+        lambda: character.component("body").sample_mesh(0),
+        lambda: DNAExporter.validate_scene(exporter),
+        lambda: DNAExporter._prepare_merged_export(exporter),
+        lambda: set_active_lod(character.view_options, 1),
+    ):
+        with pytest.raises(ValueError, match="Split the surfaces in Character DNA Pro"):
+            operation()
+        np.testing.assert_array_equal(coordinates(proxy.data.vertices), original)
+        assert character.view_options.active_lod == lod
