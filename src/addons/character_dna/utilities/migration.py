@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import bpy
 
+from idprop.types import IDPropertyGroup
 from mathutils import Euler, Matrix, Quaternion
 
 from ..constants import ADDON_IDS, LEGACY_DATA_KEYS, MIGRATABLE_DATA_KEYS, SCALE_FACTOR, ComponentType, ToolInfo
@@ -1106,6 +1107,17 @@ def control_rebuild_available(context: Any, source: Any) -> bool:
     return True
 
 
+def _copy_custom_properties(source: Any, target: Any, exclude: frozenset[str] = frozenset()) -> None:
+    """Copy values into existing RNA-owned groups, which Blender 4.5 cannot replace."""
+    for name, value in source.items():
+        if name in exclude:
+            continue
+        if isinstance(value, IDPropertyGroup) and isinstance(target.get(name), IDPropertyGroup):
+            _copy_custom_properties(value, target[name])
+        else:
+            target[name] = value.to_dict() if isinstance(value, IDPropertyGroup) else value
+
+
 def _restore_pose(rig: Any, state: dict) -> None:
     for name, values in state.items():
         bone = rig.pose.bones.get(name)
@@ -1340,15 +1352,12 @@ class ControlUpgrade:
             self.new.parent_bone = self.old.parent_bone
             self.new.matrix_parent_inverse = self.old.matrix_parent_inverse.copy()
             self.new.matrix_world = self.old.matrix_world.copy()
-            for name, value in self.old.items():
-                if name != "rig_id":
-                    self.new[name] = value
+            _copy_custom_properties(self.old, self.new, exclude=frozenset({"rig_id"}))
             _restore_pose(self.new, self.state)
             for bone in self.old.pose.bones:
                 target = self.new.pose.bones.get(bone.name)
                 if target:
-                    for name, value in bone.items():
-                        target[name] = value
+                    _copy_custom_properties(bone, target)
             # A custom metarig cannot be reconstructed from standard DNA positions.
             # Reject before replacement instead of silently losing authored motion.
             if self.migrate:

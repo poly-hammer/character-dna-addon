@@ -408,6 +408,9 @@ def test_confirmed_control_rebuild_retains_ik_and_fk_motion(  # noqa: PLR0915
     proxy.snap_bones_to_mesh = False
     ik = control.pose.bones["hand_ik.L"]
     finger = control.pose.bones["f_index.01.L"]
+    custom_settings = {"weight": 0.25, "nested": {"enabled": 1}, "samples": [0.1, 0.2]}
+    control["authored_settings"] = custom_settings
+    ik["authored_settings"] = custom_settings
     for frame, value in ((1, 0), (5, 0.08), (10, -0.03)):
         ik.location = (value, value * 0.5, -value)
         ik.keyframe_insert("location", frame=frame)
@@ -472,6 +475,8 @@ def test_confirmed_control_rebuild_retains_ik_and_fk_motion(  # noqa: PLR0915
         assert action.name in saved.actions
         assert not any(".Migrated" in name for name in saved.actions)
     assert instance.control_rig.name == original_name
+    assert instance.control_rig["authored_settings"].to_dict() == custom_settings
+    assert instance.control_rig.pose.bones["hand_ik.L"]["authored_settings"].to_dict() == custom_settings
     assert instance.control_rig.animation_data.action is None
     assert action.use_fake_user
     new_strip = instance.control_rig.animation_data.nla_tracks[0].strips[0]
