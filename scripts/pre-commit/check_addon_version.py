@@ -7,6 +7,10 @@ This hook ensures that the version in:
 - uv.lock (at repo root)
 
 Are all in sync and auto-bumps the patch version when addon files are changed.
+For Character DNA, a sibling character-dna-core Git checkout also has its Cargo
+workspace and local workspace-package lock versions synchronized. This is local
+only: CI never reads or changes the sibling checkout. Core changes are not staged
+by the add-on hook, even with --stage; commit them from the Core repository.
 
 Usage:
     python check_addon_version.py <addon_name> [--watch <glob_pattern>...]
@@ -18,13 +22,19 @@ Example:
     python check_addon_version.py character_dna --set-version 1.0.0 --stage
 """
 
+# Git is the required local CLI; every subprocess uses an argument list, never a shell.
+# ruff: noqa: S603, S607
+
 from __future__ import annotations
 
 import argparse
 import fnmatch
+import os
 import re
 import subprocess
 import sys
+import tomllib
+
 from pathlib import Path
 from typing import NamedTuple
 
@@ -149,7 +159,7 @@ def read_version_from_init(file_path: Path) -> Version:
 def read_version_from_toml(file_path: Path) -> Version:
     """Read version from a TOML file (blender_manifest.toml or pyproject.toml)."""
     content = file_path.read_text(encoding="utf-8")
-    # Match: version = "0.5.4"
+    # Match a quoted semantic version assignment.
     pattern = r'^version\s*=\s*"(\d+\.\d+\.\d+)"'
     match = re.search(pattern, content, re.MULTILINE)
     if not match:
@@ -196,9 +206,7 @@ def write_version_to_toml(file_path: Path, version: Version) -> None:
     file_path.write_text(new_content, encoding="utf-8", newline="\n")
 
 
-def write_version_to_uv_lock(
-    file_path: Path, package_name: str, version: Version
-) -> bool:
+def write_version_to_uv_lock(file_path: Path, package_name: str, version: Version) -> bool:
     """Write version to uv.lock for a specific package.
 
     Returns True if the file was updated, False if file doesn't exist or package not found.
@@ -219,6 +227,94 @@ def write_version_to_uv_lock(
     # Preserve LF line endings
     file_path.write_text(new_content, encoding="utf-8", newline="\n")
     return True
+
+
+CI_VARIABLES = ("CI", "GITHUB_ACTIONS", "PRE_COMMIT_CI", "RUNNING_CI")
+
+
+def _replace_cargo_version(content: str, version: Version) -> str:
+    """Replace one package version while retaining comments and formatting."""
+    result, count = re.subn(
+        r'^(version[ \t]*=[ \t]*)"[^"\n]+"',
+        rf'\g<1>"{version}"',
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if count != 1:
+        raise ValueError("Cargo package has no explicit version")
+    return result
+
+
+def prepare_core_version_updates(repo_root: Path, package_name: str, version: Version) -> dict[Path, str]:
+    """Validate and prepare optional sibling Core edits before changing any files.
+
+    No Cargo invocation is needed: dependencies stay locked and CI needs neither
+    a Rust toolchain nor access to the private Core checkout.
+    """
+    if package_name != "character-dna-addon" or any(
+        os.environ.get(name, "").lower() not in {"", "0", "false", "no", "off"} for name in CI_VARIABLES
+    ):
+        return {}
+    core_root = repo_root.parent / "character-dna-core"
+    # Both ordinary clones (.git directory) and worktrees (.git file) qualify.
+    if not (core_root / ".git").exists():
+        return {}
+
+    cargo_path, lock_path = core_root / "Cargo.toml", core_root / "Cargo.lock"
+    cargo = cargo_path.read_text(encoding="utf-8")
+    workspace = tomllib.loads(cargo)["workspace"]
+    names = set()
+    for member in workspace["members"]:
+        for folder in core_root.glob(member):
+            package = tomllib.loads((folder / "Cargo.toml").read_text(encoding="utf-8"))["package"]
+            if package.get("version") == {"workspace": True}:
+                names.add(package["name"])
+    if not names:
+        raise ValueError(f"No packages inherit the workspace version in {cargo_path}")
+    new_cargo, count = re.subn(
+        r"(?ms)^(\[workspace\.package\][^\n]*\n)(.*?)(?=^\[|\Z)",
+        lambda match: match[1] + _replace_cargo_version(match[2], version),
+        cargo,
+    )
+    if count != 1:
+        raise ValueError(f"Missing [workspace.package] version in {cargo_path}")
+
+    lock = lock_path.read_text(encoding="utf-8")
+    tomllib.loads(lock)  # Validate the complete lockfile before editing any block.
+    found = set()
+    old_versions = {}
+
+    def update_package(match: re.Match) -> str:
+        block = match[0]
+        package = tomllib.loads(block)["package"][0]
+        name = package["name"]
+        if name not in names or "source" in package:
+            return block
+        found.add(name)
+        old_versions[name] = package["version"]
+        return _replace_cargo_version(block, version)
+
+    new_lock = re.sub(r"(?ms)^\[\[package\]\][^\n]*\n.*?(?=^\[\[package\]\]|\Z)", update_package, lock)
+    if missing := names - found:
+        raise ValueError(f"Missing workspace packages in {lock_path}: {', '.join(sorted(missing))}")
+    # Cargo may qualify dependency names with a version when names collide.
+    for name, old_version in old_versions.items():
+        new_lock = new_lock.replace(f'"{name} {old_version}"', f'"{name} {version}"')
+    return {
+        path: updated
+        for path, old, updated in ((cargo_path, cargo, new_cargo), (lock_path, lock, new_lock))
+        if old != updated
+    }
+
+
+def write_core_version_updates(updates: dict[Path, str]) -> None:
+    """Apply prepared Core edits without changing another repository's index."""
+    for path, content in updates.items():
+        path.write_text(content, encoding="utf-8", newline="\n")
+        print(f"  Updated {path}")
+    if updates:
+        print("Core version files updated; review and commit them separately in character-dna-core.")
 
 
 def stage_file(file_path: Path) -> None:
@@ -261,7 +357,7 @@ Examples:
     parser.add_argument(
         "--stage",
         action="store_true",
-        help="Stage the updated version files after setting version (use with --set-version)",
+        help="Stage add-on version files after setting version; sibling Core stays unstaged (use with --set-version)",
     )
     return parser.parse_args()
 
@@ -279,6 +375,7 @@ def sync_version_to_all_files(
 
     Returns list of files that were updated.
     """
+    core_updates = prepare_core_version_updates(pyproject_path.parent, package_name, version)
     updated_files: list[Path] = []
 
     # Update main version files
@@ -299,6 +396,8 @@ def sync_version_to_all_files(
         updated_files.append(uv_lock_path)
         print(f"  Updated {uv_lock_path} for package '{package_name}'")
 
+    write_core_version_updates(core_updates)
+
     # Stage files if requested
     if stage_files:
         for file_path in updated_files:
@@ -308,7 +407,7 @@ def sync_version_to_all_files(
     return updated_files
 
 
-def main() -> int:
+def run() -> int:  # noqa: PLR0915
     """Main entry point for the pre-commit hook.
 
     Returns:
@@ -405,9 +504,7 @@ def main() -> int:
     if relevant_changes and not version_files_staged:
         # Auto-bump patch version
         new_version = init_version.bumped_patch()
-        print(
-            f"\nRelevant files changed. Auto-bumping patch version: {init_version} -> {new_version}"
-        )
+        print(f"\nRelevant files changed. Auto-bumping patch version: {init_version} -> {new_version}")
 
         sync_version_to_all_files(
             version=new_version,
@@ -439,8 +536,18 @@ def main() -> int:
         print("unstaging the version files and committing your addon changes again.")
         return 1
 
+    write_core_version_updates(prepare_core_version_updates(repo_root, package_name, init_version))
     print("\nAll versions are in sync.")
     return 0
+
+
+def main() -> int:
+    """Report version-file errors without leaving a traceback in pre-commit."""
+    try:
+        return run()
+    except (OSError, ValueError, KeyError) as error:
+        print(f"ERROR: Could not synchronize versions: {error}")
+        return 1
 
 
 if __name__ == "__main__":
