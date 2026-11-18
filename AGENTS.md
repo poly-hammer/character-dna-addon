@@ -4,7 +4,9 @@
 
 ## Documentation: Fumadocs and agent access
 
-Documentation in `docs/` is authored for the central Polyhammer Fumadocs site. Do not add MkDocs syntax, plugins, navigation, or commands.
+Documentation in `docs/` is authored for the central Poly Hammer Fumadocs site. Do not add MkDocs syntax, plugins, navigation, or commands.
+
+Write the brand as **Poly Hammer** in visible text and metadata. Preserve existing URLs and code identifiers.
 
 - Use Markdown/MDX with YAML `title` and `description` frontmatter. The layout renders the H1; start body sections at H2.
 - Use `docs/meta.json` and folder `meta.json` files for navigation order and labels.
