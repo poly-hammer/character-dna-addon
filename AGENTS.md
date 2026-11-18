@@ -8,6 +8,8 @@ Documentation in `docs/` is authored for the central Poly Hammer Fumadocs site. 
 
 Write the brand as **Poly Hammer** in visible text and metadata. Preserve existing URLs and code identifiers.
 
+Keep internal implementation plans outside `docs/`. The `plans` folder is not public documentation and is excluded by the central site.
+
 - Use Markdown/MDX with YAML `title` and `description` frontmatter. The layout renders the H1; start body sections at H2.
 - Use `docs/meta.json` and folder `meta.json` files for navigation order and labels.
 - Use `<Callout type="info|warn|error|idea|success" title="...">` instead of `!!!` admonitions. Use shared `DocVideo`, `DocImage`, and `YouTubeEmbed` components for media.
