@@ -9,6 +9,6 @@ permissions:
 jobs:
   notify:
     if: vars.DOCS_PIPELINE_ENABLED == 'true'
-    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-docs-notify.yaml@39a8928ba112ccf9d3054f6659bd8be7e6f9e667
+    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-docs-notify.yaml@ccb30bb5af689b9e0f8a7e2600fcf537c3c35607
     secrets:
-      DOCS_DISPATCH_APP_KEY: ${{ secrets.DOCS_DISPATCH_APP_KEY }}
+      DOCS_GITHUB_TOKEN: ${{ secrets.DOCS_GITHUB_TOKEN }}
