@@ -11,4 +11,4 @@ jobs:
     if: vars.DOCS_PIPELINE_ENABLED == 'true'
     uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-docs-notify.yaml@ccb30bb5af689b9e0f8a7e2600fcf537c3c35607
     secrets:
-      DOCS_GITHUB_TOKEN: ${{ secrets.DOCS_GITHUB_TOKEN }}
+      DOCS_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
