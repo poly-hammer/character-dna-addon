@@ -10,6 +10,8 @@ Write the brand as **Poly Hammer** in visible text and metadata. Preserve existi
 
 Keep internal implementation plans outside `docs/`. The `plans` folder is not public documentation and is excluded by the central site.
 
+Keep `docs/pro-features/mesh-editor.mdx` and `docs/workflows/custom-topology-metadata.mdx` as unpublished source documents. They are excluded from navigation and the central site's `docs-sources.json`; do not publish routes or agent exports for them until explicitly approved for release.
+
 - Use Markdown/MDX with YAML `title` and `description` frontmatter. The layout renders the H1; start body sections at H2.
 - Use `docs/meta.json` and folder `meta.json` files for navigation order and labels.
 - Use `<Callout type="info|warn|error|idea|success" title="...">` instead of `!!!` admonitions. Use shared `DocVideo`, `DocImage`, and `YouTubeEmbed` components for media.
