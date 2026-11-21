@@ -921,82 +921,69 @@ def add_rig_instance(name: None | str = None) -> "RigInstance":
     return instance
 
 
-def extract_rig_instance_data_from_blend_file(blend_file_path: Path) -> tuple[list[dict], str]:
-    extracted_data = []
-
+def extract_rig_instance_data_from_blend_file(blend_file_path: Path) -> tuple[dict[str, dict], str]:
+    """Inspect saved characters using literal paths on every platform."""
     file_id = uuid.uuid4()
     script_file = SCRIPTS_FOLDER / "save_rig_instance_data.py"
     data_file = TEMP_FOLDER / f"{file_id}.json"
     error_file = TEMP_FOLDER / f"{file_id}_error.log"
     addon_folder = Path(__file__).parent.parent.parent
 
+    # macOS extension paths contain "Application Support". Passing an argument
+    # list avoids shell splitting/expansion of spaces, quotes, and Unicode paths.
     binary_path = bpy.app.binary_path
     if binary_path:
-        if sys.platform == "win32":
-            command = (
-                f'"{binary_path}" --background --python "{script_file}" -- --data-file "{data_file}" '
-                f'--blend-file "{blend_file_path}" --addon-folder "{addon_folder}" --addon-name "{ToolInfo.NAME}"'
-            )
-        else:
-            command = (
-                f"{binary_path} --background --python {script_file.as_posix()} -- --data-file {data_file.as_posix()} "
-                f"--blend-file {blend_file_path.as_posix()} --addon-folder {addon_folder.as_posix()} "
-                f"--addon-name {ToolInfo.NAME}"
-            )
-    # binary path can be empty if blender is run headless
-    elif sys.platform == "win32":
-        command = (
-            f'"{sys.executable}" "{script_file}" -- --data-file "{data_file}" --blend-file "{blend_file_path}" '
-            f'--addon-folder "{addon_folder}" --addon-name "{ToolInfo.NAME}"'
-        )
+        command = [binary_path, "--background", "--factory-startup", "--disable-autoexec", "--python", str(script_file)]
     else:
-        command = (
-            f"{sys.executable} {script_file.as_posix()} -- --data-file {data_file.as_posix()} --blend-file "
-            f"{blend_file_path.as_posix()} --addon-folder {addon_folder.as_posix()} --addon-name {ToolInfo.NAME}"
-        )
+        # The standalone bpy wheel runs inside the current Python interpreter.
+        command = [sys.executable, str(script_file)]
+    command += [
+        "--",
+        "--data-file",
+        str(data_file),
+        "--blend-file",
+        str(blend_file_path),
+        "--addon-folder",
+        str(addon_folder),
+        "--addon-name",
+        ToolInfo.NAME,
+    ]
 
-    # Run the extraction in a headless Blender subprocess. The bpy module is known to
-    # segfault during interpreter teardown, which yields a non-zero exit code even when
-    # the extraction itself succeeded. The authoritative results are the error log and
-    # data file written before teardown, so capture the output and always inspect those
-    # files instead of failing the moment the subprocess returns non-zero.
-    subprocess_output: list[str] = []
+    # A bpy process can fail during native teardown after writing a valid result.
+    # Its descriptor/error files remain authoritative, regardless of exit status.
     try:
-        for line in shell(command=command):
-            subprocess_output.append(line)  # noqa: PERF402
+        result = subprocess.run(  # noqa: S603
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        subprocess_output = result.stdout or ""
+        if result.returncode:
+            logger.debug("Rig instance extraction subprocess exited %s: %s", result.returncode, subprocess_output)
     except OSError as error:
-        if not subprocess_output:
-            subprocess_output = str(error).splitlines()
-        logger.debug("Rig instance extraction subprocess exited non-zero: %s", error)
+        subprocess_output = str(error)
+        logger.debug("Could not launch rig instance extraction: %s", error)
 
-    if error_file.exists():
-        with error_file.open() as f:
-            error_message = f.read()
+    try:
+        if error_file.exists():
+            return {}, error_file.read_text(encoding="utf-8")
+        if data_file.exists():
+            return json.loads(data_file.read_text(encoding="utf-8")), ""
+    finally:
+        for path in (error_file, data_file):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as error:
+                logger.debug(error)
 
-        try:
-            error_file.unlink()
-        except OSError as error:
-            logger.debug(error)
-
-        return [], error_message
-
-    if data_file.exists():
-        with data_file.open() as f:
-            extracted_data = json.load(f)
-
-        try:
-            data_file.unlink()
-        except OSError as error:
-            logger.debug(error)
-
-        return extracted_data, ""
-
-    # Neither a data file nor an error log was produced, so surface the full subprocess
-    # output to make the failure actionable instead of reporting a generic message.
     if subprocess_output:
-        return [], "Failed to extract rig instance data from blend file:\n" + "\n".join(subprocess_output)
-
-    return [], "Failed to extract rig instance data."
+        return {}, "Failed to extract rig instance data from blend file:\n" + subprocess_output
+    return {}, "Failed to extract rig instance data."
 
 
 def reset_face_board_controls(face_board_object: bpy.types.Object) -> None:
@@ -1370,6 +1357,29 @@ def editors_available() -> bool:
         editors_init = Path(__file__).parent.parent / "editors" / "__init__.py"
         cache["editors_available"] = editors_init.is_file()
     return cache["editors_available"]
+
+
+def get_scene_merge(instance: "RigInstance") -> ModuleType | None:
+    """Resolve the converter only for scenes that actually contain merged surfaces.
+
+    Archived component meshes can be stale while a merged surface has pending
+    edits. Without the converter, refuse those operations rather than sampling
+    or exporting the archived geometry.
+    """
+    registry = instance.get("dna_merged_surfaces")
+    merged = (
+        any(obj is not None for obj in registry.values())
+        if registry is not None
+        else bool(instance.get("dna_merge_proxy"))
+    )
+    if not merged:
+        return None
+    if not editors_available():
+        raise ValueError(
+            "This character has merged surfaces. Split the surfaces in Character DNA Pro "
+            "before using this operation in the free edition."
+        )
+    return importlib.import_module("..editors.converter.scene.merge", package=__package__)
 
 
 def get_editors() -> ModuleType | None:

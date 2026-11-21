@@ -64,6 +64,7 @@ class FbxAnimationClip:
         unit_meters: Size of one file unit in meters, e.g. ``0.01`` for centimeters.
         up_axis: The file's up axis, such as ``"Y"`` or ``"-Z"``.
         take_name: Name of the animation stack that was baked.
+        sample_times: Optional ``(F,)`` source times in seconds, relative to the take start.
     """
 
     node_names: tuple[str, ...]
@@ -80,6 +81,7 @@ class FbxAnimationClip:
     unit_meters: float
     up_axis: str
     take_name: str
+    sample_times: np.ndarray | None = None
 
     @property
     def num_nodes(self) -> int:
@@ -199,13 +201,16 @@ def _select_baked_anim(scene: Any, frame_rate: float) -> tuple[Any, str]:
     return baked, stack_name
 
 
-def load_fbx_animation(file_path: str | Path, frame_rate: float | None = None) -> FbxAnimationClip:
+def load_fbx_animation(
+    file_path: str | Path, frame_rate: float | None = None, *, preserve_key_times: bool = False
+) -> FbxAnimationClip:
     """Load a node hierarchy and its animation from an FBX file.
 
     Args:
         file_path: Path to the FBX file.
         frame_rate: Rate to resample the animation at. Defaults to the file's
             own rate, falling back to 30 fps when the file does not declare one.
+        preserve_key_times: Retain the baked tracks' fractional key times instead of sampling a uniform grid.
 
     Returns:
         The loaded clip, in the file's native space and units.
@@ -222,7 +227,7 @@ def load_fbx_animation(file_path: str | Path, frame_rate: float | None = None) -
     ufbx = _require_ufbx()
     scene = ufbx.load_file(str(file_path), ignore_geometry=True, ignore_embedded=True)
     try:
-        return _build_clip(scene, frame_rate)
+        return _build_clip(scene, frame_rate, preserve_key_times=preserve_key_times)
     finally:
         scene.close()
 
@@ -230,6 +235,8 @@ def load_fbx_animation(file_path: str | Path, frame_rate: float | None = None) -
 def load_fbx_animation_buffer(
     data: bytes | bytearray | memoryview,
     frame_rate: float | None = None,
+    *,
+    preserve_key_times: bool = False,
 ) -> FbxAnimationClip:
     """Load a node hierarchy and its animation from an in-memory FBX buffer.
 
@@ -237,6 +244,7 @@ def load_fbx_animation_buffer(
         data: The raw contents of an FBX file.
         frame_rate: Rate to resample the animation at, as in
             :func:`load_fbx_animation`.
+        preserve_key_times: Retain fractional source times, as in :func:`load_fbx_animation`.
 
     Returns:
         The loaded clip, in the file's native space and units.
@@ -248,17 +256,29 @@ def load_fbx_animation_buffer(
     ufbx = _require_ufbx()
     scene = ufbx.load_memory(data, ignore_geometry=True, ignore_embedded=True)
     try:
-        return _build_clip(scene, frame_rate)
+        return _build_clip(scene, frame_rate, preserve_key_times=preserve_key_times)
     finally:
         scene.close()
 
 
-def _build_clip(scene: Any, frame_rate: float | None) -> FbxAnimationClip:
+def _validate_clip_size(num_frames: int, num_nodes: int, frame_rate: float, take_name: str) -> None:
+    buffer_bytes = num_frames * (num_nodes * 7 + 1) * np.dtype(np.float64).itemsize
+    if buffer_bytes > MAX_CLIP_BUFFER_BYTES:
+        raise ValueError(
+            f"FBX take {take_name!r} requires {num_frames:,} frames across {num_nodes:,} nodes "
+            f"at {frame_rate:g} fps ({buffer_bytes / 1024**3:.2f} GiB of animation buffers; "
+            f"limit {MAX_CLIP_BUFFER_BYTES / 1024**3:g} GiB). "
+            "Check the FBX take's start/end times and re-export a shorter range, or import at a lower frame rate."
+        )
+
+
+def _build_clip(scene: Any, frame_rate: float | None, *, preserve_key_times: bool = False) -> FbxAnimationClip:
     """Convert a loaded ufbx scene into an :class:`FbxAnimationClip`.
 
     Args:
         scene: A loaded ufbx scene.
         frame_rate: Requested resample rate, or ``None`` to use the file's rate.
+        preserve_key_times: Use the union of baked translation and rotation key times.
 
     Returns:
         The converted clip.
@@ -298,15 +318,18 @@ def _build_clip(scene: Any, frame_rate: float | None) -> FbxAnimationClip:
 
     duration = max(baked.playback_duration, baked.key_time_max, 0.0)
     num_frames = max(round(duration * frame_rate) + 1, 1)
-    buffer_bytes = num_frames * (num_nodes * 7 + 1) * np.dtype(np.float64).itemsize
-    if buffer_bytes > MAX_CLIP_BUFFER_BYTES:
-        raise ValueError(
-            f"FBX take {take_name!r} requires {num_frames:,} frames across {num_nodes:,} nodes "
-            f"at {frame_rate:g} fps ({buffer_bytes / 1024**3:.2f} GiB of animation buffers; "
-            f"limit {MAX_CLIP_BUFFER_BYTES / 1024**3:g} GiB). "
-            "Check the FBX take's start/end times and re-export a shorter range, or import at a lower frame rate."
-        )
-    sample_times = np.arange(num_frames, dtype=np.float64) / frame_rate
+    _validate_clip_size(num_frames, num_nodes, frame_rate, take_name)
+    if preserve_key_times:
+        sample_times = np.unique(np.array([0.0, duration], dtype=np.float64))
+        for node in baked.nodes:
+            if node.typed_id not in typed_id_to_index:
+                continue
+            for times in (node.rotation_times, node.translation_times):
+                sample_times = np.union1d(sample_times, times)
+                _validate_clip_size(len(sample_times), num_nodes, frame_rate, take_name)
+        num_frames = len(sample_times)
+    else:
+        sample_times = np.arange(num_frames, dtype=np.float64) / frame_rate
 
     rotations = np.broadcast_to(rest_rotations[None], (num_frames, num_nodes, 4)).copy()
     translations = np.broadcast_to(rest_translations[None], (num_frames, num_nodes, 3)).copy()
@@ -357,4 +380,5 @@ def _build_clip(scene: Any, frame_rate: float | None) -> FbxAnimationClip:
         unit_meters=float(scene.settings.unit_meters or 1.0),
         up_axis=AXIS_NAMES.get(int(scene.settings.axes.up), "Y"),
         take_name=take_name,
+        sample_times=sample_times,
     )

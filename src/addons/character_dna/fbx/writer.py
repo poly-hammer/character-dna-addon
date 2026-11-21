@@ -168,15 +168,24 @@ def write_bulk_fcurves(
         values: ``(F, C)`` values, one column per channel.
         frames: ``(F,)`` frame numbers.
     """
+    # Blender stores frame coordinates in float32. Keep the last source
+    # sample when rounding (or storage precision) puts keys at the same time.
+    frames = np.asarray(frames, dtype=np.float32)
+    keep = np.r_[frames[1:] != frames[:-1], True] if len(frames) else np.empty(0, dtype=bool)
+    frames, values = frames[keep], values[keep]
     num_frames, num_channels = values.shape
     coordinates = np.empty(num_frames * 2, dtype=np.float32)
     coordinates[0::2] = frames
+    # ufbx bakes linearly interpolable tracks, including unevenly spaced keys.
+    linear = bpy.types.Keyframe.bl_rna.properties["interpolation"].enum_items["LINEAR"].value
+    interpolation = np.full(num_frames, linear, dtype=np.int32)
 
     for channel in range(num_channels):
         fcurve = container.fcurves.new(data_path=data_path, index=channel)  # type: ignore[attr-defined]
         fcurve.keyframe_points.add(count=num_frames)
         coordinates[1::2] = values[:, channel]
         fcurve.keyframe_points.foreach_set("co", coordinates)
+        fcurve.keyframe_points.foreach_set("interpolation", interpolation)
         fcurve.update()
 
 
@@ -232,16 +241,22 @@ def _basis_rotations(rest_rotation: np.ndarray, rotations: np.ndarray) -> np.nda
     return basis
 
 
-def frame_range(clip: FbxAnimationClip) -> np.ndarray:
+def frame_range(clip: FbxAnimationClip, frame_rate: float | None = None, round_sub_frames: bool = False) -> np.ndarray:
     """Return the Blender frame numbers for a clip's samples.
 
     Args:
         clip: The clip being written.
+        frame_rate: Destination rate, or the source sample rate to keep source frame numbers.
+        round_sub_frames: Round destination times to the nearest whole frame.
 
     Returns:
         ``(F,)`` frame numbers starting at :data:`FIRST_FRAME`.
     """
-    return np.arange(clip.num_frames, dtype=np.float64) + FIRST_FRAME
+    times = clip.sample_times
+    if times is None:
+        times = np.arange(clip.num_frames, dtype=np.float64) / clip.frame_rate
+    frames = times * (clip.frame_rate if frame_rate is None else frame_rate) + FIRST_FRAME
+    return np.rint(frames) if round_sub_frames else frames
 
 
 def write_skeleton_animation(
@@ -249,6 +264,9 @@ def write_skeleton_animation(
     armature: bpy.types.Object,
     action: bpy.types.Action,
     include_bones: set[str] | None = None,
+    *,
+    frame_rate: float | None = None,
+    round_sub_frames: bool = False,
 ) -> list[str]:
     """Write a skeletal clip onto an armature's pose bones.
 
@@ -262,6 +280,8 @@ def write_skeleton_animation(
         armature: The target armature object.
         action: The Action to write into.
         include_bones: Only write these bone names when given.
+        frame_rate: Destination frame rate, or ``None`` for source frame numbers.
+        round_sub_frames: Round destination times to whole frames before writing.
 
     Returns:
         The names of the bones that were written.
@@ -273,7 +293,7 @@ def write_skeleton_animation(
     if container is None:
         return []
 
-    frames = frame_range(clip)
+    frames = frame_range(clip, frame_rate, round_sub_frames)
     node_indices = clip.node_indices
     written: list[str] = []
 
@@ -320,6 +340,9 @@ def write_face_board_animation(
     armature: bpy.types.Object,
     action: bpy.types.Action,
     exclude_bones: frozenset[str] = frozenset(),
+    *,
+    frame_rate: float | None = None,
+    round_sub_frames: bool = False,
 ) -> list[str]:
     """Write a face board clip onto the face board armature's control bones.
 
@@ -332,6 +355,8 @@ def write_face_board_animation(
         armature: The face board armature object.
         action: The Action to write into.
         exclude_bones: Control names that must not be animated.
+        frame_rate: Destination frame rate, or ``None`` for source frame numbers.
+        round_sub_frames: Round destination times to whole frames before writing.
 
     Returns:
         The names of the controls that were written.
@@ -343,7 +368,7 @@ def write_face_board_animation(
     if container is None:
         return []
 
-    frames = frame_range(clip)
+    frames = frame_range(clip, frame_rate, round_sub_frames)
     node_indices = clip.node_indices
     written: list[str] = []
 

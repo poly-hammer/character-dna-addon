@@ -135,6 +135,7 @@
         },
         {
             "label": "Version: Set Addon Version",
+            "detail": "Set add-on and local sibling Character DNA Core versions. Core changes remain unstaged.",
             "command": "uv run python scripts/pre-commit/check_addon_version.py character_dna --set-version ${input:addon-version}",
             "type": "shell",
             "group": {

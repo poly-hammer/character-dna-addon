@@ -6,6 +6,8 @@ on:
     paths:
       - "src/**"
       - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/**"
   workflow_dispatch:
     inputs:
@@ -136,45 +138,10 @@ jobs:
         test-blender-4-5-macos-latest,
       ]
     name: Release
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    environment: ${{ inputs.environment || 'staging' }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: addon
-          lfs: true
-          submodules: true
-          token: ${{ secrets.GH_PAT }}
-          persist-credentials: false
-      # Pin packaging plus immutable release identity before collecting versioned docs.
-      - uses: actions/checkout@v7
-        with:
-          repository: poly-hammer/poly-hammer-utils
-          ref: 2354d851722599b4b16ad414b764eb50ab3ff66e
-          path: poly-hammer-utils
-          token: ${{ secrets.GH_PAT }}
-          persist-credentials: false
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.13'
-      - uses: astral-sh/setup-uv@v7
-      - name: Install the locked packaging environment and tested release helper
-        working-directory: addon
-        run: |
-          uv sync --locked --python 3.13
-          uv pip install --no-deps --reinstall ../poly-hammer-utils
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-      - name: Create the standard add-on release with matching Core assets
-        working-directory: addon
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-          ADDONS_FOLDER: ${{ github.workspace }}/addon/src/addons
-          GITHUB_REPO: ${{ github.repository }}
-          ENVIRONMENT: ${{ inputs.environment || 'staging' }}
-          PORTAL_API_KEY: ${{ inputs.environment == 'production' && secrets.POLY_HAMMER_PORTAL_API_KEY_PRODUCTION || secrets.POLY_HAMMER_PORTAL_API_KEY_STAGING }}
-        run: uv run --no-sync python -m poly_hammer_utils.extension.character_dna
+    uses: poly-hammer/poly-hammer-workflows/.github/workflows/re-use-blender-release.yaml@main
+    secrets: inherit
+    with:
+      timeout-minutes: 90
+      python-version: "3.13"
+      environment: ${{ inputs.environment || 'staging' }}
+      addon-id: "character_dna"

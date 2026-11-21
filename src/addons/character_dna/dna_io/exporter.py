@@ -276,10 +276,8 @@ class DNAExporter:
         This lets a caller run every component's validations up-front (before any
         file is written), so a validation failure and its fix dialog surface before
         the exporter has already exported another component."""
-        if self._instance.get("dna_merge_proxy"):
-            from ..editors.converter.scene.merge import prepare_export
-
-            prepare_export(self._instance, apply=False)
+        if merge := utilities.get_scene_merge(self._instance):
+            merge.prepare_export(self._instance, apply=False)
         self.initialize_scene_data()
         if self._instance.output.run_validations:
             return self.validate()
@@ -965,11 +963,10 @@ class DNAExporter:
     def _prepare_merged_export(self) -> None:
         from .shape_migration import migrate_instance
 
+        merge = utilities.get_scene_merge(self._instance)
         migrate_instance(self._instance)
-        if self._instance.get("dna_merge_proxy"):
-            from ..editors.converter.scene.merge import prepare_export
-
-            prepare_export(self._instance, apply=True)
+        if merge is not None:
+            merge.prepare_export(self._instance, apply=True)
 
     def _export_component_extensions(self) -> None:
         from . import document, metadata

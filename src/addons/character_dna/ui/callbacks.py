@@ -634,11 +634,12 @@ def set_bake_end_frame(self: "BakeAnimationBase", value: int):
 
 def set_active_lod(self: "CharacterViewOptionsProperties", value: int):
     from ..runtime.engine import sync_settings
-    from ..utilities import set_hidden
+    from ..utilities import get_scene_merge, set_hidden
 
     instance = _get_view_options_owner(self)
     if is_reference_readonly(instance) or is_readonly_id(self.id_data):
         return
+    merge = get_scene_merge(instance) if instance and bpy.context.scene else None
     self["active_lod"] = value
     if not bpy.context.scene:
         return
@@ -681,10 +682,8 @@ def set_active_lod(self: "CharacterViewOptionsProperties", value: int):
         and body_lod_object.get("dna_converter_visibility") is None
     ):
         set_hidden(body_lod_object, False)
-    if instance.get("dna_merge_proxy"):
-        from ..editors.converter.scene.merge import sync_visibility
-
-        sync_visibility(instance)
+    if merge is not None:
+        merge.sync_visibility(instance)
 
 
 def set_show_head_bones(self: "CharacterViewOptionsProperties", value: bool):

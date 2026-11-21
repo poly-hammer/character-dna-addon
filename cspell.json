@@ -109,6 +109,7 @@
             "filename": "src/**",
             "description": "Source code - Blender API and addon technical terms",
             "words": [
+                "idprop",
                 "rebake",
                 "AVX",
                 "RAII-wrapped",

@@ -250,3 +250,44 @@ def test_bake_face_board_animation_ignores_unrelated_channels(animated_face_boar
     )
 
     assert result == {"FINISHED"}
+
+
+@pytest.mark.parametrize("rounded", [None, False, True], ids=["default", "fractional", "rounded"])
+@pytest.mark.parametrize("component", ["head", "body", "face_board"])
+def test_fbx_import_operator_preserves_or_rounds_source_times(load_full_dna_for_animation, component, rounded):
+    import numpy as np
+
+    from character_dna.utilities.action import load_animation_clip
+
+    instance = get_active_rig_instance()
+    file_names = {
+        "head": "head/MHC_HeadROM.fbx",
+        "body": "body/MHC_BodyROM.fbx",
+        "face_board": "head/MHC_FaceBoardROM.fbx",
+    }
+    path = TEST_ANIMATION_FOLDER / file_names[component]
+    clip = load_animation_clip(path)
+    scene = bpy.context.scene
+    previous = scene.render.fps, scene.render.fps_base
+    scene.render.fps, scene.render.fps_base = 24, 1.0
+    options = {"filepath": str(path), "match_frame_rate": True}
+    if rounded is not None:
+        options["round_sub_frames"] = rounded
+    try:
+        if component == "face_board":
+            status = bpy.ops.character_dna.import_face_board_animation(**options)
+            armature = instance.face_board
+        else:
+            status = bpy.ops.character_dna.import_component_animation(component_type=component, **options)
+            armature = getattr(instance, f"{component}_rig")
+        assert status == {"FINISHED"}
+    finally:
+        scene.render.fps, scene.render.fps_base = previous
+    expected = 1 + clip.sample_times * 24
+    expected = (np.rint(expected) if rounded else expected).astype(np.float32)
+    expected = np.unique(expected)
+    curves = get_channel_bag(armature.animation_data.action, armature.name).fcurves
+    assert len(curves) > 0
+    assert np.any(expected != np.rint(expected)) if not rounded else np.all(expected == np.rint(expected))
+    for curve in curves:
+        np.testing.assert_array_equal([key.co.x for key in curve.keyframe_points], expected)

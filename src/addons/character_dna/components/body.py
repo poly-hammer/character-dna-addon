@@ -25,7 +25,7 @@ class CharacterComponentBody(CharacterComponentBase):
     def import_action(
         self,
         file_path: Path,
-        round_sub_frames: bool = True,
+        round_sub_frames: bool = False,
         match_frame_rate: bool = True,
         prefix_instance_name: bool = True,
         prefix_component_name: bool = True,

@@ -116,7 +116,7 @@ repos:
     hooks:
       - id: check-addon-version
         name: Check Addon Version
-        description: Auto-bumps patch version and ensures version sync across addon files
+        description: Auto-bumps and syncs add-on versions, including a local sibling Core checkout outside CI
         entry: >
           uv run python ./scripts/pre-commit/check_addon_version.py
           character_dna --watch "src/addons/character_dna/**/*.py"
