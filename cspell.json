@@ -35,6 +35,10 @@
         "src/addons/character_dna/editors/**/template.html"
     ],
     "words": [
+        "Fumadocs",
+        "MCP",
+        "SEO",
+        "llms",
         "bpy",
         "lerps",
         "ufbx",
@@ -96,6 +100,11 @@
     "minWordLength": 3,
     "allowCompoundWords": true,
     "overrides": [
+        {
+            "filename": "docs/workflows/customizing-materials.mdx",
+            "description": "Preserve the existing add-texure-logic-node.gif asset filename",
+            "words": ["texure"]
+        },
         {
             "filename": "src/**",
             "description": "Source code - Blender API and addon technical terms",

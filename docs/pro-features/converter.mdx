@@ -1,13 +1,18 @@
-# Converter
+---
+title: Converter
+description: The Converter is part of the Pro edition and only appears when Pro
+  is installed.
+---
 
-!!! info "Pro Feature"
-    The Converter is part of the **Pro** edition and only appears when Pro is installed.
+<Callout type="info" title="Pro Feature">
+
+The Converter is part of the **Pro** edition and only appears when Pro is installed.
+
+</Callout>
 
 Re-fit a base MetaHuman DNA onto your own head and body meshes, producing a new `.dna` calibrated to your geometry.
 
-<video autoplay loop muted playsinline class="rounded-image" style="width:100%" poster="../../images/converter/auto_fitting_algorithm.png">
-  <source src="../../images/converter/auto_fitting_algorithm.webm" type="video/webm">
-</video>
+<DocVideo src="../images/converter/auto_fitting_algorithm.webm" poster="../images/converter/auto_fitting_algorithm.png" title="auto fitting algorithm" autoPlay loop muted />
 
 This uses the UV layout of your wrapped mesh to relocate the DNA's bones and shapes to match.
 
@@ -21,8 +26,11 @@ This uses the UV layout of your wrapped mesh to relocate the DNA's bones and sha
 | Head | Your head mesh to fit |
 | Body | Your body mesh to fit |
 
-!!! warning
-    Auto-fitting is **UV based**. Your mesh must share the base MetaHuman UV layout with no overlapping or extra islands, or the fit won't be correct. See [Mesh Wrapping](../workflows/mesh-wrapping.md) for how to produce a compatible mesh.
+<Callout type="warn" title="Warning">
+
+Auto-fitting is **UV based**. Your mesh must share the base MetaHuman UV layout with no overlapping or extra islands, or the fit won't be correct. See [Mesh Wrapping](../workflows/mesh-wrapping.mdx) for how to produce a compatible mesh.
+
+</Callout>
 
 ## Advanced
 
@@ -46,9 +54,7 @@ Expand **Advanced** for finer control:
 
 The Converter calibrates lower LODs from your LOD0 mesh automatically when the DNA conversion happens. This keeps all levels in sync with that initial `Convert to DNA` operation.
 
-<video autoplay loop muted playsinline class="rounded-image" style="width:100%" poster="../../images/converter/lod_calibration.png">
-  <source src="../../images/converter/lod_calibration.webm" type="video/webm">
-</video>
+<DocVideo src="../images/converter/lod_calibration.webm" poster="../images/converter/lod_calibration.png" title="lod calibration" autoPlay loop muted />
 
 ## Convert to DNA
 
